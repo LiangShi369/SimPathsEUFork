@@ -64,4 +64,18 @@ class CommittedBundlesTest {
                 "%s: the Ramsey wage trend does not grow over ten years (year 1 %.4f%%, year 10 %.4f%%)",
                 bundle, firstYear, tenthYear));
     }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("committedBundles")
+    void ramseyDependencyRatioIsConstantInTheTail(Path bundle) throws IOException {
+        MacroModelManager manager = new MacroModelManager();
+        manager.setUseRamseyTrend(true);
+        manager.initializeRamseyTrend(bundle.toString());
+        RamseyTrendModel t = manager.getRamseyTrend();
+        int q = t.getSimQuarters();
+        double ratio = t.pathPAt(q - 1) / t.pathNAt(q - 1);
+        for (int i = q; i < t.extendedLength(); i++) {
+            assertEquals(ratio, t.pathPAt(i) / t.pathNAt(i), 1e-12 * ratio, bundle + ": ratio at tail quarter " + i);
+        }
+    }
 }

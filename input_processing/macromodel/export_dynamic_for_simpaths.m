@@ -613,7 +613,7 @@ fprintf(fid, '|------|-------------|\n');
 fprintf(fid, '| `growth_model_reference_%s.csv` | In-sample Ramsey solution; its last row is the handoff quarter that every other file aligns to |\n', lower(export_country));
 fprintf(fid, '| `growth_params_%s.json` | Calibrated structural parameters and solver settings |\n', export_country);
 fprintf(fid, '| `growth_terminal_state.json` | Terminal K and A, the handoff quarter, and `projection_quarters` (the forward horizon; a mismatch silently changes the terminal closure) |\n');
-fprintf(fid, '| `population_projection_%s.csv` | SimPaths-consistent demographic path, `time,N` |\n', export_country);
+fprintf(fid, '| `population_projection_%s.csv` | SimPaths-consistent demographic path, `time,N,P`: persons in employment and resident population |\n', export_country);
 fprintf(fid, '| `hours_projection_%s.csv` | Planner hours per worker, `time,h`, `projection_quarters + 1` rows from the handoff |\n\n', export_country);
 fprintf(fid, '**Alignment.** Each projection is located by DATE, not by row position: find the\n');
 fprintf(fid, 'row whose label equals the handoff quarter and read forward from there. A\n');
@@ -626,7 +626,8 @@ fprintf(fid, 'would hide.\n\n');
 fprintf(fid, '**What is built on both sides.** The terminal tail appended past the\n');
 fprintf(fid, 'SimPaths horizon is not exported. Both sides construct it with the same rule\n');
 fprintf(fid, '(trailing-growth window 20 for the demographic path, 1 for hours), enforced only\n');
-fprintf(fid, 'by convention and a downstream tripwire test.\n\n');
+fprintf(fid, 'by convention and a downstream tripwire test. Beyond the projection''s last row\n');
+fprintf(fid, 'the population follows employment at the last projected ratio.\n\n');
 
 fprintf(fid, '## 3. Variable Classification\n\n');
 fprintf(fid, '### State Variables (rows in A, B_s; columns in A, C)\n\n');

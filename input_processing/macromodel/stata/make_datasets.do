@@ -124,7 +124,6 @@ if "$country" == "Germany" {
         // "DESTATIS"  , "81000BV014"  , "DG.X13JDSB.PRO016"                       , "pr_hour"                 , "Lab.prod. per h.worked by pers.in empl.(dom.conc.) (2020=100)"           \
         // "DESTATIS"  , "81000BV014"  , "DG.X13JDSB.VST038"                       , "w_pp"                    , "Gross wages and salaries per employee (dom. conc.) (in euro)"            \
         // "DESTATIS"  , "81000BV014"  , "DG.X13JDSB.VST039"                       , "w_hour"                  , "Gross wages and sal. per empl. hour (dom. concept) (in euro)"            \
-        // "DESTATIS"  , "81000BV001"  , "DG.X13JDSB.BEV020"                       , "pop"                     , "Population (in 1,000 persons)"                                           \
         // "DESTATIS"  , "81000BV001"  , "DG.X13JDSB.ERW030"                       , "pop_selfempl"            , "Self-employed persons (in 1,000 persons)"                                \
         // "DESTATIS"  , "81000BV001"  , "DG.X13JDSB.ERW060"                       , "employment_nat"          , "Persons in employment (national concept)"                                \
         // "DESTATIS"  , "81000BV001"  , "DG.WERTORG.ERW089"                       , "ur_ilo_unadj"            , "Unemployment rate, not seasonally adjusted (ILO)"                        \
@@ -145,10 +144,11 @@ if "$country" == "Germany" {
         // LABOUR MARKET: National accounts employment & hours
         // =====================================================================
         "DESTATIS"  , "81000BV012"  , "DG.X13JDSB.ERW061"                       , "employees"               , "Employees (domestic concept) (in 1,000 persons)"                         \
-        "DESTATIS"  , "81000BV001"  , "DG.X13JDSB.ERW036"                       , "employees_nat"           , "Employees (national concept)"                                            \
+        "DESTATIS"  , "81000BV001"  , "DG.X13JDSB.ERW060"                       , "employment_nat"          , "Persons in employment (national concept) (in 1,000 persons)"             \
+        "DESTATIS"  , "81000BV012"  , "DG.X13JDSB.ERW063"                       , "employment"              , "Persons in employment (domestic concept) (in 1,000 persons)"             \
         "DESTATIS"  , "81000BV012"  , "DG.X13JDSB.ETG005"                       , "labour_cost"             , "Compensation of employees (<Arbeitnehmerentgelt>) (in bn euro)"          \
         "DESTATIS"  , "81000BV012"  , "DG.X13JDSB.VST020"                       , "gross_wages"             , "Gross wages and salaries (domestic concept) (in bn euro)"                \
-        "DESTATIS"  , "81000BV012"  , "DG.X13JDSB.STD008"                       , "hours_employees_pp"      , "Hours worked per employee (domestic concept) (in hours)"                 \
+        "DESTATIS"  , "81000BV012"  , "DG.X13JDSB.STD007"                       , "hours_employment_pp"     , "Hours worked per person in empl. (domestic concept) (in hours)"          \
 
         // =====================================================================
         // GDP AND EXPENDITURE COMPONENTS (chain-linked volumes)
@@ -159,6 +159,17 @@ if "$country" == "Germany" {
         "Eurostat"  , "namq_10_gdp" , "Q.CLV15_MNAC.SCA.P3_S13.DE"              , "gov_cons_mn"             , "Government final consumption, chain linked (million euro)"               \
         "Eurostat"  , "namq_10_gdp" , "Q.CLV15_MNAC.SCA.P6.DE"                  , "exports_mn"              , "Exports of goods and services, chain linked (million euro)"              \
         "Eurostat"  , "namq_10_gdp" , "Q.CLV15_MNAC.SCA.P7.DE"                  , "imports_mn"              , "Imports of goods and services, chain linked (million euro)"              \
+
+        // =====================================================================
+        // POPULATION
+        // =====================================================================
+        // Resident population of the national accounts, all ages, quarterly average.
+        // Destatis carries it back on the basis of the latest census, so it has no
+        // census step, unlike Eurostat's demo_pjan for Germany (breaks flagged at
+        // 1 January 2011 and 2023, the 2011 and 2022 censuses): its largest
+        // quarter-on-quarter change since 1991 is +0.78% in 2022q2, the arrivals from
+        // Ukraine, and 2011q2 moves by +0.01% (checked on 2026-11-08).
+        "DESTATIS"  , "81000BV001"  , "DG.X13JDSB.BEV020"                       , "pop"                     , "Population, national accounts, quarterly average (in 1,000 persons)"     \
 
         "", "", "", "", ""  // End marker (last row cannot end with "\", which is inconvenient; adding empty row eases maintenance)
     )
@@ -171,6 +182,19 @@ if "$country" == "Germany" {
     )
 
     end
+
+    // THE POPULATION SERIES (see the population section below for what is done with
+    // it). pop_freq is the frequency of the fetched series; pop_var its internal name;
+    // pop_anchor_q the quarter that carries an annual figure (unused for a quarterly
+    // series); pop_divisor turns the source unit into thousand persons;
+    // pop_break_periods lists the periods whose figure is the first on a new census
+    // basis, in the frame's time units. Germany's series is quarterly, in
+    // series_codes_q, and has no break.
+    local pop_freq          quarterly
+    local pop_var           pop
+    local pop_anchor_q      .
+    local pop_divisor       1
+    local pop_break_periods
 }
 
 else if "$country" == "Poland" {
@@ -188,7 +212,8 @@ else if "$country" == "Poland" {
         // LABOUR MARKET: National accounts employment & hours
         // =====================================================================
         "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SA.SAL_DC.PL"                  , "employees"                , "Employees, domestic concept (1000 persons, SCA)"                        \
-        "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SA.SAL_NC.PL"                  , "employees_nat"            , "Employees, national concept (1000 persons, SCA)"                        \
+        "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SA.EMP_NC.PL"                  , "employment_nat"           , "Persons in employment, national concept (1000 persons, SA)"             \
+        "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SA.EMP_DC.PL"                  , "employment"               , "Persons in employment, domestic concept (1000 persons, SA)"             \
         // CURRENCY: wage aggregates in million PLN (CP_MNAC), the currency of the
         // HICP that deflates them, as for Sweden. CP_MEUR would convert at the
         // CURRENT exchange rate and put every PLN/EUR swing into the "real" wage
@@ -196,7 +221,7 @@ else if "$country" == "Poland" {
         // at the fixed 2015 rate.
         "Eurostat"  , "namq_10_gdp" , "Q.CP_MNAC.SCA.D1.PL"                     , "labour_cost"              , "Compensation of employees D1 (million PLN, current prices, SCA)"        \
         "Eurostat"  , "namq_10_gdp" , "Q.CP_MNAC.SCA.D11.PL"                    , "gross_wages"              , "Wages and salaries - Poland D11 (million PLN, current prices, SCA)"     \
-        "Eurostat"  , "namq_10_a10_e", "Q.THS_HW.TOTAL.SCA.SAL_DC.PL"           , "hours_employees_total"    , "Hours worked by employees, domestic concept (1000 hours, SCA)"          \
+        "Eurostat"  , "namq_10_a10_e", "Q.THS_HW.TOTAL.SCA.EMP_DC.PL"           , "hours_employment_total"   , "Hours worked by persons in employment, domestic concept (1000 hours, SCA)" \
 
         // =====================================================================
         // GDP AND EXPENDITURE COMPONENTS (chain-linked volumes)
@@ -232,7 +257,26 @@ else if "$country" == "Poland" {
         "", "", "", "", ""  // End marker
     )
 
+    // Annual variables, interpolated to quarters in the population section
+    series_codes_a = (
+        "Eurostat"  , "demo_pjan"      , "A.NR.TOTAL.T.PL"                      , "pop_jan1"                , "Population on 1 January, all ages (persons)"                             \
+
+        "", "", "", "", ""  // End marker
+    )
+
     end
+
+    // THE POPULATION SERIES: pop_freq, pop_var, pop_anchor_q, pop_divisor and
+    // pop_break_periods as in the Germany block. 1 January of y is q1 of y.
+    // Eurostat flags the 1 January figures of 2000, 2010 and 2021 as breaks in
+    // demo_pjan (OBS_FLAG "b"; the 2002, 2011 and 2021 censuses): the growth into
+    // 2010 is -0.30% and into 2021 -2.33%. 2000 lies before the fetched years and
+    // cannot affect them (flags read on 2026-11-08 from DBnomics' copy of demo_pjan).
+    local pop_freq          annual
+    local pop_var           pop_jan1
+    local pop_anchor_q      1
+    local pop_divisor       1000
+    local pop_break_periods 2010 2021
 }
 
 else if "$country" == "Spain" {
@@ -252,10 +296,11 @@ else if "$country" == "Spain" {
         // Spain publishes namq_10_pe under s_adj = SCA (seasonally AND calendar
         // adjusted); the SA variant used for Poland does not exist for ES.
         "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SCA.SAL_DC.ES"                 , "employees"                , "Employees, domestic concept (1000 persons, SCA)"                        \
-        "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SCA.SAL_NC.ES"                 , "employees_nat"            , "Employees, national concept (1000 persons, SCA)"                        \
+        "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SCA.EMP_NC.ES"                 , "employment_nat"           , "Persons in employment, national concept (1000 persons, SCA)"            \
+        "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SCA.EMP_DC.ES"                 , "employment"               , "Persons in employment, domestic concept (1000 persons, SCA)"            \
         "Eurostat"  , "namq_10_gdp" , "Q.CP_MEUR.SCA.D1.ES"                     , "labour_cost"              , "Compensation of employees D1 (million euro, current prices, SCA)"       \
         "Eurostat"  , "namq_10_gdp" , "Q.CP_MEUR.SCA.D11.ES"                    , "gross_wages"              , "Wages and salaries - Spain D11 (million euro, current prices, SCA)"     \
-        "Eurostat"  , "namq_10_a10_e", "Q.THS_HW.TOTAL.SCA.SAL_DC.ES"           , "hours_employees_total"    , "Hours worked by employees, domestic concept (1000 hours, SCA)"          \
+        "Eurostat"  , "namq_10_a10_e", "Q.THS_HW.TOTAL.SCA.EMP_DC.ES"           , "hours_employment_total"   , "Hours worked by persons in employment, domestic concept (1000 hours, SCA)" \
 
         // =====================================================================
         // GDP AND EXPENDITURE COMPONENTS (chain-linked volumes)
@@ -280,7 +325,23 @@ else if "$country" == "Spain" {
         "", "", "", "", ""  // End marker
     )
 
+    // Annual variables, interpolated to quarters in the population section
+    series_codes_a = (
+        "Eurostat"  , "demo_pjan"      , "A.NR.TOTAL.T.ES"                      , "pop_jan1"                , "Population on 1 January, all ages (persons)"                             \
+
+        "", "", "", "", ""  // End marker
+    )
+
     end
+
+    // THE POPULATION SERIES: as in the Germany block; 1 January of y is q1 of y.
+    // Spain's figures are register-based, and Eurostat flags no break in the series
+    // (checked on 2026-11-08 against DBnomics' copy of demo_pjan).
+    local pop_freq          annual
+    local pop_var           pop_jan1
+    local pop_anchor_q      1
+    local pop_divisor       1000
+    local pop_break_periods
 }
 
 else if "$country" == "Sweden" {
@@ -301,7 +362,8 @@ else if "$country" == "Sweden" {
         // Sweden publishes namq_10_pe under s_adj = SCA, as Spain does; the SA
         // variant used for Poland does not exist for SE.
         "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SCA.SAL_DC.SE"                 , "employees"                , "Employees, domestic concept (1000 persons, SCA)"                        \
-        "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SCA.SAL_NC.SE"                 , "employees_nat"            , "Employees, national concept (1000 persons, SCA)"                        \
+        "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SCA.EMP_NC.SE"                 , "employment_nat"           , "Persons in employment, national concept (1000 persons, SCA)"            \
+        "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SCA.EMP_DC.SE"                 , "employment"               , "Persons in employment, domestic concept (1000 persons, SCA)"            \
         // CURRENCY: the current-price wage aggregates are taken in NATIONAL
         // CURRENCY (CP_MNAC = million SEK), not CP_MEUR. real_wage_per_employee
         // deflates them by the Swedish HICP, which is a SEK-denominated index, and
@@ -313,7 +375,7 @@ else if "$country" == "Sweden" {
         // see the note on the volumes below for why a fixed rate is harmless.
         "Eurostat"  , "namq_10_gdp" , "Q.CP_MNAC.SCA.D1.SE"                     , "labour_cost"              , "Compensation of employees D1 (million SEK, current prices, SCA)"        \
         "Eurostat"  , "namq_10_gdp" , "Q.CP_MNAC.SCA.D11.SE"                    , "gross_wages"              , "Wages and salaries - Sweden D11 (million SEK, current prices, SCA)"     \
-        "Eurostat"  , "namq_10_a10_e", "Q.THS_HW.TOTAL.SCA.SAL_DC.SE"           , "hours_employees_total"    , "Hours worked by employees, domestic concept (1000 hours, SCA)"          \
+        "Eurostat"  , "namq_10_a10_e", "Q.THS_HW.TOTAL.SCA.EMP_DC.SE"           , "hours_employment_total"   , "Hours worked by persons in employment, domestic concept (1000 hours, SCA)" \
 
         // =====================================================================
         // GDP AND EXPENDITURE COMPONENTS (chain-linked volumes)
@@ -349,7 +411,23 @@ else if "$country" == "Sweden" {
         "", "", "", "", ""  // End marker
     )
 
+    // Annual variables, interpolated to quarters in the population section
+    series_codes_a = (
+        "Eurostat"  , "demo_pjan"      , "A.NR.TOTAL.T.SE"                      , "pop_jan1"                , "Population on 1 January, all ages (persons)"                             \
+
+        "", "", "", "", ""  // End marker
+    )
+
     end
+
+    // THE POPULATION SERIES: as in the Germany block; 1 January of y is q1 of y.
+    // Sweden's figures come from its population register, and Eurostat flags no
+    // break in the series (checked on 2026-11-08 against DBnomics' copy of demo_pjan).
+    local pop_freq          annual
+    local pop_var           pop_jan1
+    local pop_anchor_q      1
+    local pop_divisor       1000
+    local pop_break_periods
 }
 
 else if "$country" == "UK" {
@@ -375,11 +453,12 @@ else if "$country" == "UK" {
         // =====================================================================
         // OECD QNA tables 0110 (national concept) and 0111 (domestic concept) are the
         // same SNA transmission tables Eurostat publishes as namq_10_pe and
-        // namq_10_a10_e. UNITS: employees in thousands, as Eurostat, but hours in
-        // MILLIONS, not thousands; hours_employees_pp below rescales.
+        // namq_10_a10_e. UNITS: persons in thousands, as Eurostat, but hours in
+        // MILLIONS, not thousands; hours_employment_pp below rescales.
         "OECD"      , "DSD_NAMAIN1@DF_QNA_BY_ACTIVITY_EMPDC", "Q.Y.GBR.S1.S1.SAL._Z._T._Z.PS._Z.N.T0111", "employees"             , "Employees, domestic concept (1000 persons, SCA)"                  \
-        "OECD"      , "DSD_NAMAIN1@DF_QNA_POP_EMPNC"        , "Q.Y.GBR.S1.S1.SAL._Z._T._Z.PS._Z.N.T0110", "employees_nat"         , "Employees, national concept (1000 persons, SCA)"                  \
-        "OECD"      , "DSD_NAMAIN1@DF_QNA_BY_ACTIVITY_EMPDC", "Q.Y.GBR.S1.S1.SAL._Z._T._Z.H._Z.N.T0111" , "hours_employees_total" , "Hours worked by employees, domestic concept (million hours, SCA)" \
+        "OECD"      , "DSD_NAMAIN1@DF_QNA_POP_EMPNC"        , "Q.Y.GBR.S1.S1.EMP._Z._T._Z.PS._Z.N.T0110", "employment_nat"        , "Persons in employment, national concept (1000 persons, SCA)"      \
+        "OECD"      , "DSD_NAMAIN1@DF_QNA_BY_ACTIVITY_EMPDC", "Q.Y.GBR.S1.S1.EMP._Z._T._Z.PS._Z.N.T0111", "employment"            , "Persons in employment, domestic concept (1000 persons, SCA)"      \
+        "OECD"      , "DSD_NAMAIN1@DF_QNA_BY_ACTIVITY_EMPDC", "Q.Y.GBR.S1.S1.EMP._Z._T._Z.H._Z.N.T0111" , "hours_employment_total", "Hours worked by persons in employment, domestic concept (million hours, SCA)" \
         // CURRENCY: the wage aggregates are GBP, the currency of the CPI that deflates
         // them, as for Poland and Sweden; the currency section converts them to euro at
         // the fixed 2015 rate. DTWM and DTWL are the S.1 USES side, i.e. paid by
@@ -440,7 +519,28 @@ else if "$country" == "UK" {
         "", "", "", "", ""  // End marker
     )
 
+    // Annual variables, interpolated to quarters in the population section
+    series_codes_a = (
+        // ONS mid-year (30 June) population estimate, all ages, in persons rounded to
+        // hundreds, from the ONS population estimates time series (POP); Eurostat's
+        // demo_pjan ends at 2020 for the UK. The series is revised back after each
+        // census and has no census step: the growth into mid-2011 is +0.84% and into
+        // mid-2021 +0.36%, and its largest annual change since 1997 is +1.34%
+        // (mid-2023, net migration; checked on 2026-11-08).
+        "ONS"       , "POP"            , "UKPOP.A"                              , "pop_mid"                 , "UK population, mid-year estimate, all ages (persons; ONS POP UKPOP.A)"   \
+
+        "", "", "", "", ""  // End marker
+    )
+
     end
+
+    // THE POPULATION SERIES: as in the Germany block; the mid-year figure of y is q3
+    // of y.
+    local pop_freq          annual
+    local pop_var           pop_mid
+    local pop_anchor_q      3
+    local pop_divisor       1000
+    local pop_break_periods
 }
 
 else {
@@ -450,6 +550,22 @@ else {
 // Remove end markers
 mata: series_codes_q = series_codes_q[1..rows(series_codes_q)-1, .]
 mata: series_codes_me = series_codes_me[1..rows(series_codes_me)-1, .]
+if ("`pop_freq'" == "annual") {
+    mata: series_codes_a = series_codes_a[1..rows(series_codes_a)-1, .]
+}
+
+// The population series as "provider dataset key", for PROVENANCE, read off the row
+// that defines it. The annual figures are fetched for one year either side of the
+// sample, so every sample quarter lies between two anchor quarters or next to one.
+local pop_codes = cond("`pop_freq'" == "annual", "series_codes_a", "series_codes_q")
+mata: st_local("pop_rows", strofreal(sum(`pop_codes'[., 4] :== "`pop_var'")))
+if (`pop_rows' != 1) {
+    display as error "The population series `pop_var' is defined `pop_rows' times in `pop_codes' for $country; it must be exactly once."
+    exit 9
+}
+mata: st_local("pop_source", invtokens(select(`pop_codes', `pop_codes'[., 4] :== "`pop_var'")[1, 1..3]))
+local pop_y0 = year(dofq(tq(`startdate'))) - 1
+local pop_y1 = year(dofq(tq(`enddate'))) + 1
 
 
 if (`fetch_vars') {
@@ -474,6 +590,13 @@ if (`fetch_vars') {
     frame drop data_me
 
     frame data: save data_${country}_raw, replace
+
+    // Annual population figures, on a yearly frame of their own, saved beside the
+    // quarterly raw data so that fetch_vars = 0 reuses them.
+    if ("`pop_freq'" == "annual") {
+        get_data, series_codes(series_codes_a) tframe(data_a) startdate(`pop_y0') enddate(`pop_y1') replace freq(annual)
+        frame data_a: save data_${country}_raw_annual, replace
+    }
 }
 
 else {
@@ -481,6 +604,11 @@ else {
     cap frame drop data
     frame create data
     frame data: use data_${country}_raw, clear
+    if ("`pop_freq'" == "annual") {
+        cap frame drop data_a
+        frame create data_a
+        frame data_a: use data_${country}_raw_annual, clear
+    }
 }
 
 // Merge the seasonally adjusted HICP from `hicp_file' into the main dataset; this is the
@@ -499,6 +627,94 @@ frame data: rename hicp_`lower_counter'_sa HICP
 
 cwf data
 tsset time, quarterly
+
+// =====================================================================
+// Resident population (pop_level), census breaks spliced
+// =====================================================================
+
+// pop_level is the resident population of all ages in thousand persons, the Ramsey
+// planner's number of consumers. A census that is not carried back puts a step into
+// the series between two figures (-2.3% into Poland's 1 January 2021), and an HP trend
+// with lambda = 160,000 spreads such a step into a bend of about the size of the true
+// population growth, so breaks are spliced before anything else touches the series:
+// splice_breaks chains it
+// backwards from its latest figure with its own period-to-period growth, replacing the
+// growth into each period in pop_break_periods (set in the series block) by the mean
+// of its neighbours' growth. The level is therefore on the latest vintage throughout.
+//
+// An annual figure is then put on its anchor quarter (1 January of y at q1 of y, the
+// UK's 30 June at q3) and interpolated log-linearly between anchors. Sample quarters
+// before the first or after the last anchor continue the nearest quarter-on-quarter
+// log change, which for annual anchors is the nearest annual log growth divided by
+// four, so pop_level is complete over the whole sample. All of this happens on a
+// quarterly frame of its own (pop_q), spanning the sample and every anchor; only
+// pop_level reaches the data frame.
+local pop_q_lo = tq(`startdate')
+local pop_q_hi = tq(`enddate')
+if ("`pop_freq'" == "annual") {
+    cwf data_a
+    quietly tsset time, yearly
+    splice_breaks `pop_var', breaks(`pop_break_periods') gen(pop_spliced)
+    local pop_replaced "`r(replaced)'"
+    gen time_q = yq(time, `pop_anchor_q')
+    format time_q %tq
+    quietly summarize time_q if !missing(pop_spliced), meanonly
+    local pop_q_lo = min(`pop_q_lo', r(min))
+    local pop_q_hi = max(`pop_q_hi', r(max))
+    local pop_src_frame data_a
+    local pop_src_key   time_q
+}
+else {
+    cwf data
+    splice_breaks `pop_var', breaks(`pop_break_periods') gen(pop_spliced)
+    local pop_replaced "`r(replaced)'"
+    local pop_src_frame data
+    local pop_src_key   time
+}
+
+cap frame drop pop_q
+frame create pop_q
+cwf pop_q
+quietly set obs `=`pop_q_hi' - `pop_q_lo' + 1'
+gen time = `pop_q_lo' + _n - 1
+format time %tq
+tsset time, quarterly
+frlink 1:1 time, frame(`pop_src_frame' `pop_src_key') generate(pop_src)
+frget pop_anchor = pop_spliced, from(pop_src)
+drop pop_src
+replace pop_anchor = pop_anchor / `pop_divisor'
+
+gen double ln_pop_anchor = log(pop_anchor)
+ipolate ln_pop_anchor time, generate(ln_pop_q)
+gen double d_ln_pop_q = D.ln_pop_q
+quietly summarize time if !missing(ln_pop_q), meanonly
+local pop_a0 = r(min)
+local pop_a1 = r(max)
+tempname pop_ln_first pop_ln_last pop_slope_first pop_slope_last
+quietly summarize ln_pop_q if time == `pop_a0', meanonly
+scalar `pop_ln_first' = r(mean)
+quietly summarize d_ln_pop_q if time == `pop_a0' + 1, meanonly
+scalar `pop_slope_first' = r(mean)
+quietly summarize ln_pop_q if time == `pop_a1', meanonly
+scalar `pop_ln_last' = r(mean)
+quietly summarize d_ln_pop_q if time == `pop_a1', meanonly
+scalar `pop_slope_last' = r(mean)
+replace ln_pop_q = `pop_ln_first' - (`pop_a0' - time) * `pop_slope_first' if time < `pop_a0'
+replace ln_pop_q = `pop_ln_last' + (time - `pop_a1') * `pop_slope_last' if time > `pop_a1'
+
+// The anchors keep their spliced values exactly; only the quarters between and
+// beyond them come from the log-linear path.
+gen double pop_level = pop_anchor
+replace pop_level = exp(ln_pop_q) if missing(pop_level)
+label variable pop_level "Resident population, all ages (1000 persons, census breaks spliced)"
+
+cwf data
+frlink 1:1 time, frame(pop_q) generate(pop_link)
+frget pop_level, from(pop_link)
+drop pop_link
+cap drop pop_spliced
+frame drop pop_q
+cap frame drop data_a
 
 // =====================================================================
 // Currency: euro at the fixed 2015 rate
@@ -683,42 +899,37 @@ label variable w_comp "Real compensation per employee - HP-filtered (% deviation
 gen w = 100 * wage_cycle
 label variable w "Real wage per employee - HP-filtered (% deviation)"
 
-// GERMANY SPECIFIC NOTE!
 *===============================================================================
 * EMPLOYMENT-UNEMPLOYMENT-LABOR FORCE CYCLES
 *===============================================================================
-* 
-* CONCEPT CHOICE: National (residence-based) for all labor market stocks
-* - L: pop_active (Erwerbspersonen, national)
-* - n: employees_nat (Arbeitnehmer Inländer, national, excl. self-employed)
+*
+* CONCEPT CHOICE: all persons in employment, national (residence-based) concept
+* - L: pop_active (labour force, national)
+* - n: employment_nat (all persons in employment, employees and self-employed,
+*      national concept)
 * - u: unemp_pers_ilo / pop_active (ILO unemployment rate)
+* - h: hours per person in employment, domestic concept
+*
+* WHY ALL PERSONS IN EMPLOYMENT?
+* 1. The planner's labour input, SimPaths' workers (Les_c4.EmployedOrSelfEmployed)
+*    and the DSGE's chi_n are all total employment.
+* 2. The labour share 1 - alpha follows the Penn World Table's labsh, which imputes
+*    labour income to the self-employed, so it is a share of all employment.
+* 3. Hours are total hours worked per person in employment.
+* The wage observable stays per employee: national accounts attach no wage to the
+* self-employed.
 *
 * WHY NATIONAL CONCEPT?
 * 1. SimPaths models resident households' labor supply decisions
 * 2. Search-matching operates on resident labor force
-* 3. Identity u = L - n holds exactly (up to self-employed adjustment)
-*
-* WHY EXCLUDE SELF-EMPLOYED?
-* 1. Wage variable (w) is compensation per employee (excludes self-employed)
-* 2. Hours variable (h) is hours per employee (excludes self-employed)
-* 3. Search-matching framework models employee-vacancy matching
-*
-* SimPaths' labour-supply model does NOT exclude the self-employed: its working
-* state is Les_c4.EmployedOrSelfEmployed, and its wage equation pools employee
-* and self-employment income. The Ramsey feedback bridges the two concepts with
-* a level factor that holds the employee share of workers fixed (contract 16 in
-* docs/Integration_Contracts.md; docs/SimPaths_Coupling.md, section 8.1).
-*
-* The identity becomes: L - self_empl - n = u (approximately)
-* This is documented as a known measurement limitation.
+* 3. The identity U = L - N holds in concept (see check 5b)
 *===============================================================================
 
-// 1. EMPLOYMENT (National concept, excluding self-employed)
-// employees_nat = Arbeitnehmer (Inländer) from 81000BV001
-gen ln_employees_nat = log(employees_nat)
-tsfilter hp emp_cycle = ln_employees_nat, smooth(1600)
+// 1. EMPLOYMENT (national concept, all persons in employment)
+gen ln_employment_nat = log(employment_nat)
+tsfilter hp emp_cycle = ln_employment_nat, smooth(1600)
 gen n = 100 * emp_cycle  // % deviation from trend
-label variable n "Employment (national, excl. self-empl.) - HP-filtered (% deviation)"
+label variable n "Employment (national, all persons in employment) - HP-filtered (% deviation)"
 
 // 2. UNEMPLOYMENT RATE: HP-filter (not just demean!)
 // Demeaning would treat post-Hartz low unemployment as a "boom"
@@ -744,43 +955,55 @@ tsfilter hp lf_cycle = ln_lab_force, smooth(1600)
 gen L = 100 * lf_cycle  // % deviation from trend
 label variable L "Labor force - HP-filtered (% deviation)"
 
-// 4. HOURS PER EMPLOYEE (INTENSIVE MARGIN)
-// HP-filter hours per employee to capture cyclical hours adjustment
+// 4. HOURS PER PERSON EMPLOYED (INTENSIVE MARGIN)
+// HP-filter hours per person employed to capture cyclical hours adjustment
 // Germany adjusts 70-90% via hours (not employment) in recessions
-// hours_employees_pp is already seasonally adjusted from Destatis
+// hours_employment_pp is already seasonally adjusted from Destatis
 //
-// MEASUREMENT LIMITATION: hours_employees_pp uses DOMESTIC concept
+// MEASUREMENT LIMITATION: hours_employment_pp uses DOMESTIC concept
 // Destatis publishes hours data only by domestic (Inlands-) concept.
 // No national (Inländer-) concept hours series exists.
 // This inconsistency is small because:
 //   - Pendlersaldo is ~300k (< 1% of 45mn workforce)
 //   - Hours adjustment is a workplace phenomenon (intensive margin)
 //   - Cyclical correlation between concepts is near-perfect
-// For Poland, Spain, Sweden and the UK: hours_employees_pp is not fetched directly
-// but computed from total hours / number of employees (both domestic concept).
+// For Poland, Spain, Sweden and the UK: hours_employment_pp is not fetched directly
+// but computed from total hours / persons in employment (both domestic concept).
 // UNITS: Eurostat publishes total hours in thousands, the OECD (UK) in millions;
-// employees are thousands in both. The UK factor of 1000 puts hours_employees_pp in
-// hours per employee per quarter for every country.
+// persons are thousands in both. The UK factor of 1000 puts hours_employment_pp in
+// hours per person employed per quarter for every country.
 if inlist("$country", "Poland", "Spain", "Sweden", "UK") {
     local hours_factor = cond("$country" == "UK", 1000, 1)
-    gen hours_employees_pp = hours_employees_total * `hours_factor' / employees
-    label variable hours_employees_pp "Hours per employee, domestic concept (computed)"
-    drop hours_employees_total
+    gen hours_employment_pp = hours_employment_total * `hours_factor' / employment
+    label variable hours_employment_pp "Hours per person employed, domestic concept (computed)"
+    drop hours_employment_total
 }
 
-// UNITS CHECK. Hours per employee per quarter sit between 310 and 520 for every
-// country so far; a thousands/millions slip in the source is a factor of 1000 and
+// UNITS CHECK. Hours per person employed per quarter sit between 310 and 530 for
+// every country; a thousands/millions slip in the source is a factor of 1000 and
 // lands far outside [200, 700].
-quietly summarize hours_employees_pp
+quietly summarize hours_employment_pp
 if (r(N) == 0) | (r(min) < 200) | (r(max) > 700) {
-    display as error "hours_employees_pp for $country spans `r(min)' to `r(max)' (N = `r(N)'), outside [200, 700] hours per employee per quarter; check the units of the hours series."
+    display as error "hours_employment_pp for $country spans `r(min)' to `r(max)' (N = `r(N)'), outside [200, 700] hours per person employed per quarter; check the units of the hours series."
+    exit 9
+}
+display as text "UNITS CHECK hours per person employed for $country: " %6.1f r(min) " to " %6.1f r(max) " (N = " r(N) ")"
+
+// UNITS CHECK. pop_level is in thousand persons: Sweden's 9-10 million is 9,000-10,500
+// and Germany's 83 million 83,000, so a source left in persons or in millions (a factor
+// of 1000) lands far outside [1000, 150000]. Every sample quarter must carry a value.
+quietly count if missing(pop_level) & inrange(time, tq(`startdate'), tq(`enddate'))
+local pop_missing = r(N)
+quietly summarize pop_level if inrange(time, tq(`startdate'), tq(`enddate'))
+if (`pop_missing' > 0) | (r(N) == 0) | (r(min) < 1000) | (r(max) > 150000) {
+    display as error "pop_level for $country spans `r(min)' to `r(max)' (N = `r(N)', `pop_missing' sample quarters missing), outside [1000, 150000] thousand persons or incomplete; check the units and span of the population series."
     exit 9
 }
 
-gen ln_hours = log(hours_employees_pp)
+gen ln_hours = log(hours_employment_pp)
 tsfilter hp hours_cycle = ln_hours, smooth(1600)
 gen h = 100 * hours_cycle  // % deviation from trend
-label variable h "Hours per employee (domestic) - HP-filtered (% deviation)"
+label variable h "Hours per person employed (domestic) - HP-filtered (% deviation)"
 
 // 5. VALIDATION CHECKS
 // 5a. ILO unemployment rate identity (should hold exactly)
@@ -788,18 +1011,13 @@ gen unemployment_from_identity = (unemp_pers_ilo / pop_active) * 100
 gen residual_u = ur_ilo - unemployment_from_identity
 summarize residual_u  // Should be ~0 (identity holds by construction)
 
-// 5b. Labor force identity check (L = n + self_empl + u)
-// Note: We use employees_nat (excl. self-employed), so identity is approximate
-// The gap equals self-employed as share of labor force (~9-10%)
-gen employed_total_nat = pop_active - unemp_pers_ilo  // Erwerbstätige (Inländer)
-gen self_empl_share = (employed_total_nat - employees_nat) / pop_active * 100
-label variable self_empl_share "Self-employed as % of labor force (national)"
-summarize self_empl_share  // Expected: ~9-10%
-
-// 5c. Check cyclical correlation between concepts
-gen ln_empl_total = log(employed_total_nat)
-tsfilter hp empl_total_cycle = ln_empl_total, smooth(1600)
-correlate emp_cycle empl_total_cycle  // Should be very high (>0.95)
+// 5b. Employment identity: U = L - N in concept (ILO labour force 15-74 minus
+// national-concept employment of all ages). The residual is workers past 74
+// and the usual concept differences; printed, not enforced.
+gen employment_identity_resid = (pop_active - unemp_pers_ilo - employment_nat) / pop_active * 100
+label variable employment_identity_resid "L - U - N as % of L (national concept)"
+summarize employment_identity_resid
+display as text "Employment identity residual (L-U-N)/L for $country: mean " %6.2f r(mean) "%, range " %6.2f r(min) "% to " %6.2f r(max) "%"
 
 
 // Save complete dataset before trimming for Dynare
@@ -815,10 +1033,11 @@ keep time ///
     HICP hicp_qoq_ann ///
     R_eur3 ///
     real_wage_per_employee w ///
-    employees_nat n ///
+    employment_nat n ///
     ur_ilo u ///
     pop_active L ///
-    hours_employees_pp h 
+    hours_employment_pp h ///
+    pop_level
 
 // Government consumption and net exports (chain-linked million EUR, same units as GDP)
 rename gov_cons_mn g_level
@@ -843,17 +1062,17 @@ rename hicp_qoq_ann pi
 
 rename R_eur3 R
 rename real_wage_per_employee w_level
-rename employees_nat n_level  // National concept, excl. self-employed
+rename employment_nat n_level  // National concept, all persons in employment
 rename ur_ilo u_level  // ILO unemployment rate (consistent with national concept)
 rename pop_active L_level  // Labor force (national concept)
 
 // NOTE: h is domestic concept (Destatis provides no national concept hours data)
 // This is a documented measurement limitation. Justification:
 // 1. Hours are tied to workplace location, not residence
-// 2. Pendlersaldo (net commuters) is small (~300k, <1% of workforce)
+// 2. Pendlersaldo (net commuters) is small (~300k, <1% of persons in employment)
 // 3. Cyclical hours patterns are nearly identical across concepts
 // 4. SimPaths models hours decisions, which map to workplace adjustments
-rename hours_employees_pp h_level  // Hours per employee (domestic concept)
+rename hours_employment_pp h_level  // Hours per person employed (domestic concept)
 // h is already named correctly from HP-filter step
 
 // Rename u to u_rate for diagnostics/plots (u_rate is not in varobs)
@@ -886,8 +1105,8 @@ if `do_dsge_graphs' {
     else if ("$country" == "UK") local interest_rate_string "3-month rate, UK (%)"
     else local interest_rate_string "Short-term interest rate (%)"
 
-    local level_vars "y_level c_level inv_level g_level nx_level P R w_level n_level u_level L_level h_level"
-    local level_titles `" "Real GDP (mn EUR)" "Consumption (mn EUR)" "Investment (mn EUR)" "Gov. Cons. (mn EUR)" "Net Exports (mn EUR)" "HICP (2020=100)" "`interest_rate_string'" "Real wage per employee (in thousand EUR/quarter)" "Employees nat. (1000s)" "Unemp. Rate (%)" "Labor Force (1000s)" "Hours/Employee" "'
+    local level_vars "y_level c_level inv_level g_level nx_level P R w_level n_level u_level L_level h_level pop_level"
+    local level_titles `" "Real GDP (mn EUR)" "Consumption (mn EUR)" "Investment (mn EUR)" "Gov. Cons. (mn EUR)" "Net Exports (mn EUR)" "HICP (2020=100)" "`interest_rate_string'" "Real wage per employee (in thousand EUR/quarter)" "Persons in employment, nat. (1000s)" "Unemp. Rate (%)" "Labor Force (1000s)" "Hours/Person employed" "Population, all ages (1000s)" "'
     
     local cycle_vars "y c inv pi R w n u_rate L h"
     local cycle_titles `" "Output Gap (%)" "Consumption Gap (%)" "Investment Gap (%)" "Inflation (% Q-o-Q)" "Interest Rate (%)" "Wage Gap (%)" "Empl. Gap (%)" "Unemp. Gap (pp)" "LF Gap (%)" "Hours Gap (%)" "'
@@ -902,7 +1121,7 @@ if `do_dsge_graphs' {
             name(g_`var', replace) nodraw
         local ++i
     }
-    graph combine g_y_level g_c_level g_inv_level g_g_level g_nx_level g_P g_R g_w_level g_n_level g_u_level g_L_level g_h_level, ///
+    graph combine g_y_level g_c_level g_inv_level g_g_level g_nx_level g_P g_R g_w_level g_n_level g_u_level g_L_level g_h_level g_pop_level, ///
         cols(3) title("DSGE Observables - ${country} - Levels") ///
         name(levels_combined, replace)
     graph export "dsge_levels_${country}.png", replace width(1200)
@@ -924,7 +1143,7 @@ if `do_dsge_graphs' {
     graph export "dsge_cycles_${country}.png", replace width(1200)
     
     // Clean up individual graphs
-    graph drop g_y_level g_c_level g_inv_level g_g_level g_nx_level g_P g_R g_w_level g_n_level g_u_level g_L_level g_h_level
+    graph drop g_y_level g_c_level g_inv_level g_g_level g_nx_level g_P g_R g_w_level g_n_level g_u_level g_L_level g_h_level g_pop_level
     graph drop g_y_c g_c_c g_inv_c g_pi_c g_R_c g_w_c g_n_c g_u_rate_c g_L_c g_h_c
 }
 
@@ -953,10 +1172,13 @@ save data_for_dynare_${country}, replace
 //              currency D11 by their own HICP and convert at the FIXED 2015 rate,
 //              so the column carries no exchange-rate movement. Diagnostic only:
 //              nothing in the MATLAB pipeline reads it.
-//   n_level  = employees, national concept excl. self-employed (thousands)
+//   n_level  = persons in employment, national concept (thousands)
 //   u_level  = ILO unemployment rate (%)
 //   L_level  = labor force, national concept (thousands)
-//   h_level  = hours per employee, domestic concept (hours/quarter)
+//   h_level  = hours per person employed, domestic concept (hours/quarter)
+//   pop_level = resident population, all ages (thousands), census breaks spliced,
+//               1 January figures at q1 (UK: mid-year at q3), log-linear between
+//               anchors
 //
 // COVID censoring does not touch the *_level variables — they are separate
 // variables from the censored DSGE observables, so the Ramsey model gets the
@@ -968,8 +1190,8 @@ save data_for_dynare_${country}, replace
 // inflation trend). Do not "restore" pi here without re-checking the inflation
 // trend — uncensoring it changes the trend the DSGE is detrended against.
 preserve
-    keep time y_level c_level inv_level g_level nx_level pi R w_level n_level u_level L_level h_level
-    order time y_level c_level inv_level g_level nx_level pi R w_level n_level u_level L_level h_level
+    keep time y_level c_level inv_level g_level nx_level pi R w_level n_level u_level L_level h_level pop_level
+    order time y_level c_level inv_level g_level nx_level pi R w_level n_level u_level L_level h_level pop_level
     export delimited using "../data/data_for_dynare_levels_${country}.csv", replace
 restore
 
@@ -1045,6 +1267,22 @@ quietly {
     }
     else {
         file write provfh "series_fetched   no (reused existing data_${country}_raw.dta)" _n
+    }
+
+    // The population series and every growth rate the census splice replaced.
+    file write provfh "population_source   `pop_source'" _n
+    if ("`pop_replaced'" == "") {
+        file write provfh "population_breaks   none" _n
+    }
+    else {
+        foreach pop_tok of local pop_replaced {
+            gettoken pop_period pop_rest : pop_tok, parse(":")
+            local pop_rest  = substr("`pop_rest'", 2, .)
+            local pop_arrow = strpos("`pop_rest'", "->")
+            local pop_old   = substr("`pop_rest'", 1, `pop_arrow' - 1)
+            local pop_new   = substr("`pop_rest'", `pop_arrow' + 2, .)
+            file write provfh "population_breaks   `pop_period': growth `pop_old'% -> `pop_new'%" _n
+        }
     }
 
     capture checksum "make_datasets.do"

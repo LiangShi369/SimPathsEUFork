@@ -1,7 +1,7 @@
 Data vintage for UK
 =========================================
 generated_by     make_datasets.do
-generated_at      7 Nov 2026 17:57:56
+generated_at      8 Nov 2026 14:36:48
 stata_version    19
 country          UK
 sample_requested 2000q1 to 2025q1
@@ -10,8 +10,10 @@ observations     101
 covid_censored   2020q1-2021q2 (y c inv pi w n u_rate L h)
 hicp_seasonal    reused existing hicp_q_sa_uk.dta: X-13ARIMA-SEATS 1.1 b62 (SEATS) on ONS D7BT, 1996m1-2025m12, via make_datasets_hicp_uk.do (fetched 21 Oct 2026)
 series_fetched   yes (dbnomics)
-script_checksum  706528323 (length 71039)
-git_head         ref: refs/heads/JW/docs-current-state
+population_source   ONS POP UKPOP.A
+population_breaks   none
+script_checksum  3425691504 (length 84068)
+git_head         ref: refs/heads/JW/planner-population
 
 Files written by this run
 -----------------------------------------

@@ -1,6 +1,6 @@
 # DSGE Policy Function Export for SimPaths
 
-**Generated:** 07-Nov-2026 17:50:14
+**Generated:** 08-Nov-2026 18:05:35
 **Model:** Macromodel_UK_frozen
 
 ## 1. State-Space Representation
@@ -57,7 +57,7 @@ downstream is how the two sides drift apart without any error surfacing.
 | `growth_model_reference_uk.csv` | In-sample Ramsey solution; its last row is the handoff quarter that every other file aligns to |
 | `growth_params_UK.json` | Calibrated structural parameters and solver settings |
 | `growth_terminal_state.json` | Terminal K and A, the handoff quarter, and `projection_quarters` (the forward horizon; a mismatch silently changes the terminal closure) |
-| `population_projection_UK.csv` | SimPaths-consistent demographic path, `time,N` |
+| `population_projection_UK.csv` | SimPaths-consistent demographic path, `time,N,P`: persons in employment and resident population |
 | `hours_projection_UK.csv` | Planner hours per worker, `time,h`, `projection_quarters + 1` rows from the handoff |
 
 **Alignment.** Each projection is located by DATE, not by row position: find the
@@ -73,7 +73,8 @@ would hide.
 **What is built on both sides.** The terminal tail appended past the
 SimPaths horizon is not exported. Both sides construct it with the same rule
 (trailing-growth window 20 for the demographic path, 1 for hours), enforced only
-by convention and a downstream tripwire test.
+by convention and a downstream tripwire test. Beyond the projection's last row
+the population follows employment at the last projected ratio.
 
 ## 3. Variable Classification
 
@@ -113,14 +114,14 @@ by convention and a downstream tripwire test.
 
 | Index | Shock | Description | ρ | σ |
 |-------|-------|-------------|---|---|
-| 0 | `eps_a` | technology | 0.950 | 0.5891 |
-| 1 | `eps_r` | monetary policy | 0.850 | 0.5086 |
-| 2 | `eps_d` | demand/preference | 0.800 | 0.4057 |
-| 3 | `eps_p` | price-setting / cost-push | 0.000 | 1.4489 |
-| 4 | `eps_L` | labor force | 0.950 | 0.2477 |
+| 0 | `eps_a` | technology | 0.950 | 0.5701 |
+| 1 | `eps_r` | monetary policy | 0.850 | 0.5076 |
+| 2 | `eps_d` | demand/preference | 0.800 | 0.4135 |
+| 3 | `eps_p` | price-setting / cost-push | 0.000 | 1.4869 |
+| 4 | `eps_L` | labor force | 0.950 | 0.2517 |
 | 5 | `eps_sep` | separation | 0.800 | 0.1000 |
-| 6 | `eps_h` | hours worked | 0.800 | 0.3925 |
-| 7 | `eps_inv` | investment-specific | 0.850 | 2.5426 |
+| 6 | `eps_h` | hours worked | 0.800 | 0.3894 |
+| 7 | `eps_inv` | investment-specific | 0.850 | 2.3969 |
 
 ## 4. Java Sketch
 

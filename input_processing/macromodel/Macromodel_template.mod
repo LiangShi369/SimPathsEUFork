@@ -265,9 +265,9 @@ varobs y inv c pi R n L h;
 // c      = Consumption gap (detrended log private consumption, % deviation)
 // pi     = Inflation rate (QoQ annualized, %)
 // R      = Nominal interest rate (3m interbank rate, %)
-// n      = Employment gap (detrended log employment, % deviation)
+// n      = Employment gap (detrended log employment, all persons in employment, % deviation)
 // L      = Labor force gap (detrended log labor force, % deviation)
-// h      = Hours per employee gap (detrended, % deviation)
+// h      = Hours per person employed gap (detrended, % deviation)
 //
 // 8 observables, 8 shocks → just-identified
 

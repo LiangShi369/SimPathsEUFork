@@ -317,13 +317,13 @@ public class DSGEState {
 
     // ========== Convenience Getters ==========
 
-    /** Wage (w) - STATE variable: the bargained wage per employee */
+    /** Wage (w) - STATE variable: the bargained wage per worker */
     public double getWageDeviation() {
         return wageDeviation;
     }
 
     /**
-     * The wage per hour, {@code w - h}: the DSGE's wage per employee net of hours per employee
+     * The wage per hour, {@code w - h}: the DSGE's wage per worker net of hours per worker
      * (both 100&times;log deviations). This is the cycle SimPaths applies, since its macro wage
      * multiplies hourly wages and the planner's trend wage is a wage per hour.
      */

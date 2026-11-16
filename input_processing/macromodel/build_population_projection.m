@@ -1,22 +1,24 @@
 function build_population_projection(dsge_country, simpaths_pop_file, options)
-% BUILD_POPULATION_PROJECTION  Build the quarterly N projection from SimPaths population data.
+% BUILD_POPULATION_PROJECTION  Build the quarterly N and P projections from SimPaths population data.
 %
 % Reads align_popProjections.xlsx from the SimPaths input directory,
-% extracts working-age (15–64) population totals by year, and applies
-% their growth rates to the terminal N (employees) of the reference CSV to
-% build a forward path for the Ramsey model.
+% extracts the working-age (15–64) and all-ages population totals by year,
+% and applies their growth rates to the terminal N (persons in employment)
+% and P (resident population) of the reference CSV to build the forward
+% paths of the Ramsey model.
 %
 % Design principle: keep the DSGE/Ramsey calibration for the selected
-% country (K₀, A₀, α, δ, σ, g_A) but replace the forward N path with
-% the demographic trend from the matching SimPaths population projections.
+% country (K₀, A₀, α, δ, σ, g_A) but replace the forward N and P paths with
+% the demographic trends from the matching SimPaths population projections.
 % This ensures that:
 %   (1) The Ramsey growth model's demographic path is consistent with
 %       what SimPaths agents experience in the chosen country
 %   (2) All other model structure remains from the estimation country
 %
-% The exporters copy the output file into the bundle, where
-% MacroModelManager.initializeRamseyTrend() in SimPaths requires it and takes
-% the forward N path from it.
+% The file carries workers (N, ages 15-64) and consumers (P, all ages) from
+% the one population workbook SimPaths aligns to. The exporters copy the output
+% file into the bundle, where MacroModelManager.initializeRamseyTrend()
+% requires both columns.
 %
 % Usage:
 %   build_population_projection('Spain', '../../input/ES/align_popProjections.xlsx')
@@ -27,7 +29,7 @@ function build_population_projection(dsge_country, simpaths_pop_file, options)
 %   simpaths_pop_file  - Full path to align_popProjections.xlsx
 %
 % Output:
-%   population_projection_[COUNTRY].csv in output/, columns time, N.
+%   population_projection_[COUNTRY].csv in output/, columns time, N, P.
 %
 % The CSV starts at projection_start (default: shared SimPaths integration
 % handoff quarter) and extends through the final projection
@@ -189,14 +191,32 @@ function build_population_projection(dsge_country, simpaths_pop_file, options)
         end
         wap_annual(i) = sum(col_data, 'omitnan');
     end
-    
+
+    % Resident population: every row with a parsable age, summed the same way.
+    tot_mask = ~isnan(age_col);
+    tot_data = raw(tot_mask, :);
+    tot_annual = zeros(length(years), 1);
+    for i = 1:length(year_col_indices)
+        col_data = tot_data{:, year_col_indices(i)};
+        if iscell(col_data)
+            col_data = cellfun(@(x) str2double(string(x)), col_data);
+        end
+        tot_annual(i) = sum(col_data, 'omitnan');
+    end
+
     % %,.0f is not a valid MATLAB format (no thousands-separator flag); it prints
     % the year and silently drops the value.
     fprintf('\n  Working-age population (15-64):\n');
     fprintf('    %d: %.0f\n', years(1), wap_annual(1));
     fprintf('    %d: %.0f\n', years(end), wap_annual(end));
     fprintf('    Change: %.1f%%\n', 100 * (wap_annual(end) / wap_annual(1) - 1));
-    
+    fprintf('\n  Resident population (all ages):\n');
+    fprintf('    %d: %.0f\n', years(1), tot_annual(1));
+    fprintf('    %d: %.0f\n', years(end), tot_annual(end));
+    fprintf('    Total / working-age: %.4f in %d, %.4f in %d\n', ...
+            tot_annual(1) / wap_annual(1), years(1), ...
+            tot_annual(end) / wap_annual(end), years(end));
+
     %% =====================================================================
     %% 2. LOAD TERMINAL VALUES FROM RAMSEY REFERENCE CSV
     %% =====================================================================
@@ -208,7 +228,11 @@ function build_population_projection(dsge_country, simpaths_pop_file, options)
     end
     
     ref = readtable(ref_file);
+    if ~ismember('P', ref.Properties.VariableNames)
+        error('Run ramsey_trend(''%s'') first; the reference CSV has no P column.', dsge_country);
+    end
     N_terminal = ref.N(end);
+    P_terminal = ref.P(end);
     terminal_time = ref.time{end};  % e.g., '2025q1'
     
     % Parse terminal year and quarter
@@ -293,7 +317,6 @@ function build_population_projection(dsge_country, simpaths_pop_file, options)
     % so the CSV covers the full SimPaths simulation horizon.
     final_output_year = last_proj_year;
     total_quarters = (final_output_year - start_year) * 4 + (4 - start_quarter + 1);
-    proj_primary = nan(total_quarters, 1);
     time_labels = cell(total_quarters, 1);
 
     for i = 1:total_quarters
@@ -310,34 +333,18 @@ function build_population_projection(dsge_country, simpaths_pop_file, options)
               terminal_time, time_labels{1}, time_labels{end});
     end
 
-    proj_primary(terminal_position) = N_terminal;
-
-    quarter_growth = nan(size(annual_growth));
-    for i = 1:length(annual_growth)
-        quarter_growth(i) = (1 + annual_growth(i))^(1/4) - 1;
+    % Workers (15-64) and consumers (all ages) follow their own annual growth
+    % rates from the same workbook, each anchored at its reference terminal.
+    proj_primary = quarterly_path(annual_growth, start_year, start_quarter, ...
+                                  total_quarters, terminal_position, N_terminal);
+    annual_growth_pop = zeros(n_growth_years, 1);
+    for i = 1:n_growth_years
+        y_idx = start_idx + i - 1;
+        annual_growth_pop(i) = tot_annual(y_idx + 1) / tot_annual(y_idx) - 1;
     end
+    proj_pop = quarterly_path(annual_growth_pop, start_year, start_quarter, ...
+                              total_quarters, terminal_position, P_terminal);
 
-    % Backfill periods before the terminal anchor.
-    for idx = terminal_position-1:-1:1
-        current_year = start_year + floor((start_quarter - 1 + idx - 1) / 4);
-        growth_idx = current_year - start_year + 1;
-        if growth_idx < 1 || growth_idx > length(quarter_growth)
-            error('Missing annual growth for backfill year %d.', current_year);
-        end
-        proj_primary(idx) = proj_primary(idx + 1) / (1 + quarter_growth(growth_idx));
-    end
-
-    % Forward-fill periods after the terminal anchor.
-    for idx = terminal_position+1:total_quarters
-        prev_year = start_year + floor((start_quarter - 1 + idx - 2) / 4);
-        growth_idx = prev_year - start_year + 1;
-        if growth_idx < 1
-            error('Missing annual growth for forward year %d.', prev_year);
-        end
-        growth_idx = min(growth_idx, length(quarter_growth));
-        proj_primary(idx) = proj_primary(idx - 1) * (1 + quarter_growth(growth_idx));
-    end
-    
     N_proj = proj_primary;
     fprintf('\n  Quarterly N projection:\n');
     fprintf('    Start: %s, N = %.1f\n', time_labels{1}, N_proj(1));
@@ -353,13 +360,13 @@ function build_population_projection(dsge_country, simpaths_pop_file, options)
     output_file = artifact_path('output', sprintf('population_projection_%s.csv', dsge_country), 'create', true);
 
     fid = fopen(output_file, 'w');
-    fprintf(fid, 'time,N\n');
+    fprintf(fid, 'time,N,P\n');
     for i = 1:total_quarters
-        fprintf(fid, '%s,%.6f\n', time_labels{i}, N_proj(i));
+        fprintf(fid, '%s,%.6f,%.6f\n', time_labels{i}, N_proj(i), proj_pop(i));
     end
     fclose(fid);
 
-    fprintf('\n  ✓ %s (%d rows, columns: time, N)\n', output_file, total_quarters);
+    fprintf('\n  ✓ %s (%d rows, columns: time, N, P)\n', output_file, total_quarters);
     
     %% =====================================================================
     %% 5. DIAGNOSTIC SUMMARY
@@ -408,45 +415,95 @@ function build_population_projection(dsge_country, simpaths_pop_file, options)
             N_2050_trend - N_2050_simpaths, ...
             100 * (N_2050_trend / N_terminal - N_2050_simpaths / N_terminal));
 
+    fprintf('\n  Dependency ratio P/N:\n');
+    fprintf('    Start (%s): %.4f\n', time_labels{1}, proj_pop(1) / N_proj(1));
+    fprintf('    %s: %.4f\n', time_labels{idx_2050}, proj_pop(idx_2050) / N_proj(idx_2050));
+    fprintf('    End (%s): %.4f\n', time_labels{end}, proj_pop(end) / N_proj(end));
+
     %% =====================================================================
-    %% 6. EXTEND demographic_L_{country}.csv WITH SAME SimPaths GROWTH PATH
+    %% 6. EXTEND demographic_L_{country}.csv AND demographic_P_{country}.csv
     %% =====================================================================
-    % MATLAB ramsey_trend.m reads demographic_L_{country}.csv for the
-    % in-sample labor force trend and uses its post-sample tail to override
-    % the forward N extrapolation. To keep MATLAB and Java consuming the
-    % same demographic story, append/replace the post-projection_start rows
-    % of L_demo with the SimPaths-aligned growth path computed above. Rows
-    % before projection_start are preserved as user-maintained historical
-    % data.
+    % MATLAB ramsey_trend.m reads both files: L_demo for the in-sample labour-
+    % force trend, the growth of both files after the last data quarter to
+    % extend the in-sample solve's N and P, and both from projection_start on
+    % for the handoff solve. To keep MATLAB and Java consuming the same
+    % demographic story, the post-projection_start rows of L_demo follow the
+    % worker path and those of P_demo the resident-population path computed
+    % above. Rows before projection_start are preserved as historical data.
 
     demo_L_file = artifact_path('data', sprintf('demographic_L_%s.csv', lower(dsge_country)));
-    if exist(demo_L_file, 'file')
-        demo_tbl = readtable(demo_L_file);
-        pivot_idx = find(strcmpi(demo_tbl.time, projection_start), 1);
-        proj_anchor_idx = find(strcmp(time_labels, projection_start), 1);
-        if isempty(pivot_idx)
-            fprintf('\n  ⚠ %s missing %s anchor row; demographic_L extension skipped.\n', ...
-                    demo_L_file, projection_start);
-        elseif isempty(proj_anchor_idx)
-            fprintf('\n  ⚠ projection_start %s not in proj time axis; demographic_L extension skipped.\n', ...
-                    projection_start);
-        else
-            L_anchor = demo_tbl.L_demo(pivot_idx);
-            forward_time = time_labels(proj_anchor_idx+1:end);
-            forward_L = L_anchor * proj_primary(proj_anchor_idx+1:end) / proj_primary(proj_anchor_idx);
-            new_demo = [demo_tbl(1:pivot_idx, :); ...
-                        table(forward_time, forward_L, 'VariableNames', {'time','L_demo'})];
-            writetable(new_demo, demo_L_file);
-            fprintf('\n  ✓ Extended %s: %d historical rows preserved (through %s), %d projection rows written (through %s)\n', ...
-                    demo_L_file, pivot_idx, demo_tbl.time{pivot_idx}, ...
-                    length(forward_time), forward_time{end});
-        end
-    else
-        fprintf('\n  (skipped %s update — file does not exist; run calibrate_growth_model first)\n', ...
-                demo_L_file);
+    demo_P_file = artifact_path('data', sprintf('demographic_P_%s.csv', lower(dsge_country)));
+    if ~exist(demo_P_file, 'file')
+        error(['%s does not exist; ramsey_trend needs it. ' ...
+               'Run calibrate_growth_model first.'], demo_P_file);
     end
+    extend_demographic_file(demo_L_file, 'L_demo', projection_start, time_labels, proj_primary);
+    extend_demographic_file(demo_P_file, 'P_demo', projection_start, time_labels, proj_pop);
 
     fprintf('\n✓ Population projection complete\n\n');
+end
+
+
+function path = quarterly_path(annual_growth, start_year, start_quarter, ...
+                               total_quarters, terminal_position, anchor_level)
+% Quarterly level path through anchor_level at terminal_position. Growth within a
+% year is uniform across its four quarters; quarters beyond the last annual
+% growth rate reuse it.
+    path = nan(total_quarters, 1);
+    path(terminal_position) = anchor_level;
+    quarter_growth = (1 + annual_growth).^(1/4) - 1;
+
+    % Backfill periods before the terminal anchor.
+    for idx = terminal_position-1:-1:1
+        current_year = start_year + floor((start_quarter - 1 + idx - 1) / 4);
+        growth_idx = current_year - start_year + 1;
+        if growth_idx < 1 || growth_idx > length(quarter_growth)
+            error('Missing annual growth for backfill year %d.', current_year);
+        end
+        path(idx) = path(idx + 1) / (1 + quarter_growth(growth_idx));
+    end
+
+    % Forward-fill periods after the terminal anchor.
+    for idx = terminal_position+1:total_quarters
+        prev_year = start_year + floor((start_quarter - 1 + idx - 2) / 4);
+        growth_idx = prev_year - start_year + 1;
+        if growth_idx < 1
+            error('Missing annual growth for forward year %d.', prev_year);
+        end
+        growth_idx = min(growth_idx, length(quarter_growth));
+        path(idx) = path(idx - 1) * (1 + quarter_growth(growth_idx));
+    end
+end
+
+
+function extend_demographic_file(demo_file, column, projection_start, time_labels, proj_path)
+% Replace the rows of demo_file after projection_start by the anchor value scaled
+% with proj_path; rows through projection_start are kept as they are.
+    if ~exist(demo_file, 'file')
+        fprintf('\n  (skipped %s update — file does not exist; run calibrate_growth_model first)\n', ...
+                demo_file);
+        return;
+    end
+    demo_tbl = readtable(demo_file);
+    pivot_idx = find(strcmpi(demo_tbl.time, projection_start), 1);
+    proj_anchor_idx = find(strcmp(time_labels, projection_start), 1);
+    if isempty(pivot_idx)
+        fprintf('\n  ⚠ %s missing %s anchor row; %s extension skipped.\n', ...
+                demo_file, projection_start, column);
+    elseif isempty(proj_anchor_idx)
+        fprintf('\n  ⚠ projection_start %s not in proj time axis; %s extension skipped.\n', ...
+                projection_start, column);
+    else
+        anchor = demo_tbl.(column)(pivot_idx);
+        forward_time = time_labels(proj_anchor_idx+1:end);
+        forward_value = anchor * proj_path(proj_anchor_idx+1:end) / proj_path(proj_anchor_idx);
+        new_demo = [demo_tbl(1:pivot_idx, :); ...
+                    table(forward_time, forward_value, 'VariableNames', {'time', column})];
+        writetable(new_demo, demo_file);
+        fprintf('\n  ✓ Extended %s: %d historical rows preserved (through %s), %d projection rows written (through %s)\n', ...
+                demo_file, pivot_idx, demo_tbl.time{pivot_idx}, ...
+                length(forward_time), forward_time{end});
+    end
 end
 
 

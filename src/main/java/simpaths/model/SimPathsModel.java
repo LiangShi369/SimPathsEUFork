@@ -852,7 +852,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         // population state so that the year's MacroPaths.csv row reflects the
         // year's official end-of-year demographics rather than the pre-alignment
         // snapshot captured during DSGEMacroUpdate. With a Ramsey layer, also runs the
-        // planner's end-of-year re-solve on SimPaths' realized employment and hours.
+        // planner's end-of-year re-solve on SimPaths' realized employment, hours and population.
         MacroEndYearCapture,
     }
 

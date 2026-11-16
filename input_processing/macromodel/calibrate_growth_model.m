@@ -10,8 +10,13 @@ function calibrate_growth_model(country)
 %   2. Computes initial capital stock K_0 from investment using perpetual
 %      inventory method (or user-supplied value from PWT)
 %   3. Computes implied TFP level A_0 from production function
-%   4. Prepares NAWRU and demographic labor force trend files
+%   4. Prepares NAWRU, demographic labor force and demographic population
+%      (demographic_P_{country}.csv) trend files
 %   5. Writes updated JSON with calibrated base_year_values
+%
+% Symbols: N = persons in employment (national concept, thousands), h = hours
+% per person employed per quarter, P = resident population (thousands, census
+% breaks spliced in the data stage), L = labour force, K = capital, A = TFP.
 %
 % The structural parameters (alpha, delta, beta, sigma, g_A) are set
 % manually in the JSON based on literature values. This script only
@@ -100,6 +105,11 @@ function calibrate_growth_model(country)
     end
     
     data = readtable(level_file);
+    if ~ismember('pop_level', data.Properties.VariableNames)
+        error('calibrate_growth_model:noPopulation', ...
+              '%s has no pop_level column. Re-run stata/make_datasets.do for %s; the planner''s consumers are the resident population.', ...
+              level_file, country);
+    end
     % The export carries a full quarterly calendar, so the last rows have no
     % observables yet. Averaging a "last year" window over that tail yields NaN
     % g_Y and NaN K_0, which then makes the Ramsey solve infeasible.
@@ -124,7 +134,8 @@ function calibrate_growth_model(country)
     %% 3. Extract base-year values
     % All national accounts variables (y, c, inv) are in million EUR,
     % chain-linked volumes (2015 reference), from Eurostat namq_10_gdp.
-    % Employment in thousands, hours in hours/quarter.
+    % Persons in employment and resident population in thousands, hours per
+    % person employed in hours/quarter.
     
     % Annualize GDP: sum of 4 quarters. The base year must have all four, or the
     % "annual" aggregates below are quietly a partial year and every level
@@ -137,20 +148,24 @@ function calibrate_growth_model(country)
     base_rows = base_idx : base_idx + 3;
     Y_annual = sum(data.y_level(base_rows));           % million EUR
     
-    % Employment: average over 4 quarters (thousands)
+    % Persons in employment: average over 4 quarters (thousands)
     N_0 = mean(data.n_level(base_rows));               % thousands
-    
-    % Hours per employee per quarter: average over 4 quarters
+
+    % Hours per person employed per quarter: average over 4 quarters
     h_0 = mean(data.h_level(base_rows));               % hours per quarter
+
+    % Resident population: average over 4 quarters (thousands)
+    P_0 = mean(data.pop_level(base_rows));             % thousands
     
     % Labor force: average over 4 quarters (thousands)
     L_0 = mean(data.L_level(base_rows));               % thousands
     
     fprintf('\nBase year values (%d):\n', base_year);
     fprintf('  Y (annual GDP)  = %.1f million EUR\n', Y_annual);
-    fprintf('  N (employees)   = %.1f thousand\n', N_0);
+    fprintf('  N (persons in employment) = %.1f thousand\n', N_0);
     fprintf('  L (labor force) = %.1f thousand\n', L_0);
-    fprintf('  h (hours/empl/q)= %.1f hours\n', h_0);
+    fprintf('  h (hours per person employed per quarter) = %.1f hours\n', h_0);
+    fprintf('  P (population)   = %.1f thousand\n', P_0);
     
     %% 4. Compute initial capital stock K_0 via perpetual inventory
     %
@@ -278,7 +293,8 @@ function calibrate_growth_model(country)
     %
     % Units: We work in quarterly terms for the Ramsey model.
     % Y_q = Y_annual / 4 (quarterly GDP in million EUR)
-    % N in thousands, h in hours per quarter
+    % N (persons in employment) in thousands, h (hours per person employed) in
+    % hours per quarter
     % Effective labor = N * h (thousands × hours = thousand-hours)
     
     Y_q = Y_annual / 4;  % quarterly GDP
@@ -397,6 +413,32 @@ function calibrate_growth_model(country)
     else
         fprintf('  Demographic L file exists: %s\n', demo_L_file);
     end
+
+    % 7c. Demographic population: the in-sample treatment of the resident
+    % population (not a placeholder). The census-break splice happened in the
+    % data stage, so the HP trend of log pop_level is smooth across the breaks.
+    % A projection beyond the sample (SimPaths align_popProjections.xlsx, all
+    % ages) may extend the file, so accept files that cover at least the
+    % in-sample period.
+    demo_P_file = artifact_path('data', sprintf('demographic_P_%s.csv', lower(country)), 'create', true);
+    if exist(demo_P_file, 'file')
+        old_demo_P = readtable(demo_P_file);
+        if height(old_demo_P) < T
+            fprintf('  ⚠ Stale %s (%d rows < %d in-sample rows) — regenerating...\n', demo_P_file, height(old_demo_P), T);
+            delete(demo_P_file);
+        end
+    end
+    if ~exist(demo_P_file, 'file')
+        fprintf('  Creating in-sample demographic P trend...\n');
+
+        P_trend = exp(hp_filter_trend(log(data.pop_level), 160000));
+
+        demo_P_table = table(data.time, P_trend, 'VariableNames', {'time', 'P_demo'});
+        writetable(demo_P_table, demo_P_file);
+        fprintf('  Wrote %s (%d observations)\n', demo_P_file, T);
+    else
+        fprintf('  Demographic P file exists: %s\n', demo_P_file);
+    end
     
     %% 8. Update JSON with calibrated values
     params.base_year_values.K = K_0;
@@ -405,7 +447,8 @@ function calibrate_growth_model(country)
     params.base_year_values.h = h_0;
     params.base_year_values.A_implied = A_0;
     params.base_year_values.L = L_0;
-    
+    params.base_year_values.P = P_0;
+
     % Government and net export shares (for open-economy Ramsey model)
     params.base_year_values.G = G_annual;
     params.base_year_values.NX = NX_annual;
@@ -495,7 +538,7 @@ function calibrate_growth_model(country)
 
     fprintf('\n✓ Wrote calibrated growth parameters to %s\n', export_json_file);
 
-    %% 8b. Export documentation summary (rendered from WELLSIM_SVEC_Overleaf, not here)
+    %% 8b. Export documentation summary (rendered by documentation_tables/refresh_documentation_tables)
     try
         ramsey_summary = build_ramsey_documentation_summary(params, country);
         summary_file = artifact_path('output', fullfile('documentation_data', 'ramsey', ...
@@ -504,7 +547,7 @@ function calibrate_growth_model(country)
         write_json_summary(ramsey_summary, summary_file, ...
             'country', country, ...
             'source_function', 'calibrate_growth_model', ...
-            'model_version', 'v17');
+            'model_version', 'v22');
         documentation_status = sprintf('summary exported to %s', summary_file);
     catch documentation_error
         documentation_status = sprintf('documentation export failed: %s', documentation_error.message);
@@ -525,6 +568,7 @@ function calibrate_growth_model(country)
     print_box_line(sprintf('  r* (BGP)  = %12.2f%%%% (annual)', r_star_annual*100), box_width);
     print_box_line(sprintf('  NAWRU     = %s', nawru_file), box_width);
     print_box_line(sprintf('  Demo L    = %s', demo_L_file), box_width);
+    print_box_line(sprintf('  Demo P    = %s', demo_P_file), box_width);
     print_box_line(sprintf('  Docs      = %s', documentation_status), box_width);
     if isfield(params, 'terminal_growth') && isfield(params.terminal_growth, 'enabled') && params.terminal_growth.enabled
         print_box_line(sprintf('  g_A term. = %12.2f%%%% (annual)', 100*params.terminal_growth.g_A_terminal_annual), box_width);

@@ -15,7 +15,7 @@
       "delta_annual": "5.5% annual depreciation for total-economy capital, between Germany/Spain (5%) and Poland (6%). Sweden is a mature economy like Germany, but its capital stock carries an unusually high ICT and R&D share, and those assets depreciate far faster than structures. PWT composite rates for Sweden sit around 5.5-6%. This is the one Swedish structural input with no sharp empirical pin in this repo; if the Ramsey K/Y comes out far from the PIM value, revisit it first.",
       "beta_annual": "Discount factor: 0.96 annual, as for the other three countries. It pins the terminal modified-golden-rule BGP real rate jointly with sigma and tfp_growth_annual; the resulting r* is written to output/documentation_data/ramsey/ramsey_summary_Sweden.json (structural.r_star_annual) by calibrate_growth_model rather than quoted here, because it is derived and would go stale.",
       "sigma": "Inverse IES (CRRA coefficient). sigma=1.5 is mid-range consensus (1=log, 2=high risk aversion), same as the other three.",
-      "tfp_growth_annual": "0.65% annual labour-augmenting TFP growth, DERIVED FROM THIS SAMPLE rather than assumed. Over 2001q1-2025q1 the Swedish levels data give GDP per hour growth of 0.98% p.a.; on a BGP where K grows with Y, g_A = g_(Y/L) * (1 - alpha_K) = 0.98% * 0.67 = 0.65%. This is the HIGHEST of the four implemented countries (Germany 0.5%, Spain 0.4%, Poland 1.5% in-sample but converging to 0.5%), which matches Sweden's comparatively strong measured productivity performance over the period."
+      "tfp_growth_annual": "0.65% annual labour-augmenting TFP growth, set by the rule g_A = g_(Y/(N h)) * (1 - alpha_K), with g_(Y/(N h)) the growth of GDP per hour worked: on a BGP where K grows with Y, output per hour grows at g_A / (1 - alpha_K). On the current levels data (2001q1-2025q1, all persons in employment and hours per person employed) GDP per hour worked grows 1.13% p.a. (first against last four quarters), so the rule gives 1.13% * 0.67 = 0.76%. The calibrated value is re-tuned only when the trend's sanity check fails or the consumption fit clearly worsens, not on every data refresh. It is the highest long-run rate of the implemented countries (Germany 0.5%, UK 0.51%, Spain 0.4%; Poland 1.5% in sample, converging to 0.5%), which matches Sweden's comparatively strong measured productivity performance over the period."
     }
   },
   "base_year": 2001,
@@ -33,8 +33,10 @@
     "nawru_file": "nawru_sweden.csv",
     "demographic_L_source": "PLACEHOLDER: HP trend (lambda=160000) of the in-sample labour force, written by calibrate_growth_model.m; no projection tail. Intended source: Eurostat population projections + SCB (Statistics Sweden) labor force participation.",
     "demographic_L_file": "demographic_L_sweden.csv",
+    "demographic_P_source": "Up to the SimPaths handoff quarter: HP trend (lambda=160000) of the resident population (pop_level, census breaks spliced in the data stage), written by calibrate_growth_model.m. After it: growth path of SimPaths align_popProjections.xlsx (all ages), written by build_population_projection.m.",
+    "demographic_P_file": "demographic_P_sweden.csv",
     "hours_trend_method": "log_linear",
-    "x_comment": "nawru_file is read for diagnostics only. demographic_L_file has no post-sample tail, so ramsey_trend.m extends N at its trailing 20-quarter trend growth rate, untapered, until build_population_projection.m supplies a projection. Hours: log-linear trend fitted to observed."
+    "x_comment": "nawru_file is read for diagnostics only. demographic_L_file has no post-sample tail, so ramsey_trend.m extends N at its trailing 20-quarter trend growth rate, untapered, until build_population_projection.m supplies a projection. Hours: log-linear trend fitted to observed. The planner reads demographic_P_file in full and holds P/N at its last value beyond it."
   },
   "solver": {
     "method": "stacked_newton_lbj",

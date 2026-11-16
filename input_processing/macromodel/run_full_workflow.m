@@ -134,7 +134,9 @@ function run_full_workflow(country, options)
             % 0b pass after 0c closes the loop where it matters. The anchor drift is
             % measured below rather than assumed negligible.
             demo_L_file = artifact_path('data', sprintf('demographic_L_%s.csv', lower(country)));
+            demo_P_file = artifact_path('data', sprintf('demographic_P_%s.csv', lower(country)));
             demo_before = read_file_if_exists(demo_L_file);
+            demo_P_before = read_file_if_exists(demo_P_file);
             anchor_before = reference_terminal_anchor(country);
 
             build_population_projection(country, pop_file, ...
@@ -142,13 +144,18 @@ function run_full_workflow(country, options)
             fprintf('✓ Population projection built\n\n');
 
             demo_after = read_file_if_exists(demo_L_file);
-            demographics_changed = ~strcmp(demo_before, demo_after);
+            demo_P_after = read_file_if_exists(demo_P_file);
+            changed_L = ~strcmp(demo_before, demo_after);
+            changed_P = ~strcmp(demo_P_before, demo_P_after);
+            demographics_changed = changed_L || changed_P;
+            changed_files = strjoin([repmat({demo_L_file}, 1, changed_L), ...
+                                     repmat({demo_P_file}, 1, changed_P)], ' and ');
 
             if demographics_changed && ~options.skip_detrending
                 fprintf('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
                 fprintf('  STEP 0b (2nd pass): Re-solving Ramsey on refreshed demographics\n');
                 fprintf('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-                fprintf('  %s changed in step 0c; the first pass used the previous\n', demo_L_file);
+                fprintf('  %s changed in step 0c; the first pass used the previous\n', changed_files);
                 fprintf('  demographics. Re-solving so the trend and the detrended\n');
                 fprintf('  estimation data reflect the current projection.\n\n');
 
@@ -171,7 +178,7 @@ function run_full_workflow(country, options)
                 warning('run_full_workflow:staleDemographics', ...
                         ['%s changed but detrending was skipped: the Ramsey trend and ' ...
                          'data_for_dynare_%s.csv still embed the previous demographics.'], ...
-                        demo_L_file, country);
+                        changed_files, country);
             else
                 fprintf('  Demographics unchanged; Ramsey re-solve not required.\n\n');
             end
@@ -297,11 +304,13 @@ function run_full_workflow(country, options)
 
     % Documentation summaries were written by the stages above into
     % output/documentation_data/. Rendering them into the Overleaf tables is a
-    % separate step run from WELLSIM_SVEC_Overleaf, which reads that folder.
+    % separate step, documentation_tables/refresh_documentation_tables.m, which
+    % reads that folder and writes into WELLSIM_SVEC_Overleaf.
     if options.skip_growth_calibration && options.skip_detrending && options.skip_postestimation
         documentation_status = 'no summary-writing stage ran';
     else
-        documentation_status = 'summaries in output/documentation_data/ (render from WELLSIM_SVEC_Overleaf)';
+        % Short enough for the 62-character summary box.
+        documentation_status = sprintf('render with refresh_documentation_tables(''%s'')', country);
     end
 
     % -------------------------------------------------------------------------

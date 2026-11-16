@@ -1,6 +1,6 @@
 {
-  "K_terminal": 8.9328486378723346e+06,
-  "A_terminal": 6.6638370977376724e-02,
+  "K_terminal": 9.0151811720734481e+06,
+  "A_terminal": 6.0263231392678356e-02,
   "handoff_time": "2023q1",
   "projection_quarters": 320,
   "comment": "Capital stock and TFP level at the SimPaths handoff quarter. Use as initial values for SimPaths forward projection."

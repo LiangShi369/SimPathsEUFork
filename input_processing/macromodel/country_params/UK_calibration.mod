@@ -147,11 +147,4 @@ chi_u    = 0.0422;  // unemployment SHARE of WAP, U/WAP = chi_L * 0.054446
                     // Implied U/L = chi_u/chi_L = 5.45%, vs sample mean 5.44%
 
 chi_n    = chi_L - chi_u;   // = 0.7328 -> TOTAL employment / WAP
-                            // Note: the observable feeding n is employees excl.
-                            // self-employed. Using the total employment share here
-                            // assumes self-employment moves proportionally with
-                            // employees, which keeps the identity's coefficient
-                            // difference at exactly 1. In this sample employees
-                            // are about 86.5% of LFS employment, so the
-                            // self-employed and other non-employees are about
-                            // 13.5%, between Sweden (~10%) and Poland (20%).
+                            // The observable feeding n is total employment, the same concept as this share.

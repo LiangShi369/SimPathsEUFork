@@ -170,6 +170,7 @@ public class RamseyRecursiveFeedbackTest {
         m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutral2025 * 1.02);
         double w2026After = meanWageAtQuarter(m, 4);
         double revisionPct = (w2026After / w2026Before - 1.0) * 100.0;
+        // Measured 2026-11-08 on the population-weighted planner: -0.558%.
         // Capital dilution: +2% permanent labor -> wage dips by roughly alpha*2% (~0.5-0.7%),
         // partially offset within the year by investment. Generous band, strict sign.
         assertTrue(revisionPct < -0.10, "expected a wage dip, got " + revisionPct + "%");
@@ -188,7 +189,11 @@ public class RamseyRecursiveFeedbackTest {
         double revisionPct = (w2026After / w2026Before - 1.0) * 100.0;
         // With a transitory belief the future labor path is unchanged; only the (small)
         // extra investment out of one year's windfall moves next year's wage.
-        assertTrue(Math.abs(revisionPct) < 0.10,
+        // The revision is +0.126%, measured 2026-11-08 on the population-weighted planner: a
+        // one-year worker surprise with the population on its projection changes output per
+        // head for that year, which the planner partly saves. The persistent surprise of
+        // testPersistentPositiveSurpriseLowersNextYearWage revises the wage by -0.558%.
+        assertTrue(Math.abs(revisionPct) < 0.25,
                 "transitory belief should give near-zero wage revision, got " + revisionPct + "%");
     }
 
@@ -387,6 +392,7 @@ public class RamseyRecursiveFeedbackTest {
         m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN, 40.0 * 1.02);
 
         double revisionPct = (meanWageAtQuarter(m, 4) / w2026Before - 1.0) * 100.0;
+        // Measured 2026-11-08 on the population-weighted planner: -0.558%.
         assertTrue(revisionPct < -0.10, "expected a wage dip, got " + revisionPct + "%");
         assertTrue(revisionPct > -1.20, "implausibly large dip: " + revisionPct + "%");
     }
@@ -458,5 +464,127 @@ public class RamseyRecursiveFeedbackTest {
         }
         assertTrue(nextYearWage[2] < nextYearWage[1] && nextYearWage[1] < nextYearWage[0],
                 "more permanent hours, lower next-year trend wage: " + java.util.Arrays.toString(nextYearWage));
+    }
+
+    // ========== Population feedback ==========
+
+    /** Mean of the 4 quarters of calendar year `year` in the retained population path. */
+    private double assumedMeanP(MacroModelManager m, int year) throws Exception {
+        double[] projP = getField(m, "ramseyProjP", double[].class);
+        int q0 = 4 * (year - START_YEAR);
+        return (projP[q0] + projP[q0 + 1] + projP[q0 + 2] + projP[q0 + 3]) / 4.0;
+    }
+
+    @Test
+    public void testPopulationReferenceLatchesWithLambdaP() throws Exception {
+        MacroModelManager m = newFeedbackManager(1.0);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0, 30000.0);
+        assertEquals(assumedMeanP(m, START_YEAR + 1) / 30000.0, (double) getField(m, "ramseyFeedbackLambdaP", Double.class), 1e-12);
+        assertEquals(START_YEAR, (int) getField(m, "ramseyQuarterZeroYear", Integer.class));   // latch year: no re-solve
+    }
+
+    @Test
+    public void testUniformPopulationSurpriseIsNeutral() throws Exception {
+        // The level of P is a pure scale: at rho = 1 a population gap scales the whole remaining
+        // P path, so it leaves the wage unchanged whatever its size (only a change in the time
+        // shape of the P path moves the wage).
+        MacroModelManager m = newFeedbackManager(1.0);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0, 30000.0);
+        double neutralN = 1000.0 * assumedMeanN(m, START_YEAR + 2) / assumedMeanN(m, START_YEAR + 1);
+        double neutralP = 30000.0 * assumedMeanP(m, START_YEAR + 2) / assumedMeanP(m, START_YEAR + 1);
+        double before = meanWageAtQuarter(m, 12);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN, 40.0, neutralP * 1.02);
+        double after = meanWageAtQuarter(m, 4);
+        // Measured 2026-11-08: residual 5.2e-14.
+        assertTrue(Math.abs(after / before - 1.0) < 1e-6, "uniform population surprise moved the wage by " + (after / before - 1.0));
+    }
+
+    @Test
+    public void testWorkerSurpriseWithPopulationOnProjectionDilutesCapital() throws Exception {
+        MacroModelManager m = newFeedbackManager(1.0);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0, 30000.0);
+        double neutralN = 1000.0 * assumedMeanN(m, START_YEAR + 2) / assumedMeanN(m, START_YEAR + 1);
+        double neutralP = 30000.0 * assumedMeanP(m, START_YEAR + 2) / assumedMeanP(m, START_YEAR + 1);
+        double before = meanWageAtQuarter(m, 12);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN * 1.02, 40.0, neutralP);
+        double revisionPct = (meanWageAtQuarter(m, 4) / before - 1.0) * 100.0;
+        // Measured 2026-11-08: -0.558%.
+        assertTrue(revisionPct < -0.10 && revisionPct > -1.20, "expected the dilution band, got " + revisionPct + "%");
+    }
+
+    @Test
+    public void testWorkerAndPopulationSurpriseTogetherStillDiluteCapital() throws Exception {
+        // +2% workers and +2% consumers: N/P unchanged, capital per worker still diluted.
+        MacroModelManager m = newFeedbackManager(1.0);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0, 30000.0);
+        double neutralN = 1000.0 * assumedMeanN(m, START_YEAR + 2) / assumedMeanN(m, START_YEAR + 1);
+        double neutralP = 30000.0 * assumedMeanP(m, START_YEAR + 2) / assumedMeanP(m, START_YEAR + 1);
+        double before = meanWageAtQuarter(m, 12);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN * 1.02, 40.0, neutralP * 1.02);
+        double revisionPct = (meanWageAtQuarter(m, 4) / before - 1.0) * 100.0;
+        // Measured 2026-11-08: -0.558%, the same as with the population on its projection.
+        assertTrue(revisionPct < -0.10 && revisionPct > -1.20, "expected the dilution band, got " + revisionPct + "%");
+    }
+
+    @Test
+    public void testInvalidRealizedPopulationLeavesPopulationChannelInert() throws Exception {
+        MacroModelManager m = newFeedbackManager(1.0);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0, 0.0);
+        assertTrue(Double.isNaN((Double) getField(m, "ramseyFeedbackLambdaP", Double.class)));
+        assertFalse(Double.isNaN((Double) getField(m, "ramseyFeedbackLambda", Double.class)), "workers still latch");
+    }
+
+    @Test
+    public void testInvalidPopulationAfterTheLatchLeavesThatYearOnTheProjection() throws Exception {
+        MacroModelManager m = newFeedbackManager(1.0);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0, 30000.0);
+        double lambdaP = getField(m, "ramseyFeedbackLambdaP", Double.class);
+        double neutralN = 1000.0 * assumedMeanN(m, START_YEAR + 2) / assumedMeanN(m, START_YEAR + 1);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN * 1.02, 40.0, 0.0);
+        assertEquals(START_YEAR + 2, (int) getField(m, "ramseyQuarterZeroYear", Integer.class), "the re-solve still runs");
+        assertEquals(lambdaP, (double) getField(m, "ramseyFeedbackLambdaP", Double.class), 0.0, "lambda_P is not re-latched");
+        RamseyTrendModel t = getField(m, "ramseyTrend", RamseyTrendModel.class);
+        double[] projP = getField(m, "ramseyProjP", double[].class);
+        int calQ = 4 * (START_YEAR + 2 - START_YEAR);
+        for (int i = 0; i < t.getSimQuarters(); i++) {
+            assertEquals(1.0, t.pathPAt(i) / projP[calQ + i], 1e-12, "quarter " + i);
+        }
+    }
+
+    @Test
+    public void testPublicWrapperLatchesPopulationFromTheSameAggregates() throws Exception {
+        MacroModelManager m = newFeedbackManager(1.0);
+        setField(m, "laborSupplyAggregator", new LaborSupplyAggregator());
+        Set<Person> persons = buildSyntheticPersons();
+        m.applyRamseyRecursiveFeedback(START_YEAR + 1, persons);
+        var agg = getField(m, "laborSupplyAggregator", LaborSupplyAggregator.class).computeRawAggregates(persons);
+        assertEquals(assumedMeanP(m, START_YEAR + 1) / agg.totalPopulation(), (double) getField(m, "ramseyFeedbackLambdaP", Double.class), 1e-9);
+    }
+
+    @Test
+    public void testPopulationSurpriseRevisesThePlannerPopulationPath() throws Exception {
+        MacroModelManager m = newFeedbackManager(1.0);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0, 30000.0);
+        double neutralN = 1000.0 * assumedMeanN(m, START_YEAR + 2) / assumedMeanN(m, START_YEAR + 1);
+        double neutralP = 30000.0 * assumedMeanP(m, START_YEAR + 2) / assumedMeanP(m, START_YEAR + 1);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN, 40.0, neutralP * 1.02);
+        RamseyTrendModel t = getField(m, "ramseyTrend", RamseyTrendModel.class);
+        double[] projP = getField(m, "ramseyProjP", double[].class);
+        int calQ = 4 * (getField(m, "ramseyQuarterZeroYear", Integer.class) - START_YEAR);
+        for (int i = 0; i < t.getSimQuarters(); i++) {
+            assertEquals(1.02, t.pathPAt(i) / projP[calQ + i], 1e-12, "quarter " + i);
+        }
+    }
+
+    @Test
+    public void testFrozenDependencyRatioSurvivesTheReSolve() throws Exception {
+        MacroModelManager m = newFeedbackManager(1.0);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0, 30000.0);
+        double neutralN = 1000.0 * assumedMeanN(m, START_YEAR + 2) / assumedMeanN(m, START_YEAR + 1);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN * 1.03, 40.0, 30000.0 * 0.99);
+        RamseyTrendModel t = getField(m, "ramseyTrend", RamseyTrendModel.class);
+        int q = t.getSimQuarters();
+        double ratio = t.pathPAt(q - 1) / t.pathNAt(q - 1);
+        for (int i = q; i < t.extendedLength(); i++) assertEquals(ratio, t.pathPAt(i) / t.pathNAt(i), 1e-12 * ratio);
     }
 }

@@ -1,6 +1,6 @@
 // =========================================================================
 // FROZEN MODEL - AUTO-GENERATED
-// Generated: 2026-10-23 15:20:41
+// Generated: 2026-11-08 18:15:28
 // Source: Macromodel_Spain (estimation results)
 // DO NOT EDIT MANUALLY - regenerate with generate_frozen_model.m
 // =========================================================================
@@ -220,7 +220,7 @@ lambda_w = 0.70;
 // was absorbed almost entirely through job destruction rather than hours cuts.
 // So the hours channel is weaker and less persistent than in Germany.
 rho_h    = 0.80;    // hours persistence (as Poland, below Germany's 0.85)
-omega_h  = 0.378429;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point; ESTIMATED)
+omega_h  = 0.393749;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point; ESTIMATED)
 
 // ----- DIRECT LABOR FORCE -> WAGE EFFECT (CALIBRATED) -----
 psi_wL   = -0.05;   // direct L->w elasticity (negative: more L -> lower w)
@@ -244,7 +244,7 @@ delta_k  = 0.025;   // quarterly depreciation ~9.6% annual
                     // delta_k governs the cyclical capital law of motion only.
 rho_inv  = 0.85;    // investment persistence (same starting point)
 phi_inv_y = 0.3;    // investment sensitivity to output gap (structural floor)
-phi_inv_r = 0.086601;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
+phi_inv_r = 0.107633;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
 
 // =========================================================================
 // STEADY STATE LABOR MARKET (Spain, 2000q1-2025q1 sample)
@@ -276,11 +276,7 @@ chi_u    = 0.1137;  // unemployment SHARE of WAP, U/WAP = chi_L * 0.15369
                     // Implied U/L = chi_u/chi_L = 15.36%, vs sample mean 15.37%
 
 chi_n    = chi_L - chi_u;   // = 0.6263 -> TOTAL employment / WAP
-                            // Note: the observable feeding n is employees excl.
-                            // self-employed. Using the total employment share here
-                            // assumes self-employment moves proportionally with
-                            // employees, which keeps the identity's coefficient
-                            // difference at exactly 1.
+                            // The observable feeding n is total employment, the same concept as this share.
 
 
 // =========================================================================
@@ -430,16 +426,16 @@ end;
 //
 // These are STARTING values; Bayesian estimation will update them.
 shocks;
-    var eps_a;      stderr 0.6936;  // ESTIMATED    // technology
-    var eps_d;      stderr 0.4304;  // ESTIMATED    // demand: large boom-bust swings
-    var eps_r;      stderr 0.5347;  // ESTIMATED    // monetary: ECB, so as Germany (not Poland's 0.80)
-    var eps_L;      stderr 0.5424;  // ESTIMATED    // labor force: huge migration swings both ways
+    var eps_a;      stderr 0.6542;  // ESTIMATED    // technology
+    var eps_d;      stderr 0.4412;  // ESTIMATED    // demand: large boom-bust swings
+    var eps_r;      stderr 0.5352;  // ESTIMATED    // monetary: ECB, so as Germany (not Poland's 0.80)
+    var eps_L;      stderr 0.5217;  // ESTIMATED    // labor force: huge migration swings both ways
                                     // (net inflows to 2008, net outflows 2011-2015)
     var eps_sep;    stderr 0.12;    // separation: dual labour market, high churn
-    var eps_h;      stderr 0.4987;  // ESTIMATED    // hours: WEAKER than Germany - Spain adjusts on
+    var eps_h;      stderr 0.4088;  // ESTIMATED    // hours: WEAKER than Germany - Spain adjusts on
                                     // the extensive margin, so less hours action
-    var eps_p;      stderr 1.4367;  // ESTIMATED    // cost-push: euro member, no FX pass-through
-    var eps_inv;    stderr 2.4252;  // ESTIMATED    // investment: the most volatile series in the
+    var eps_p;      stderr 1.4592;  // ESTIMATED    // cost-push: euro member, no FX pass-through
+    var eps_inv;    stderr 2.3908;  // ESTIMATED    // investment: the most volatile series in the
                                     // sample (construction collapse)
 end;
 
@@ -532,9 +528,11 @@ end;
 // Germany's than Poland's. The exceptions are investment and employment:
 //   - investment because the construction series carries genuine definitional
 //     churn across the boom/bust
-//   - employment because the temporary-contract segment makes the employees
-//     vs. total-employment gap move over the cycle, which the observable does
-//     not resolve (see the chi_n caveat in Spain_calibration.mod)
+//   - employment because Spain's temporary-contract segment makes employment
+//     adjust faster and further over the cycle than the model's matching
+//     block, with one separation rate for all jobs, can produce; the larger
+//     error lets the n observable carry that excess volatility instead of
+//     loading it onto the structural shocks
 
 shocks;
     var y;      stderr 0.3;      // GDP
@@ -544,7 +542,7 @@ shocks;
     var R;      stderr 0.2;      // Interest rate: ECB (area-wide, as Germany)
     var n;      stderr 0.35;     // Employment: dual labour market composition
     var L;      stderr 0.20;     // Labor force: migration swings
-    var h;      stderr 0.3;      // Hours per employee
+    var h;      stderr 0.3;      // Hours per person employed
 end;
 
 
@@ -557,9 +555,9 @@ varobs y inv c pi R n L h;
 // c      = Consumption gap (detrended log private consumption, % deviation)
 // pi     = Inflation rate (QoQ annualized, %)
 // R      = Nominal interest rate (3m interbank rate, %)
-// n      = Employment gap (detrended log employment, % deviation)
+// n      = Employment gap (detrended log employment, all persons in employment, % deviation)
 // L      = Labor force gap (detrended log labor force, % deviation)
-// h      = Hours per employee gap (detrended, % deviation)
+// h      = Hours per person employed gap (detrended, % deviation)
 //
 // 8 observables, 8 shocks → just-identified
 

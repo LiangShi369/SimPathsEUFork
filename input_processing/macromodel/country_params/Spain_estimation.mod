@@ -122,9 +122,11 @@ end;
 // Germany's than Poland's. The exceptions are investment and employment:
 //   - investment because the construction series carries genuine definitional
 //     churn across the boom/bust
-//   - employment because the temporary-contract segment makes the employees
-//     vs. total-employment gap move over the cycle, which the observable does
-//     not resolve (see the chi_n caveat in Spain_calibration.mod)
+//   - employment because Spain's temporary-contract segment makes employment
+//     adjust faster and further over the cycle than the model's matching
+//     block, with one separation rate for all jobs, can produce; the larger
+//     error lets the n observable carry that excess volatility instead of
+//     loading it onto the structural shocks
 
 shocks;
     var y;      stderr 0.3;      // GDP
@@ -134,5 +136,5 @@ shocks;
     var R;      stderr 0.2;      // Interest rate: ECB (area-wide, as Germany)
     var n;      stderr 0.35;     // Employment: dual labour market composition
     var L;      stderr 0.20;     // Labor force: migration swings
-    var h;      stderr 0.3;      // Hours per employee
+    var h;      stderr 0.3;      // Hours per person employed
 end;

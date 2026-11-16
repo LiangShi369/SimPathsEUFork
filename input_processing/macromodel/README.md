@@ -5,9 +5,10 @@ a Ramsey growth model for the long-run path of capital, output, consumption and
 the real wage, and an estimated New-Keynesian DSGE model for cyclical deviations
 around it. SimPaths multiplies wages by the trend wage's level times the cycle's
 factor, `(1 + w_trend/100) exp(w_cycle/100)`, and, once per
-simulated year, feeds its realized employment and hours back into a re-solve of
-the Ramsey path. Nothing here affects a SimPaths run unless `mm_macroModel` is
-switched on in the YAML config (default `off`). Poland and the UK ship bundles.
+simulated year, feeds its realized employment, hours and population back into a
+re-solve of the Ramsey path. The planner's workers are all persons in employment
+and its consumers the resident population. Nothing here affects a SimPaths run
+unless `mm_macroModel` is switched on in the YAML config (default `off`). Poland and the UK ship bundles.
 SimPathsEU itself runs Poland and Spain, not the UK, and Spain has no bundle yet
 (see "Country status").
 
@@ -19,8 +20,8 @@ re-estimation, a model change, or for a new country.
 
 | Stage | Tool | Reads | Writes | Who runs it |
 |---|---|---|---|---|
-| 1 Data | Stata 19 + `dbnomics`; X-13ARIMA-SEATS only for HICP seasonal adjustment | Eurostat/ECB/OECD via DBnomics (ONS/OECD for the UK); `stata/hicp_q_sa.dta` (`stata/hicp_q_sa_uk.dta` for the UK) | `data/data_for_dynare_levels_{Country}.csv`, `data/PROVENANCE_{Country}.txt` | Whoever refreshes the data vintage. The CSVs are tracked, so stages 2 and 3 run without Stata. |
-| 2 Trend | MATLAB + Dynare | `data/*.csv`, `country_params/`, `../../input/{CC}/align_popProjections.xlsx` | `output/` (ignored), Ramsey files in the bundle, `data/data_for_dynare_{Country}.csv` (the Dynare datafile) | Anyone rebuilding a bundle |
+| 1 Data | Stata 19 + `dbnomics`; X-13ARIMA-SEATS only for HICP seasonal adjustment | Eurostat/ECB/OECD/Destatis via DBnomics (ONS/OECD for the UK); `stata/hicp_q_sa.dta` (`stata/hicp_q_sa_uk.dta` for the UK) | `data/data_for_dynare_levels_{Country}.csv` (national accounts, total employment and hours per person employed, the labour market, the resident population with census breaks spliced), `data/PROVENANCE_{Country}.txt` | Whoever refreshes the data vintage. The CSVs are tracked, so stages 2 and 3 run without Stata. |
+| 2 Trend | MATLAB + Dynare | `data/*.csv`, `country_params/`, `../../input/{CC}/align_popProjections.xlsx` (the forward growth of the planner's `N` and `P`) | `output/` (ignored), Ramsey files in the bundle, `data/demographic_L_{country}.csv` and `data/demographic_P_{country}.csv`, `data/data_for_dynare_{Country}.csv` (the Dynare datafile) | Anyone rebuilding a bundle |
 | 3 Cycle | MATLAB + Dynare | the datafile, `Macromodel_{Country}.mod` | `Macromodel_{Country}_frozen.mod` (tracked), policy matrices in the bundle | Anyone re-estimating |
 
 The bundle lands in `../../input/{CC}/MacroModel/` directly. There is no copy step.
@@ -57,7 +58,7 @@ work, nothing older has been tried.
 - **Java 19 and Maven**, for the bundle tests (`BundleProvenanceTest`,
   `RamseyTrendModelTest`, `DSGEBundleContractTest`), already required by SimPaths.
 
-**Octave is not supported.** 25 of the 56 MATLAB files use `arguments` blocks and
+**Octave is not supported.** 35 of the 64 MATLAB files use `arguments` blocks and
 12 use `table`/`readtable`; Octave has neither. Dynare itself runs under Octave,
 the orchestration here does not, and no port is planned.
 
@@ -209,14 +210,38 @@ StataMP-64.exe /e do make_datasets.do UK
   committed, the layout test fails if one is tracked, and SimPaths refuses to start
   the macro layer on it. The next export that verifies removes the file.
 
+## Rendering the Overleaf tables
+
+The generated tables, inline values and figures of the LaTeX documentation
+(`Tables/generated/` and `Figures/generated/` in `WELLSIM_SVEC_Overleaf`) are rendered by
+`documentation_tables/refresh_documentation_tables.m` from the summaries the workflow
+writes into `output/documentation_data/`. From this folder, after `setup_path`:
+
+```matlab
+>> refresh_documentation_tables('Poland')
+>> refresh_documentation_tables('Germany', 'overleaf_root', 'C:\...\WELLSIM_SVEC_Overleaf')
+```
+
+The shared tables (the Ramsey structural parameters and base-year values, the DSGE
+parameter classification, the detrending benchmark and the inline values) take every
+summary in `output/documentation_data/`, so a country's summary there puts it into
+them. The country argument adds that country's DSGE posterior, moments and
+variance-decomposition tables, its variance-decomposition figure and its Ramsey
+diagnostic figure. `overleaf_root` defaults to the `WELLSIM_SVEC_Overleaf` folder beside
+the repository root. The benchmark summaries `comparisons/detrending_benchmark_{Country}.json`
+come from `run_detrending_benchmark('<Country>')` (two estimations), and the inline values
+need Germany's and Poland's. `documentation_tables/curated/` holds the two hand-curated
+summaries the text cites, a literature range for the wage elasticity and the NKPC
+indexation comparison.
+
 ## Country status
 
 | Country | Code | Estimated | Bundle shipped | Why not |
 |---|---|---|---|---|
 | Poland | PL | yes | yes | |
 | Germany | DE | yes | no | not exported into this repository; export a bundle with the current exporter before any DE run (Java refuses a bundle that does not declare `deviation_scale`) |
-| Spain | ES | yes | no | SimPathsEU runs Spain with the macro layer off, but no bundle is exported. The tracked data and frozen model extrapolate employment mechanically instead of following `input/ES/align_popProjections.xlsx`; the next `run_full_workflow('Spain')` reads the workbook and changes them |
-| Sweden | SE | yes | no | no `input/SE/align_popProjections.xlsx`, so employment is extrapolated mechanically and the bundle is refused; SimPathsEU has no Sweden inputs |
+| Spain | ES | yes | no | SimPathsEU runs Spain with the macro layer off, and no bundle is exported. The tracked data and frozen model follow `input/ES/align_popProjections.xlsx` for both employment and population |
+| Sweden | SE | yes | no | no `input/SE/align_popProjections.xlsx`, so employment is extrapolated mechanically, the population follows it at the last in-sample ratio and the bundle is refused; SimPathsEU has no Sweden inputs |
 | UK | UK | yes | yes | shipped, but SimPathsEU cannot run the UK yet (`Country` has no UK), so no simulation reads the bundle; `CommittedBundlesTest` and `BundleProvenanceTest` check it like Poland's. Data from the ONS and the OECD, as Eurostat has none after Brexit (`docs/MULTI_COUNTRY_WORKFLOW.md`) |
 
 The price level of every country is seasonally adjusted with X-13ARIMA-SEATS; the
@@ -230,7 +255,9 @@ X-13 on UK data; whether it is needed is a question for the next UK re-estimatio
 Four files: `country_params/{Country}_calibration.mod`,
 `country_params/{Country}_estimation.mod`, the Ramsey parameter template
 `country_params/{Country}_growth_params.json`, and the two-line wrapper
-`Macromodel_{Country}.mod`; plus the country's row in `stata/make_datasets.do` and
+`Macromodel_{Country}.mod`; plus the country's block in `stata/make_datasets.do`,
+including its resident population series and the periods where a census breaks it
+(`pop_break_periods`, from the source's own break flags), and its row in
 `internal/get_country_config.m`. `docs/MULTI_COUNTRY_WORKFLOW.md` walks through it,
 including the data sources that bite.
 
@@ -243,6 +270,7 @@ including the data sources that bite.
 - `docs/Technical_Documentation_Macromodel.md`: the model (architecture, equations,
   estimation setup, where each number comes from).
 - `docs/SimPaths_Coupling.md`: the Java side: the `mm_*` switches, which bundle files
-  SimPaths reads, and the yearly Ramsey re-solve against realized labour supply.
+  SimPaths reads, and the yearly Ramsey re-solve against realized labour supply and
+  population.
 - `docs/Estimation_Guide.md`: priors, shocks, diagnostics.
 - `docs/MULTI_COUNTRY_WORKFLOW.md`: adding a country.

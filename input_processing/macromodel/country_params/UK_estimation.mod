@@ -149,5 +149,5 @@ shocks;
     var R;      stderr 0.2;      // Interest rate: Bank Rate-linked
     var n;      stderr 0.3;      // Employment
     var L;      stderr 0.25;     // Labor force: LFS response collapse and reweighting
-    var h;      stderr 0.3;      // Hours per employee
+    var h;      stderr 0.3;      // Hours per person employed
 end;

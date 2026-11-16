@@ -62,7 +62,7 @@ function report = validate_documentation_summary(summary, kind, options)
             'r_star_annual', 'ky_bgp_quarterly', 'solver_horizon_quarters'});
 
         require_numeric_fields(payload.base_year_values, 'base_year_values', { ...
-            'K0', 'Y0_annual', 'N0', 'L0', 'h0', 'A0', 'CY', 'IY', 'GY', 'NXY'});
+            'K0', 'Y0_annual', 'N0', 'L0', 'h0', 'A0', 'P0', 'dependency_ratio0', 'CY', 'IY', 'GY', 'NXY'});
 
         share_names = {'CY', 'IY', 'GY', 'NXY'};
         if all_fields_exist(payload.base_year_values, share_names)

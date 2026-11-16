@@ -1,6 +1,6 @@
 // =========================================================================
 // FROZEN MODEL - AUTO-GENERATED
-// Generated: 2026-10-23 13:45:02
+// Generated: 2026-11-08 18:05:33
 // Source: Macromodel_UK (estimation results)
 // DO NOT EDIT MANUALLY - regenerate with generate_frozen_model.m
 // =========================================================================
@@ -235,7 +235,7 @@ lambda_w = 0.60;
 // scheme. The 2020-21 Coronavirus Job Retention Scheme (furlough) was a one-off,
 // and its quarters are censored in the estimation data.
 rho_h    = 0.80;    // hours persistence (as Poland and Spain, below Germany/Sweden's 0.85)
-omega_h  = 0.331087;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point; ESTIMATED)
+omega_h  = 0.326091;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point; ESTIMATED)
 
 // ----- DIRECT LABOR FORCE -> WAGE EFFECT (CALIBRATED) -----
 psi_wL   = -0.05;   // direct L->w elasticity (negative: more L -> lower w)
@@ -260,7 +260,7 @@ delta_k  = 0.025;   // quarterly depreciation ~9.6% annual
                     // delta_k governs the cyclical capital law of motion only.
 rho_inv  = 0.85;    // investment persistence (same starting point)
 phi_inv_y = 0.3;    // investment sensitivity to output gap (structural floor)
-phi_inv_r = 0.044957;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
+phi_inv_r = 0.054081;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
 
 // =========================================================================
 // STEADY STATE LABOR MARKET (UK, 2000q1-2025q1 sample)
@@ -292,14 +292,7 @@ chi_u    = 0.0422;  // unemployment SHARE of WAP, U/WAP = chi_L * 0.054446
                     // Implied U/L = chi_u/chi_L = 5.45%, vs sample mean 5.44%
 
 chi_n    = chi_L - chi_u;   // = 0.7328 -> TOTAL employment / WAP
-                            // Note: the observable feeding n is employees excl.
-                            // self-employed. Using the total employment share here
-                            // assumes self-employment moves proportionally with
-                            // employees, which keeps the identity's coefficient
-                            // difference at exactly 1. In this sample employees
-                            // are about 86.5% of LFS employment, so the
-                            // self-employed and other non-employees are about
-                            // 13.5%, between Sweden (~10%) and Poland (20%).
+                            // The observable feeding n is total employment, the same concept as this share.
 
 
 // =========================================================================
@@ -451,14 +444,14 @@ end;
 //
 // These are STARTING values; Bayesian estimation will update them.
 shocks;
-    var eps_a;      stderr 0.5891;  // ESTIMATED    // technology
-    var eps_d;      stderr 0.4057;  // ESTIMATED    // demand
-    var eps_r;      stderr 0.5086;  // ESTIMATED    // monetary: active, independent Bank of England
-    var eps_L;      stderr 0.2477;  // ESTIMATED    // labor force: migration-driven swings
+    var eps_a;      stderr 0.5701;  // ESTIMATED    // technology
+    var eps_d;      stderr 0.4135;  // ESTIMATED    // demand
+    var eps_r;      stderr 0.5076;  // ESTIMATED    // monetary: active, independent Bank of England
+    var eps_L;      stderr 0.2517;  // ESTIMATED    // labor force: migration-driven swings
     var eps_sep;    stderr 0.10;    // separation: high turnover, flexible market
-    var eps_h;      stderr 0.3925;  // ESTIMATED    // hours shock (no standing short-time work scheme)
-    var eps_p;      stderr 1.4489;  // ESTIMATED    // cost-push: floating GBP pass-through, energy
-    var eps_inv;    stderr 2.5426;  // ESTIMATED    // investment: volatile business investment
+    var eps_h;      stderr 0.3894;  // ESTIMATED    // hours shock (no standing short-time work scheme)
+    var eps_p;      stderr 1.4869;  // ESTIMATED    // cost-push: floating GBP pass-through, energy
+    var eps_inv;    stderr 2.3969;  // ESTIMATED    // investment: volatile business investment
 end;
 
 // =========================================================================
@@ -578,7 +571,7 @@ shocks;
     var R;      stderr 0.2;      // Interest rate: Bank Rate-linked
     var n;      stderr 0.3;      // Employment
     var L;      stderr 0.25;     // Labor force: LFS response collapse and reweighting
-    var h;      stderr 0.3;      // Hours per employee
+    var h;      stderr 0.3;      // Hours per person employed
 end;
 
 
@@ -591,9 +584,9 @@ varobs y inv c pi R n L h;
 // c      = Consumption gap (detrended log private consumption, % deviation)
 // pi     = Inflation rate (QoQ annualized, %)
 // R      = Nominal interest rate (3m interbank rate, %)
-// n      = Employment gap (detrended log employment, % deviation)
+// n      = Employment gap (detrended log employment, all persons in employment, % deviation)
 // L      = Labor force gap (detrended log labor force, % deviation)
-// h      = Hours per employee gap (detrended, % deviation)
+// h      = Hours per person employed gap (detrended, % deviation)
 //
 // 8 observables, 8 shocks → just-identified
 

@@ -54,7 +54,8 @@ deviation. `docs/MULTI_COUNTRY_WORKFLOW.md` explains how the calibrated values a
 ## 3. Data
 
 The eight observables are declared in `Macromodel_template.mod`: `varobs y inv c pi R n L h` (output,
-investment, consumption, inflation, the short-term rate, employees, the labour force, hours per employee).
+investment, consumption, inflation, the short-term rate, persons in employment, the labour force, hours per
+person employed).
 
 - The datafile is `data/data_for_dynare_{Country}.csv`, written by `ramsey_trend.m`: the real variables are
   **Ramsey-detrended** 100×log deviations, so the DSGE fluctuates around the Ramsey path; `pi` and `R` enter as

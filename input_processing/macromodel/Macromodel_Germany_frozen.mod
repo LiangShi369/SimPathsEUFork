@@ -1,6 +1,6 @@
 // =========================================================================
 // FROZEN MODEL - AUTO-GENERATED
-// Generated: 2026-10-23 15:14:59
+// Generated: 2026-11-08 15:28:22
 // Source: Macromodel_Germany (estimation results)
 // DO NOT EDIT MANUALLY - regenerate with generate_frozen_model.m
 // =========================================================================
@@ -217,7 +217,7 @@ lambda_w = 0.75;    // baseline: 1-year average wage duration
 rho_h    = 0.85;    // hours persistence - CALIBRATED to resolve collinearity
                     // (rho_h and SE_eps_h are collinear when both are estimated)
                     // Kurzarbeit contracts average ~6 months (quarterly ρ ≈ 0.85)
-omega_h  = 0.437293;  // ESTIMATED (posterior mode)    // hours weight in production: total labor = n + omega_h * h
+omega_h  = 0.418875;  // ESTIMATED (posterior mode)    // hours weight in production: total labor = n + omega_h * h
                     // < 1.0 because headcount matters more than marginal hours
                     // Matches production function literature (Chetty et al. 2012)
 // h is a pure AR(1): no output-gap or wage term moves hours. The DSGE has no
@@ -258,7 +258,7 @@ phi_inv_y = 0.3;    // small positive value as a structural floor.
                     // negative demand shock → R↓ → inv↑ (investment rises in recessions).
                     // 0.3 ensures weak demand co-movement without dominating unconditional VD.
                     // cosn(rho_inv, phi_inv_y) = 0.9989 → keep calibrated, do NOT estimate.
-phi_inv_r = 0.211903;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate (cost of capital)
+phi_inv_r = 0.309402;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate (cost of capital)
                     // Grid search: determinacy boundary at ~0.5 for phi_inv_y=2.0
 
 // =========================================================================
@@ -286,6 +286,7 @@ chi_u    = 0.0419;  // unemployment SHARE of WAP, U/WAP = chi_L * 0.0544
                     // NOT the U/L unemployment rate (that is 5.44%)
 
 chi_n    = chi_L - chi_u;   // = 0.7281 -> TOTAL employment / WAP
+                            // The observable feeding n is total employment, the same concept as this share.
 
 
 // =========================================================================
@@ -428,15 +429,15 @@ end;
 // the value set here.
 //
 shocks;
-    var eps_a;      stderr 1.0977;  // ESTIMATED    // technology
-    var eps_d;      stderr 0.3340;  // ESTIMATED    // demand: main driver for y-pi
-    var eps_r;      stderr 0.4557;  // ESTIMATED    // monetary
-    var eps_L;      stderr 0.1423;  // ESTIMATED    // labor force
+    var eps_a;      stderr 1.1132;  // ESTIMATED    // technology
+    var eps_d;      stderr 0.3821;  // ESTIMATED    // demand: main driver for y-pi
+    var eps_r;      stderr 0.4585;  // ESTIMATED    // monetary
+    var eps_L;      stderr 0.1408;  // ESTIMATED    // labor force
     var eps_sep;    stderr 0.08;    // separation (not estimated)
-    var eps_h;      stderr 0.4241;  // ESTIMATED    // hours shock (Kurzarbeit): calibrated to σ(h) ≈ 0.8%
+    var eps_h;      stderr 0.3839;  // ESTIMATED    // hours shock (Kurzarbeit): calibrated to σ(h) ≈ 0.8%
                                     // German data: σ(h) = 0.81%, σ(h)/σ(n) = 1.22
-    var eps_p;      stderr 1.4682;  // ESTIMATED    // cost-push / price markup shock
-    var eps_inv;    stderr 1.8940;  // ESTIMATED    // investment shock [CAPITAL EXTENSION]
+    var eps_p;      stderr 1.4992;  // ESTIMATED    // cost-push / price markup shock
+    var eps_inv;    stderr 1.8594;  // ESTIMATED    // investment shock [CAPITAL EXTENSION]
 end;
 
 // =========================================================================
@@ -581,7 +582,7 @@ shocks;
     var R;      stderr 0.2;      // Interest rate: ~1.5% std dev → 0.2% meas. error
     var n;      stderr 0.3;      // Employment: ~1.5% std dev → 0.3% meas. error
     var L;      stderr 0.15;     // Labor force: ~0.3% std dev → 0.15% meas. error
-    var h;      stderr 0.3;      // Hours per employee: ~1.0% std dev → 0.3% meas. error
+    var h;      stderr 0.3;      // Hours per person employed: ~1.0% std dev → 0.3% meas. error
 end;
 
 
@@ -594,9 +595,9 @@ varobs y inv c pi R n L h;
 // c      = Consumption gap (detrended log private consumption, % deviation)
 // pi     = Inflation rate (QoQ annualized, %)
 // R      = Nominal interest rate (3m interbank rate, %)
-// n      = Employment gap (detrended log employment, % deviation)
+// n      = Employment gap (detrended log employment, all persons in employment, % deviation)
 // L      = Labor force gap (detrended log labor force, % deviation)
-// h      = Hours per employee gap (detrended, % deviation)
+// h      = Hours per person employed gap (detrended, % deviation)
 //
 // 8 observables, 8 shocks → just-identified
 

@@ -141,10 +141,11 @@ public class MacroModelManager {
     /**
      * The planner's belief about how much of a realized labour-supply surprise is permanent,
      * for the employment gap (SimPaths' workers with positive hours against the planner's
-     * employees path) and the hours gap alike: 1 = permanent, 0 = current year only. The
-     * feedback itself is always on with a Ramsey layer, for both margins: the labour input is
-     * N*h, so feeding one margin alone gets the capital-dilution response wrong whenever
-     * SimPaths moves the two in opposite directions.
+     * employment path), the hours gap and the population gap alike: 1 = permanent, 0 = current
+     * year only. The feedback itself is always on with a Ramsey layer, for all three margins:
+     * the labour input is N*h and the planner's consumers are P, so feeding one margin alone
+     * gets the capital-dilution response wrong whenever SimPaths moves them in different
+     * directions.
      */
     private double ramseyFeedbackPersistence = 1.0;
     /**
@@ -155,6 +156,8 @@ public class MacroModelManager {
     private int lastFeedbackYear = Integer.MIN_VALUE;
     /** SimPaths -> Ramsey level factor, latched in the first post-labour-market year. */
     private double ramseyFeedbackLambda = Double.NaN;
+    /** SimPaths -> Ramsey level factor for the population, latched in the same year as {@link #ramseyFeedbackLambda}. */
+    private double ramseyFeedbackLambdaP = Double.NaN;
     /**
      * SimPaths' own hours-per-worker level in the latch year, the reference the realized hours
      * gap is measured against. Deliberately NOT a ratio to the planner's hours path, unlike
@@ -165,6 +168,8 @@ public class MacroModelManager {
     private int ramseyQuarterZeroYear;
     /** Original projection slices passed to the startup solve; index 0 = startYear q1. */
     private double[] ramseyProjN;
+    /** The planner's population path P on the same quarters as {@link #ramseyProjN}. */
+    private double[] ramseyProjP;
     private double[] ramseyProjH;
     private double[] ramseyProjGY;
     private double[] ramseyProjNXY;
@@ -816,7 +821,9 @@ public class MacroModelManager {
         double[] refH = new double[refSize];
         double[] refGY = new double[refSize];
         double[] refNXY = new double[refSize];
+        double[] refP = new double[refSize];
         for (int i = 0; i < refSize; i++) {
+            refP[i] = reference.get(i).P();
             refN[i] = reference.get(i).N();
             refH[i] = reference.get(i).h();
             refGY[i] = reference.get(i).gY();
@@ -888,6 +895,11 @@ public class MacroModelManager {
         int maxOverride = Math.min(popDemographic.length - popStartIdx, totalExtended - startIdx);
         System.arraycopy(popDemographic, popStartIdx, extDemographic, startIdx, maxOverride);
 
+        // The planner's population: the reference history, then the projection's P column.
+        double[] extDemographicP = new double[totalExtended];
+        System.arraycopy(refP, 0, extDemographicP, 0, refSize);
+        System.arraycopy(popProjection.p(), popStartIdx, extDemographicP, startIdx, maxOverride);
+
         // Beyond the finite population projection horizon, taper the trailing
         // demographic growth rate smoothly to zero. The tail is a terminal
         // closure for the perfect-foresight solve, not an additional forecast.
@@ -900,31 +912,44 @@ public class MacroModelManager {
                     extDemographic, startIdx + maxOverride - 1, totalExtended,
                     demographicTaperWindow(overrideQuartersAfterHandoff));
         }
+        // Beyond the projection P follows N (already tapered) at the last projected ratio.
+        if (startIdx + maxOverride < totalExtended) {
+            applyFrozenDependencyRatio(extDemographicP, extDemographic,
+                    startIdx + maxOverride - 1, totalExtended);
+        }
 
         if (logMacroState) {
             log.info(String.format(
                     "Population projection loaded: %d quarters from %s "
-                    + "(N[0]=%.1f → N[%d]=%.1f, override applied from index %d)",
+                    + "(N[0]=%.1f → N[%d]=%.1f, P[0]=%.1f → P[%d]=%.1f, P/N %.4f → %.4f, "
+                    + "override applied from index %d)",
                     popDemographic.length, popProjPath.getFileName(),
                     popDemographic[0],
                     popDemographic.length - 1, popDemographic[popDemographic.length - 1],
+                    popProjection.p()[0],
+                    popDemographic.length - 1, popProjection.p()[popDemographic.length - 1],
+                    popProjection.p()[0] / popDemographic[0],
+                    popProjection.p()[popDemographic.length - 1]
+                            / popDemographic[popDemographic.length - 1],
                     startIdx));
         }
 
         // Forward projection starts at terminal date (last reference observation)
         int projLen = totalExtended - startIdx;
         double[] projDemographic = Arrays.copyOfRange(extDemographic, startIdx, totalExtended);
+        double[] projP = Arrays.copyOfRange(extDemographicP, startIdx, totalExtended);
         double[] projH = loadProjectedHours(refPath, countryTag, refTerminalTime, projLen);
         double[] projGY = Arrays.copyOfRange(extGY, startIdx, totalExtended);
         double[] projNXY = Arrays.copyOfRange(extNXY, startIdx, totalExtended);
         
         double K_terminal = ramseyTrend.getK();
         double A_terminal = ramseyTrend.getA();
-        ramseyTrend.solveForPath(K_terminal, A_terminal, projDemographic, projH, projGY, projNXY, projLen);
+        ramseyTrend.solveForPath(K_terminal, A_terminal, projDemographic, projH, projP, projGY, projNXY, projLen);
 
         // Retain the original projection slices: a later recursive-feedback re-solve builds
         // each year's inputs from these, never from the (already-consumed) local arrays above.
         this.ramseyProjN = projDemographic.clone();
+        this.ramseyProjP = projP.clone();
         this.ramseyProjH = projH.clone();
         this.ramseyProjGY = projGY.clone();
         this.ramseyProjNXY = projNXY.clone();
@@ -1104,6 +1129,7 @@ public class MacroModelManager {
 
     static final String TREND_KEY_REALIZED_GAP = "n_realized_gap";
     static final String TREND_KEY_REALIZED_HOURS_GAP = "h_realized_gap";
+    static final String TREND_KEY_REALIZED_POP_GAP = "p_realized_gap";
     static final String TREND_KEY_WAGE_REVISION = "w_trend_revision";
 
     /**
@@ -1143,6 +1169,31 @@ public class MacroModelManager {
      * the population projection is the reference for employment.</p>
      */
     void applyRamseyFeedbackWithRealized(int year, double realizedLaborForce, double realizedHours) {
+        applyRamseyFeedbackWithRealized(year, realizedLaborForce, realizedHours, Double.NaN);
+    }
+
+    /**
+     * As the three-argument overload, additionally feeding SimPaths' own population (all ages,
+     * weighted, after alignment) into the planner's population path P. The population gap
+     * latches its own level factor {@link #ramseyFeedbackLambdaP} in the same year as
+     * {@link #ramseyFeedbackLambda}, is measured against the planner's P, and is carried
+     * forward under the same persistence {@link #ramseyFeedbackPersistence}.
+     *
+     * <p>The level of P is a pure scale: scaling the whole P path leaves K, Y, C and the wage
+     * unchanged. A population gap therefore moves the trend wage only through the time shape
+     * of the planner's P path, so at rho = 1, where the gap scales the whole remaining path, it
+     * leaves the wage unchanged whatever its size. Workers move the wage through capital per
+     * worker whatever the population does, so at rho = 1 a joint surprise to workers and
+     * population revises the wage like a workers-only one.</p>
+     *
+     * <p>Pass a non-finite or non-positive {@code realizedPopulation} to leave the population on
+     * the bundle's path. Such a population is logged as a warning: in the latch year
+     * {@link #ramseyFeedbackLambdaP} is then never latched and the population margin stays on
+     * the bundle's path for the whole run; in a later year that year's population is left on
+     * the projection.</p>
+     */
+    void applyRamseyFeedbackWithRealized(int year, double realizedLaborForce, double realizedHours,
+                                         double realizedPopulation) {
         if (ramseyTrend == null || !ramseyTrend.isSolved() || ramseyProjN == null) return;
         if (year <= simulationStartYear) return; // no labour market in the start year
 
@@ -1160,16 +1211,33 @@ public class MacroModelManager {
         }
         double assumedMeanN = (ramseyProjN[calQ] + ramseyProjN[calQ + 1]
                 + ramseyProjN[calQ + 2] + ramseyProjN[calQ + 3]) / 4.0;
+        double assumedMeanP = (ramseyProjP[calQ] + ramseyProjP[calQ + 1]
+                + ramseyProjP[calQ + 2] + ramseyProjP[calQ + 3]) / 4.0;
         boolean hoursUsable = Double.isFinite(realizedHours) && realizedHours > 0.0;
+        boolean popUsable = Double.isFinite(realizedPopulation) && realizedPopulation > 0.0;
 
         if (Double.isNaN(ramseyFeedbackLambda)) {       // first post-labour-market year
             ramseyFeedbackLambda = assumedMeanN / realizedLaborForce;
             if (hoursUsable) ramseyFeedbackHoursBase = realizedHours;
-            amendFeedbackDiagnostics(year, 0.0, hoursUsable ? 0.0 : Double.NaN, Double.NaN);
+            if (popUsable) {
+                ramseyFeedbackLambdaP = assumedMeanP / realizedPopulation;
+            } else {
+                log.warn(String.format(
+                        "Ramsey feedback %d: invalid realized population %.4f in the latch year; lambda_P "
+                        + "is not latched, so the population margin stays on the bundle's path for the "
+                        + "whole run.", year, realizedPopulation));
+            }
+            amendFeedbackDiagnostics(year, 0.0, hoursUsable ? 0.0 : Double.NaN,
+                    popUsable ? 0.0 : Double.NaN, Double.NaN);
             if (logMacroState) {
                 log.info(String.format(
                         "Ramsey feedback %d: latched lambda=%.6f (assumed N=%.1f, realized L=%.1f).",
                         year, ramseyFeedbackLambda, assumedMeanN, realizedLaborForce));
+                if (popUsable) {
+                    log.info(String.format(
+                            "Ramsey feedback %d: latched lambda_P=%.6f (assumed P=%.1f, realized population=%.1f).",
+                            year, ramseyFeedbackLambdaP, assumedMeanP, realizedPopulation));
+                }
                 if (hoursUsable) {
                     log.info(String.format(
                             "Ramsey feedback %d: latched hours reference h=%.4f (SimPaths' own base).",
@@ -1183,10 +1251,17 @@ public class MacroModelManager {
                 && ramseyFeedbackHoursBase > 0.0;
         double delta = ramseyFeedbackLambda * realizedLaborForce / assumedMeanN;
         double deltaH = hoursMeasurable ? realizedHours / ramseyFeedbackHoursBase : 1.0;
+        boolean popMeasurable = popUsable && !Double.isNaN(ramseyFeedbackLambdaP);
+        if (!popUsable && !Double.isNaN(ramseyFeedbackLambdaP)) {
+            log.warn(String.format(
+                    "Ramsey feedback %d: invalid realized population %.4f; the population is left on "
+                    + "its projection this year.", year, realizedPopulation));
+        }
+        double deltaP = popMeasurable ? ramseyFeedbackLambdaP * realizedPopulation / assumedMeanP : 1.0;
         int qYearCur = 4 * (year - ramseyQuarterZeroYear);  // offset of `year` in the CURRENT solved model
         double wOldNext = meanWageAtQuarterOrNaN(qYearCur + 4);
 
-        // Both margins, one persistence.
+        // The three margins (workers, hours, population), one persistence.
         double[] nSlice = buildRevisedLaborSlice(ramseyProjN, calQ, delta, ramseyFeedbackPersistence);
         double[] hSlice = hoursMeasurable
                 ? buildRevisedLaborSlice(ramseyProjH, calQ, deltaH, ramseyFeedbackPersistence)
@@ -1201,7 +1276,10 @@ public class MacroModelManager {
             ramseyTrend.setScenario(ramseyScenarioObj, year);   // deviations are keyed to quarter-0's calendar year
         }
         ramseyTrend.setTfpPhaseOffsetQuarters(calQ);             // TFP convergence continues, does not restart
-        ramseyTrend.solveForPath(k0, a0, nSlice, hSlice, gYSlice, nxSlice, ramseyProjLen - calQ);
+        double[] pSlice = popMeasurable
+                ? buildRevisedLaborSlice(ramseyProjP, calQ, deltaP, ramseyFeedbackPersistence)
+                : Arrays.copyOfRange(ramseyProjP, calQ, ramseyProjLen);
+        ramseyTrend.solveForPath(k0, a0, nSlice, hSlice, pSlice, gYSlice, nxSlice, ramseyProjLen - calQ);
         ramseyQuarterZeroYear = year;
         ramseyTrend.stepYear();                                  // consume the realized year; cursor now at year+1
 
@@ -1209,12 +1287,13 @@ public class MacroModelManager {
         double revisionPct = (!Double.isFinite(wOldNext) || wOldNext == 0.0) ? Double.NaN
                 : (wNewNext / wOldNext - 1.0) * 100.0;
         amendFeedbackDiagnostics(year, (delta - 1.0) * 100.0,
-                hoursMeasurable ? (deltaH - 1.0) * 100.0 : Double.NaN, revisionPct);
+                hoursMeasurable ? (deltaH - 1.0) * 100.0 : Double.NaN,
+                popMeasurable ? (deltaP - 1.0) * 100.0 : Double.NaN, revisionPct);
         if (logMacroState) {
             log.info(String.format(
-                    "Ramsey feedback %d (rho=%.3f): delta=%.4f%%, delta_h=%.4f%%, next-year trend wage revised by %.4f%%.",
+                    "Ramsey feedback %d (rho=%.3f): delta=%.4f%%, delta_h=%.4f%%, delta_p=%.4f%%, next-year trend wage revised by %.4f%%.",
                     year, ramseyFeedbackPersistence,
-                    (delta - 1.0) * 100.0, (deltaH - 1.0) * 100.0, revisionPct));
+                    (delta - 1.0) * 100.0, (deltaH - 1.0) * 100.0, (deltaP - 1.0) * 100.0, revisionPct));
         }
     }
 
@@ -1225,11 +1304,13 @@ public class MacroModelManager {
         return sum / 4.0;
     }
 
-    private void amendFeedbackDiagnostics(int year, double gapPct, double hoursGapPct, double revisionPct) {
+    private void amendFeedbackDiagnostics(int year, double gapPct, double hoursGapPct, double popGapPct,
+                                          double revisionPct) {
         MacroPathRecorder recorder = getActivePathRecorder();
         if (recorder == null) return;
         recorder.amendTrendForYear(year, TREND_KEY_REALIZED_GAP, gapPct);
         if (Double.isFinite(hoursGapPct)) recorder.amendTrendForYear(year, TREND_KEY_REALIZED_HOURS_GAP, hoursGapPct);
+        if (Double.isFinite(popGapPct)) recorder.amendTrendForYear(year, TREND_KEY_REALIZED_POP_GAP, popGapPct);
         if (Double.isFinite(revisionPct)) recorder.amendTrendForYear(year, TREND_KEY_WAGE_REVISION, revisionPct);
     }
 
@@ -1250,8 +1331,8 @@ public class MacroModelManager {
     }
 
     /**
-     * MacroEndYearCapture hook: the realized post-alignment workers and hours -> extended-path
-     * re-solve. Runs whenever the manager is enabled and the planner is solved, and records the
+     * MacroEndYearCapture hook: the realized post-alignment workers, hours and population, from
+     * one {@code computeRawAggregates} call -> extended-path re-solve. Runs whenever the manager is enabled and the planner is solved, and records the
      * year for the sequencing check in {@link #updateEquilibrium}.
      */
     public void applyRamseyRecursiveFeedback(int year, Set<Person> persons) {
@@ -1259,7 +1340,8 @@ public class MacroModelManager {
         if (!(useRamseyTrend && ramseyTrend != null && ramseyTrend.isSolved())) return;
         lastFeedbackYear = year;
         var aggregates = laborSupplyAggregator.computeRawAggregates(persons);
-        applyRamseyFeedbackWithRealized(year, aggregates.laborForce(), aggregates.avgHoursPerWorker());
+        applyRamseyFeedbackWithRealized(year, aggregates.laborForce(), aggregates.avgHoursPerWorker(),
+                aggregates.totalPopulation());
     }
 
     /**
@@ -1294,9 +1376,11 @@ public class MacroModelManager {
                 ? (ts.government() / ramseyBaseline.government() - 1.0) * 100.0 : 0.0);
         currentRamseyTrends.put("nx", ramseyBaseline.netExports() != 0.0
                 ? (ts.netExports() / ramseyBaseline.netExports() - 1.0) * 100.0 : 0.0);
-        // Ramsey model's labor input (employees N) — for comparison with SimPaths population
+        // Ramsey model's labor input (workers N) — for comparison with SimPaths population
         currentRamseyTrends.put("n_ramsey", ramseyBaseline.labor() > 0.0
                 ? (ts.labor() / ramseyBaseline.labor() - 1.0) * 100.0 : 0.0);
+        currentRamseyTrends.put("p_ramsey", ramseyBaseline.population() > 0.0
+                ? (ts.population() / ramseyBaseline.population() - 1.0) * 100.0 : 0.0);
 
         if (logMacroState) {
             System.out.println(String.format(
@@ -1335,13 +1419,16 @@ public class MacroModelManager {
     }
     
     /**
-     * Parsed population projection data: quarter labels and the N path.
+     * Parsed population projection data: quarter labels, the N path and the P path. Both
+     * paths come from one workbook (contract 41).
      *
      * @param times quarter labels ("2023q1", ...), one per row. Carried so the splice
      *              can align on DATE; merged by row position, this file would let a
      *              start-year change corrupt a run silently.
+     * @param n     employment (workers) per quarter
+     * @param p     the planner's population (consumers) per quarter
      */
-    private record PopulationProjectionData(String[] times, double[] n) {}
+    private record PopulationProjectionData(String[] times, double[] n, double[] p) {}
 
     private record HoursProjectionData(String[] times, double[] h) {}
 
@@ -1508,32 +1595,39 @@ public class MacroModelManager {
     /**
      * Load population projection CSV produced by MATLAB's {@code build_population_projection.m}.
      *
-     * <p>Format: {@code time,N}; further columns are ignored.</p>
+     * <p>Format: {@code time,N,P}; further columns are ignored.</p>
      *
      * @param csvPath Path to population_projection_[COUNTRY].csv
-     * @return Parsed time labels and N path
-     * @throws IOException If the file cannot be read or parsed
+     * @return Parsed time labels, N path and P path
+     * @throws IOException If the file cannot be read or parsed, or lacks N, P or time
      */
     private PopulationProjectionData loadPopulationProjection(Path csvPath) throws IOException {
         List<String> lines = Files.readAllLines(csvPath);
         var times = new ArrayList<String>();
         var nValues = new ArrayList<Double>();
+        var pValues = new ArrayList<Double>();
 
         if (lines.isEmpty()) {
-            return new PopulationProjectionData(new String[0], new double[0]);
+            return new PopulationProjectionData(new String[0], new double[0], new double[0]);
         }
 
         String[] header = MacroCsv.splitRow(lines.get(0));
         int timeCol = -1;
         int nCol = -1;
+        int pCol = -1;
         for (int i = 0; i < header.length; i++) {
             String name = header[i].trim();
             if (name.equalsIgnoreCase("time")) timeCol = i;
             if (name.equalsIgnoreCase("N")) nCol = i;
+            if (name.equalsIgnoreCase("P")) pCol = i;
         }
 
         if (nCol < 0) {
             throw new IOException("Population projection CSV missing mandatory N column: " + csvPath);
+        }
+        if (pCol < 0) {
+            throw new IOException("Population projection CSV missing mandatory P column: " + csvPath
+                    + ". The planner's consumers are the resident population; re-export the macro files.");
         }
         // Mandatory: without it the splice can only guess that row 0 is the handoff
         // quarter, which is the failure the date alignment exists to prevent.
@@ -1547,14 +1641,35 @@ public class MacroModelManager {
             String line = lines.get(i).trim();
             if (line.isEmpty()) continue;
             String[] parts = MacroCsv.splitRow(line);
-            if (parts.length <= nCol || parts.length <= timeCol) continue;
+            if (parts.length <= nCol || parts.length <= timeCol || parts.length <= pCol) continue;
 
             times.add(parts[timeCol].trim().toLowerCase());
             nValues.add(Double.parseDouble(parts[nCol].trim()));
+            pValues.add(Double.parseDouble(parts[pCol].trim()));
         }
 
         double[] n = nValues.stream().mapToDouble(Double::doubleValue).toArray();
-        return new PopulationProjectionData(times.toArray(new String[0]), n);
+        double[] p = pValues.stream().mapToDouble(Double::doubleValue).toArray();
+        return new PopulationProjectionData(times.toArray(new String[0]), n, p);
+    }
+
+    /**
+     * Hold the planner's dependency ratio P/N at its last projected value: for every index
+     * after {@code lastProjectionIdx}, {@code pPath[t] = nPath[t] * pPath[last] / nPath[last]}.
+     * P has no tail rule of its own; it follows employment, which carries the tapered tail.
+     * Nothing changes when the projection covers the whole horizon.
+     *
+     * @param pPath             population path, overwritten after {@code lastProjectionIdx}
+     * @param nPath             final employment path over the same quarters
+     * @param lastProjectionIdx index of the last quarter taken from the projection
+     * @param totalLength       number of quarters of both paths
+     */
+    static void applyFrozenDependencyRatio(double[] pPath, double[] nPath,
+                                           int lastProjectionIdx, int totalLength) {
+        double ratio = pPath[lastProjectionIdx] / nPath[lastProjectionIdx];
+        for (int t = lastProjectionIdx + 1; t < totalLength; t++) {
+            pPath[t] = nPath[t] * ratio;
+        }
     }
 
     /**
@@ -2048,7 +2163,7 @@ public class MacroModelManager {
             System.out.println("--- DSGE Shocks ---");
             System.out.println(String.format("  Scenario shocks:     %s", scenarioApplied ? "APPLIED" : "none"));
             System.out.println("--- DSGE State Evolution (Annual Average) ---");
-            System.out.println(String.format("  Wage per employee:   %+.4f%%", state.getWageDeviation()));
+            System.out.println(String.format("  Wage per worker:     %+.4f%%", state.getWageDeviation()));
             System.out.println(String.format("  Inflation deviation: %+.4f pp", state.getInflationDeviation()));
             System.out.println(String.format("  Output deviation:    %+.4f%%", state.getOutputDeviation()));
             System.out.println(String.format("  Employment dev:      %+.4f%%", state.getEmploymentDeviation()));

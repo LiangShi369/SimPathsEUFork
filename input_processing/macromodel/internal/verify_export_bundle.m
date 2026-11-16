@@ -82,16 +82,21 @@ function verify_export_bundle(output_dir, country, options)
     end
 
     % --- demographic pair coherence ----------------------------------------
-    % population_projection_*.csv (Java) and the demographic_L_*.csv tail
-    % (this side's solve) must tell one demographic story; see
-    % check_demographic_pair_coherence for why nothing else enforces it.
+    % population_projection_*.csv (Java) and the tails of demographic_L_*.csv and
+    % demographic_P_*.csv (this side's solve) must tell one demographic story on
+    % both sides, for workers (N vs L_demo) and for consumers (P vs P_demo); see
+    % check_demographic_pair_coherence for why nothing else enforces it. A
+    % projection without a P column, or a missing demographic_P file, is a problem.
     pop_in_bundle = fullfile(output_dir, sprintf('population_projection_%s.csv', country));
     terminal_json = fullfile(output_dir, 'growth_terminal_state.json');
     if exist(pop_in_bundle, 'file') && exist(terminal_json, 'file')
         tok = regexp(fileread(terminal_json), '"handoff_time"\s*:\s*"([^"]+)"', 'tokens', 'once');
         if ~isempty(tok)
-            demo_file = artifact_path('data', sprintf('demographic_L_%s.csv', lower(country)));
-            pair_problems = check_demographic_pair_coherence(pop_in_bundle, demo_file, tok{1});
+            demo_L_file = artifact_path('data', sprintf('demographic_L_%s.csv', lower(country)));
+            demo_P_file = artifact_path('data', sprintf('demographic_P_%s.csv', lower(country)));
+            pair_problems = [ ...
+                check_demographic_pair_coherence(pop_in_bundle, 'N', demo_L_file, 'L_demo', tok{1}), ...
+                check_demographic_pair_coherence(pop_in_bundle, 'P', demo_P_file, 'P_demo', tok{1})];
             problems = [problems, pair_problems];
         end
     end

@@ -8,9 +8,11 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -394,7 +396,7 @@ public class RamseyTrendModelTest {
     public void testSolveRequiresParams() {
         var fresh = new RamseyTrendModel();
         assertThrows(IllegalStateException.class, () ->
-                fresh.solveForPath(1000.0, 1.0, new double[40], new double[40],
+                fresh.solveForPath(1000.0, 1.0, new double[40], new double[40], new double[40],
                         new double[40], new double[40], 40));
     }
 
@@ -406,8 +408,10 @@ public class RamseyTrendModelTest {
         int T = 120;
         double[] N = new double[T];
         double[] h = new double[T];
+        double[] P = new double[T];
         java.util.Arrays.fill(N, referenceData.get(0).N());
         java.util.Arrays.fill(h, referenceData.get(0).h());
+        java.util.Arrays.fill(P, referenceData.get(0).P());
 
         double K0 = referenceData.get(0).K();
         double A0 = extractA0(growthParamsContent);
@@ -416,7 +420,7 @@ public class RamseyTrendModelTest {
         java.util.Arrays.fill(gY, referenceData.get(0).gY());
         java.util.Arrays.fill(nxY, referenceData.get(0).nxY());
 
-        model.solveForPath(K0, A0, N, h, gY, nxY, T);
+        model.solveForPath(K0, A0, N, h, P, gY, nxY, T);
         assertTrue(model.isSolved(), "Model should be solved");
 
         // Check K/Y moves toward the terminal BGP under a stationary exogenous environment.
@@ -473,35 +477,24 @@ public class RamseyTrendModelTest {
     }
 
     /**
-     * The MATLAB-Java cross-validation anchor.
+     * The MATLAB-Java cross-validation anchor: the handoff solve on {@link #fixtureInputs()}
+     * reproduces the last row of the MATLAB reference CSV.
      *
-     * <p>Drives {@link MacroModelManager#initializeRamseyTrend} rather than assembling the
-     * projection locally: a local assembly is another copy of the path-building rules and can
-     * go stale while this test still passes (measured 2026-08-18: a local assembly that
-     * extrapolates employment geometrically reaches 35,983 thousand by 2103, where MATLAB's
-     * handoff solve, which splices the SimPaths-consistent demographic projection, reaches
-     * 9,641 — 273% apart). Routed through the production loader, the two can only drift
-     * together.</p>
+     * <p>The employment, hours and share paths and the horizon come from
+     * {@link MacroModelManager#initializeRamseyTrend} rather than from a local assembly: a
+     * local assembly is another copy of the path-building rules and can go stale while this
+     * test still passes (measured 2026-08-18: a local assembly that extrapolates employment
+     * geometrically reaches 35,983 thousand by 2103, where MATLAB's handoff solve, which
+     * splices the SimPaths-consistent demographic projection, reaches 9,641 — 273% apart).
+     * Routed through the production loader, the two can only drift together. The population
+     * path is the fixture's projection with the dependency ratio frozen beyond it (spec
+     * §5.8).</p>
      */
     @Test
-        public void testForwardProjectionAnchorMatchesMATLABExport() throws Exception {
-        assumeTestDataAvailable();
-
-        MacroModelManager manager = new MacroModelManager();
-        manager.setEnabled(true);
-        manager.setUseDsge(false);
-        manager.setUseRamseyTrend(true);
-        manager.setPathRecordingEnabled(false);
-        java.lang.reflect.Field startYear =
-                MacroModelManager.class.getDeclaredField("simulationStartYear");
-        startYear.setAccessible(true);
-        startYear.setInt(manager, 2023);
-        manager.initializeRamseyTrend(MACRO_MODEL_PATH);
-
-        java.lang.reflect.Field trendField =
-                MacroModelManager.class.getDeclaredField("ramseyTrend");
-        trendField.setAccessible(true);
-        RamseyTrendModel solved = (RamseyTrendModel) trendField.get(manager);
+    public void testForwardProjectionAnchorMatchesMATLABExport() {
+        var in = fixtureInputs();
+        RamseyTrendModel solved = solved(in.K0(), in.A0(), in.labor(), in.h(), in.population(),
+                in.gY(), in.nxY(), in.quarters());
         assertTrue(solved.isSolved());
 
         double kTerminal = solved.getK();
@@ -524,10 +517,88 @@ public class RamseyTrendModelTest {
             "Terminal-quarter natural rate should match MATLAB export");
         assertRelativeClose(actual.labor(), expected.N(), RELATIVE_TOLERANCE,
             "Terminal-quarter labor should match MATLAB export");
+        assertRelativeClose(actual.population(), expected.P(), RELATIVE_TOLERANCE, "P");
         assertRelativeClose(kTerminal, expected.K(), RELATIVE_TOLERANCE,
             "growth_terminal_state K should match last MATLAB reference quarter");
 
         assertTrue(aTerminal > 0, "growth_terminal_state A should be positive");
+
+        String[] names = {"K", "Y", "C", "I", "w", "r", "N", "P"};
+        double[] rels = {
+                relativeError(actual.capitalStock(), expected.K()),
+                relativeError(actual.output(), expected.Y()),
+                relativeError(actual.consumption(), expected.C()),
+                relativeError(actual.investment(), expected.I()),
+                relativeError(actual.wage(), expected.w()),
+                relativeError(actual.rQuarterly(), expected.rStar()),
+                relativeError(actual.labor(), expected.N()),
+                relativeError(actual.population(), expected.P())};
+        StringBuilder detail = new StringBuilder();
+        double maxRel = 0.0;
+        for (int i = 0; i < rels.length; i++) {
+            maxRel = Math.max(maxRel, rels[i]);
+            detail.append(String.format(java.util.Locale.ROOT, " %s=%.2e", names[i], rels[i]));
+        }
+        System.out.println(String.format(java.util.Locale.ROOT,
+                "MATLAB handoff parity: max relative error %.3e (tolerance %.0e);", maxRel, RELATIVE_TOLERANCE)
+                + detail);
+    }
+
+    @Test
+    public void testPopulationLevelIsPureScale() {
+        // spec §5.1: scaling P scales c by its inverse and leaves K, Y, w, C unchanged.
+        var in = fixtureInputs();
+        RamseyTrendModel a = solved(in.K0(), in.A0(), in.labor(), in.h(), in.population(), in.gY(), in.nxY(), in.quarters());
+        double[] twoP = Arrays.stream(in.population()).map(p -> 2.0 * p).toArray();
+        RamseyTrendModel b = solved(in.K0(), in.A0(), in.labor(), in.h(), twoP, in.gY(), in.nxY(), in.quarters());
+        for (int q = 0; q < in.quarters(); q += 7) {
+            var sa = a.getTrendAtQuarter(q); var sb = b.getTrendAtQuarter(q);
+            assertRelativeClose(sb.capitalStock(), sa.capitalStock(), 1e-12, "K at " + q);
+            assertRelativeClose(sb.output(), sa.output(), 1e-12, "Y at " + q);
+            assertRelativeClose(sb.wage(), sa.wage(), 1e-12, "w at " + q);
+            assertRelativeClose(sb.consumption(), sa.consumption(), 1e-12, "C at " + q);
+            assertRelativeClose(sb.population(), 2.0 * sa.population(), 1e-12, "P at " + q);
+        }
+    }
+
+    @Test
+    public void testRisingDependencyRatioRaisesTheTransitionWage() {
+        // spec §5.4: the planner pre-funds a rising P/N; wage above and r below the constant-ratio path.
+        // Measured 2026-11-08 on the Poland fixture: wage +1.573% at 2060 (q147) against the
+        // constant-ratio path.
+        var in = fixtureInputs();
+        double r0 = in.population()[0] / in.labor()[0];
+        double[] pConst = new double[in.quarters()], pRise = new double[in.quarters()];
+        for (int t = 0; t < in.quarters(); t++) {
+            pConst[t] = in.labor()[t] * r0;
+            pRise[t] = in.labor()[t] * r0 * (1.0 + 0.19 * Math.min(t, 147) / 147.0);   // 1.55 -> 1.84 by 2060 as in the workbook
+        }
+        RamseyTrendModel c = solved(in.K0(), in.A0(), in.labor(), in.h(), pConst, in.gY(), in.nxY(), in.quarters());
+        RamseyTrendModel r = solved(in.K0(), in.A0(), in.labor(), in.h(), pRise, in.gY(), in.nxY(), in.quarters());
+        for (int q = 4; q <= 147; q++) {
+            assertTrue(r.getTrendAtQuarter(q).wage() > c.getTrendAtQuarter(q).wage(), "wage at " + q);
+            assertTrue(r.getTrendAtQuarter(q).rQuarterly() < c.getTrendAtQuarter(q).rQuarterly(), "r at " + q);
+        }
+        System.out.printf("dependency-ratio channel: wage +%.3f%% at 2060 (q147)%n",
+                (r.getTrendAtQuarter(147).wage() / c.getTrendAtQuarter(147).wage() - 1.0) * 100.0);
+    }
+
+    @Test
+    public void testDependencyRatioIsFrozenInTheTerminalTail() {
+        var in = fixtureInputs();
+        RamseyTrendModel m = solved(in.K0(), in.A0(), in.labor(), in.h(), in.population(), in.gY(), in.nxY(), in.quarters());
+        double ratio = m.pathPAt(in.quarters() - 1) / m.pathNAt(in.quarters() - 1);
+        for (int t = in.quarters(); t < m.extendedLength(); t++) {
+            assertEquals(ratio, m.pathPAt(t) / m.pathNAt(t), 1e-12 * ratio, "ratio at extended quarter " + t);
+        }
+    }
+
+    @Test
+    public void testReferenceCsvWithoutPopulationColumnIsRefused(@TempDir Path dir) throws IOException {
+        Path csv = dir.resolve("growth_model_reference_x.csv");
+        Files.writeString(csv, "time,K,Y,C,I,w,r_star,N,L,h,g_Y,nx_Y\n2023q1,1,1,1,1,1,1,1,1,1,0.2,0\n");
+        IOException ex = assertThrows(IOException.class, () -> RamseyTrendModel.loadReferenceCSV(csv));
+        assertTrue(ex.getMessage().contains("P column") && ex.getMessage().contains("re-export"), ex.getMessage());
     }
 
     /**
@@ -548,11 +619,13 @@ public class RamseyTrendModelTest {
         int T = referenceData.size();
         double[] N = new double[T];
         double[] h = new double[T];
+        double[] P = new double[T];
         double[] gY = new double[T];
         double[] nxY = new double[T];
         for (int i = 0; i < T; i++) {
             N[i] = referenceData.get(i).N();
             h[i] = referenceData.get(i).h();
+            P[i] = referenceData.get(i).P();
             gY[i] = referenceData.get(i).gY();
             nxY[i] = referenceData.get(i).nxY();
         }
@@ -561,7 +634,7 @@ public class RamseyTrendModelTest {
         Path paramsPath = Paths.get(MACRO_MODEL_PATH, "growth_params_Poland.json");
         double A0 = extractA0(Files.readString(paramsPath));
 
-        model.solveForPath(K0, A0, N, h, gY, nxY, T);
+        model.solveForPath(K0, A0, N, h, P, gY, nxY, T);
 
         for (int q = 0; q < T; q++) {
             var ts = model.getTrendAtQuarter(q);
@@ -597,11 +670,13 @@ public class RamseyTrendModelTest {
         int T = referenceData.size();
         double[] N = new double[T];
         double[] h = new double[T];
+        double[] P = new double[T];
         double[] gY = new double[T];
         double[] nxY = new double[T];
         for (int i = 0; i < T; i++) {
             N[i] = referenceData.get(i).N();
             h[i] = referenceData.get(i).h();
+            P[i] = referenceData.get(i).P();
             gY[i] = referenceData.get(i).gY();
             nxY[i] = referenceData.get(i).nxY();
         }
@@ -610,7 +685,7 @@ public class RamseyTrendModelTest {
         double A0 = extractA0(Files.readString(
                 Paths.get(MACRO_MODEL_PATH, "growth_params_Poland.json")));
 
-        model.solveForPath(K0, A0, N, h, gY, nxY, T);
+        model.solveForPath(K0, A0, N, h, P, gY, nxY, T);
 
         assertEquals(0, model.getCurrentQuarterIdx(), "Should start at quarter 0");
 
@@ -628,11 +703,13 @@ public class RamseyTrendModelTest {
         int T = referenceData.size();
         double[] N = new double[T];
         double[] h = new double[T];
+        double[] P = new double[T];
         double[] gY = new double[T];
         double[] nxY = new double[T];
         for (int i = 0; i < T; i++) {
             N[i] = referenceData.get(i).N();
             h[i] = referenceData.get(i).h();
+            P[i] = referenceData.get(i).P();
             gY[i] = referenceData.get(i).gY();
             nxY[i] = referenceData.get(i).nxY();
         }
@@ -641,7 +718,7 @@ public class RamseyTrendModelTest {
         double A0 = extractA0(Files.readString(
                 Paths.get(MACRO_MODEL_PATH, "growth_params_Poland.json")));
 
-        model.solveForPath(K0, A0, N, h, gY, nxY, T);
+        model.solveForPath(K0, A0, N, h, P, gY, nxY, T);
 
         // Compute manual average for first year
         double yManual = 0;
@@ -665,11 +742,13 @@ public class RamseyTrendModelTest {
         int T = referenceData.size();
         double[] N = new double[T];
         double[] h = new double[T];
+        double[] P = new double[T];
         double[] gY = new double[T];
         double[] nxY = new double[T];
         for (int i = 0; i < T; i++) {
             N[i] = referenceData.get(i).N();
             h[i] = referenceData.get(i).h();
+            P[i] = referenceData.get(i).P();
             gY[i] = referenceData.get(i).gY();
             nxY[i] = referenceData.get(i).nxY();
         }
@@ -678,7 +757,7 @@ public class RamseyTrendModelTest {
         double A0 = extractA0(Files.readString(
                 Paths.get(MACRO_MODEL_PATH, "growth_params_Poland.json")));
 
-        model.solveForPath(K0, A0, N, h, gY, nxY, T);
+        model.solveForPath(K0, A0, N, h, P, gY, nxY, T);
 
         model.stepYear();
         model.stepYear();
@@ -705,21 +784,25 @@ public class RamseyTrendModelTest {
         int refSize = referenceData.size();
         double[] refN = new double[refSize];
         double[] refH = new double[refSize];
+        double[] refP = new double[refSize];
         double[] refGY = new double[refSize];
         double[] refNXY = new double[refSize];
         for (int i = 0; i < refSize; i++) {
             refN[i] = referenceData.get(i).N();
             refH[i] = referenceData.get(i).h();
+            refP[i] = referenceData.get(i).P();
             refGY[i] = referenceData.get(i).gY();
             refNXY[i] = referenceData.get(i).nxY();
         }
 
-        // Extend N/h forward (80 years = 320 quarters, matching manager code)
+        // Extend N/h forward (80 years = 320 quarters, matching manager code); P follows N
+        // at the handoff dependency ratio.
         int projectionQuarters = 320;
         int totalExtended = refSize + projectionQuarters;
         double[] extN = RamseyTrendModel.extendExogenous(refN, totalExtended, 20);
         double[] extH = RamseyTrendModel.extendExogenous(refH, totalExtended,
                 Math.min(20, refSize - 1));
+        double[] extP = RamseyTrendModel.extendWithFrozenRatio(refP, extN, totalExtended);
         double[] extGY = RamseyTrendModel.extendShare(refGY, totalExtended);
         double[] extNXY = RamseyTrendModel.extendShare(refNXY, totalExtended);
 
@@ -728,6 +811,7 @@ public class RamseyTrendModelTest {
         int projLen = totalExtended - startIdx;
         double[] projN = java.util.Arrays.copyOfRange(extN, startIdx, totalExtended);
         double[] projH = java.util.Arrays.copyOfRange(extH, startIdx, totalExtended);
+        double[] projP = java.util.Arrays.copyOfRange(extP, startIdx, totalExtended);
         double[] projGY = java.util.Arrays.copyOfRange(extGY, startIdx, totalExtended);
         double[] projNXY = java.util.Arrays.copyOfRange(extNXY, startIdx, totalExtended);
 
@@ -740,7 +824,7 @@ public class RamseyTrendModelTest {
         assertTrue(A_terminal > 0, "Terminal A should be positive, got: " + A_terminal);
 
         // Solve forward from terminal state
-        model.solveForPath(K_terminal, A_terminal, projN, projH, projGY, projNXY, projLen);
+        model.solveForPath(K_terminal, A_terminal, projN, projH, projP, projGY, projNXY, projLen);
         assertTrue(model.isSolved(), "Forward projection should converge");
 
         // === Verify quarter 0 matches terminal state ===
@@ -814,11 +898,13 @@ public class RamseyTrendModelTest {
         int refSize = referenceData.size();
         double[] refN = new double[refSize];
         double[] refH = new double[refSize];
+        double[] refP = new double[refSize];
         double[] refGY = new double[refSize];
         double[] refNXY = new double[refSize];
         for (int i = 0; i < refSize; i++) {
             refN[i] = referenceData.get(i).N();
             refH[i] = referenceData.get(i).h();
+            refP[i] = referenceData.get(i).P();
             refGY[i] = referenceData.get(i).gY();
             refNXY[i] = referenceData.get(i).nxY();
         }
@@ -828,6 +914,7 @@ public class RamseyTrendModelTest {
         double[] extN = RamseyTrendModel.extendExogenous(refN, totalExtended, 20);
         double[] extH = RamseyTrendModel.extendExogenous(refH, totalExtended,
                 Math.min(20, refSize - 1));
+        double[] extP = RamseyTrendModel.extendWithFrozenRatio(refP, extN, totalExtended);
         double[] extGY = RamseyTrendModel.extendShare(refGY, totalExtended);
         double[] extNXY = RamseyTrendModel.extendShare(refNXY, totalExtended);
 
@@ -835,11 +922,12 @@ public class RamseyTrendModelTest {
         int projLen = totalExtended - startIdx;
         double[] projN = java.util.Arrays.copyOfRange(extN, startIdx, totalExtended);
         double[] projH = java.util.Arrays.copyOfRange(extH, startIdx, totalExtended);
+        double[] projP = java.util.Arrays.copyOfRange(extP, startIdx, totalExtended);
         double[] projGY = java.util.Arrays.copyOfRange(extGY, startIdx, totalExtended);
         double[] projNXY = java.util.Arrays.copyOfRange(extNXY, startIdx, totalExtended);
 
         model.loadTerminalState(Paths.get(MACRO_MODEL_PATH, "growth_terminal_state.json"));
-        model.solveForPath(model.getK(), model.getA(), projN, projH, projGY, projNXY, projLen);
+        model.solveForPath(model.getK(), model.getA(), projN, projH, projP, projGY, projNXY, projLen);
 
         // === Mimic MacroModelManager.advanceRamseyTrend() logic ===
         double baselineWage = 0.0;
@@ -942,11 +1030,9 @@ public class RamseyTrendModelTest {
      */
     @Test
     public void testShiftedHorizonReSolveReproducesOriginalTail() throws IOException {
-        Assumptions.assumeTrue(testDataAvailable, "Macro fixtures not available");
-        model.loadTerminalState(Paths.get(MACRO_MODEL_PATH, "growth_terminal_state.json"));
-        ProjectionInputs inputs = buildForwardProjectionInputs();
-        model.solveForPath(model.getK(), model.getA(), inputs.labor(), inputs.h(),
-                inputs.gY(), inputs.nxY(), inputs.projLen());
+        FixtureInputs inputs = fixtureInputs();
+        model = solved(inputs.K0(), inputs.A0(), inputs.labor(), inputs.h(), inputs.population(),
+                inputs.gY(), inputs.nxY(), inputs.quarters());
 
         final int shift = 4; // one year
         int n = model.getSimQuarters();
@@ -964,9 +1050,9 @@ public class RamseyTrendModelTest {
         reSolved.loadParams(Paths.get(MACRO_MODEL_PATH, "growth_params_Poland.json"));
         reSolved.setTfpPhaseOffsetQuarters(shift);
         reSolved.solveForPath(k0, a0,
-                tail(inputs.labor(), shift), tail(inputs.h(), shift),
+                tail(inputs.labor(), shift), tail(inputs.h(), shift), tail(inputs.population(), shift),
                 tail(inputs.gY(), shift), tail(inputs.nxY(), shift),
-                inputs.projLen() - shift);
+                inputs.quarters() - shift);
 
         int compareQuarters = Math.min(120, reSolved.getSimQuarters()); // first 30 years
         double maxRelDev = 0.0;
@@ -1015,7 +1101,7 @@ public class RamseyTrendModelTest {
         java.util.Arrays.fill(N, 35000.0);
         java.util.Arrays.fill(h, 345.0);
 
-        model.solveForPath(9e6, 0.058, N, h, new double[T], new double[T], T);
+        model.solveForPath(9e6, 0.058, N, h, N.clone(), new double[T], new double[T], T);
 
         assertThrows(IndexOutOfBoundsException.class, () -> model.getTrendAtQuarter(-1));
         assertThrows(IndexOutOfBoundsException.class, () -> model.getTrendAtQuarter(T));
@@ -1046,6 +1132,10 @@ public class RamseyTrendModelTest {
         // K should be positive and large (millions of EUR, German capital stock)
         assertTrue(referenceData.get(0).K() > 500000,
                 "K should be > 1M, got: " + referenceData.get(0).K());
+
+        // The resident population, the planner's consumers
+        assertTrue(referenceData.get(0).P() > 0,
+                "P should be positive, got: " + referenceData.get(0).P());
     }
 
     @Test
@@ -1055,7 +1145,17 @@ public class RamseyTrendModelTest {
         double[] h = new double[30]; // different length
 
         assertThrows(IllegalArgumentException.class, () ->
-                model.solveForPath(9e6, 0.058, N, h, new double[40], new double[40], 40));
+                model.solveForPath(9e6, 0.058, N, h, new double[40], new double[40], new double[40], 40));
+
+        double[] n40 = new double[40];
+        double[] h40 = new double[40];
+        java.util.Arrays.fill(n40, 35000.0);
+        java.util.Arrays.fill(h40, 345.0);
+        double[] p30 = new double[30]; // population of a different length
+        java.util.Arrays.fill(p30, 80000.0);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
+                model.solveForPath(9e6, 0.058, n40, h40, p30, new double[40], new double[40], 40));
+        assertTrue(ex.getMessage().contains("P length"), ex.getMessage());
     }
 
     @Test
@@ -1081,7 +1181,7 @@ public class RamseyTrendModelTest {
         java.util.Arrays.fill(nxY, 0.25);
 
         assertThrows(IllegalArgumentException.class, () ->
-                model.solveForPath(9e6, 0.058, N, h, gY, nxY, T));
+                model.solveForPath(9e6, 0.058, N, h, N.clone(), gY, nxY, T));
     }
 
     @Test
@@ -1106,7 +1206,7 @@ public class RamseyTrendModelTest {
 
         model.setScenario(scenario, 2025);
         assertThrows(IllegalArgumentException.class, () ->
-                model.solveForPath(9e6, 0.058, N, h, gY, nxY, T));
+                model.solveForPath(9e6, 0.058, N, h, N.clone(), gY, nxY, T));
     }
 
     @Test
@@ -1119,7 +1219,7 @@ public class RamseyTrendModelTest {
         java.util.Arrays.fill(N, 35000.0);
         java.util.Arrays.fill(h, 345.0);
 
-        model.solveForPath(9e6, 0.058, N, h, new double[T], new double[T], T);
+        model.solveForPath(9e6, 0.058, N, h, N.clone(), new double[T], new double[T], T);
 
         assertThrows(IndexOutOfBoundsException.class, () -> model.getKAtQuarter(-1));
         assertThrows(IndexOutOfBoundsException.class, () -> model.getKAtQuarter(T));
@@ -1160,7 +1260,7 @@ public class RamseyTrendModelTest {
         double[] nxY = new double[quarters];
         java.util.Arrays.fill(labor, 35000.0);
         java.util.Arrays.fill(hours, 345.0);
-        simpleModel.solveForPath(9e6, 0.058, labor, hours, gY, nxY, quarters);
+        simpleModel.solveForPath(9e6, 0.058, labor, hours, labor.clone(), gY, nxY, quarters);
     }
 
     private static double annualizedQuarterGrowth(RamseyTrendModel testModel, int quarterIdx) {
@@ -1204,40 +1304,53 @@ public class RamseyTrendModelTest {
         return stripped;
     }
 
-    private ProjectionInputs buildForwardProjectionInputs() {
-        List<RamseyTrendModel.ReferenceRow> ref = referenceData;
-        int refSize = ref.size();
-        double[] refLabor = new double[refSize];
-        double[] refH = new double[refSize];
-        double[] refGY = new double[refSize];
-        double[] refNXY = new double[refSize];
+    /**
+     * The inputs of the handoff solve on the frozen fixture.
+     *
+     * <p>Employment, hours, the two expenditure shares and the horizon are the slices that
+     * {@link MacroModelManager#initializeRamseyTrend} retains from its own solve on the
+     * fixture directory, so they are the production loader's paths rather than a local copy
+     * of its rules. {@code K0} and {@code A0} are the fixture's
+     * {@code growth_terminal_state.json}. The population is the manager's retained
+     * {@code ramseyProjP}: the {@code P} column of {@code population_projection_Poland.csv}
+     * from the handoff quarter through its last row, then employment times the dependency
+     * ratio of that row (spec §5.8).</p>
+     */
+    private FixtureInputs fixtureInputs() {
+        assumeTestDataAvailable();
+        try {
+            MacroModelManager manager = MacroTestSupport.newManager(false, true);
+            MacroTestSupport.setField(manager, "simulationStartYear", 2023);
+            manager.initializeRamseyTrend(MACRO_MODEL_PATH);
+            double[] labor = MacroTestSupport.getField(manager, "ramseyProjN", double[].class).clone();
+            double[] h = MacroTestSupport.getField(manager, "ramseyProjH", double[].class).clone();
+            double[] gY = MacroTestSupport.getField(manager, "ramseyProjGY", double[].class).clone();
+            double[] nxY = MacroTestSupport.getField(manager, "ramseyProjNXY", double[].class).clone();
+            int quarters = MacroTestSupport.getField(manager, "ramseyProjLen", Integer.class);
 
-        for (int i = 0; i < refSize; i++) {
-            var row = ref.get(i);
-            refLabor[i] = row.N();
-            refH[i] = row.h();
-            refGY[i] = row.gY();
-            refNXY[i] = row.nxY();
+            RamseyTrendModel terminal = new RamseyTrendModel();
+            terminal.loadTerminalState(Paths.get(MACRO_MODEL_PATH, "growth_terminal_state.json"));
+
+            double[] population = MacroTestSupport.getField(manager, "ramseyProjP", double[].class).clone();
+            return new FixtureInputs(terminal.getK(), terminal.getA(), labor, h, population,
+                    gY, nxY, quarters);
+        } catch (Exception e) {
+            throw new IllegalStateException("Cannot build the handoff inputs from " + MACRO_MODEL_PATH, e);
         }
+    }
 
-        int projectionQuarters = 320;
-        int totalExtended = refSize + projectionQuarters;
-        // Reproduces what MATLAB writes into the bundle: extend_level_path(N_trend, ..., 20)
-        // and extend_level_path(handoff_h_hist, ..., 1). A wrong hours window here would stay
-        // invisible while hours_trend_method is log_linear, because the h column is then a
-        // pure exponential.
-        double[] extLabor = RamseyTrendModel.extendExogenous(refLabor, totalExtended, 20);
-        double[] extH = RamseyTrendModel.extendExogenous(refH, totalExtended, 1);
-        double[] extGY = RamseyTrendModel.extendShare(refGY, totalExtended);
-        double[] extNXY = RamseyTrendModel.extendShare(refNXY, totalExtended);
-
-        int startIdx = refSize - 1;
-        return new ProjectionInputs(
-                java.util.Arrays.copyOfRange(extLabor, startIdx, totalExtended),
-                java.util.Arrays.copyOfRange(extH, startIdx, totalExtended),
-                java.util.Arrays.copyOfRange(extGY, startIdx, totalExtended),
-                java.util.Arrays.copyOfRange(extNXY, startIdx, totalExtended),
-                totalExtended - startIdx);
+    /** A model with the fixture's parameters and terminal state, solved on the given paths. */
+    private RamseyTrendModel solved(double K0, double A0, double[] N, double[] h, double[] P,
+                                    double[] gY, double[] nxY, int quarters) {
+        RamseyTrendModel m = new RamseyTrendModel();
+        try {
+            m.loadParams(Paths.get(MACRO_MODEL_PATH, "growth_params_Poland.json"));
+            m.loadTerminalState(Paths.get(MACRO_MODEL_PATH, "growth_terminal_state.json"));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        m.solveForPath(K0, A0, N, h, P, gY, nxY, quarters);
+        return m;
     }
 
     /**
@@ -1294,5 +1407,6 @@ public class RamseyTrendModelTest {
         return Math.pow(1.0 + annualGrowth, 0.25) - 1.0;
     }
 
-    private record ProjectionInputs(double[] labor, double[] h, double[] gY, double[] nxY, int projLen) {}
+    private record FixtureInputs(double K0, double A0, double[] labor, double[] h, double[] population,
+                                 double[] gY, double[] nxY, int quarters) {}
 }

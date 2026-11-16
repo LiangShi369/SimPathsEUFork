@@ -1,5 +1,6 @@
 package simpaths.model.macro;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -193,7 +194,7 @@ class MacroModelManagerTest {
         // a positional splice would shift the whole demographic path by a year.
         List<String> lines = Files.readAllLines(proj);
         String firstData = lines.get(1);
-        String value = firstData.split(",", 2)[1];
+        String value = firstData.split(",", 2)[1];       // the rest of the row: N and P
         StringBuilder prefixed = new StringBuilder(lines.get(0)).append('\n');
         for (int q = 1; q <= 4; q++) {
             prefixed.append("2022q").append(q).append(',').append(value).append('\n');
@@ -229,9 +230,70 @@ class MacroModelManagerTest {
             assertEquals(expected.labor(), actual.labor(), Math.abs(expected.labor()) * 1e-12,
                     "Quarters before the handoff must not shift the demographic path "
                     + "(quarter " + q + ")");
+            assertEquals(expected.population(), actual.population(),
+                    Math.abs(expected.population()) * 1e-12,
+                    "Quarters before the handoff must not shift the population path "
+                    + "(quarter " + q + ")");
             assertEquals(expected.output(), actual.output(), Math.abs(expected.output()) * 1e-12,
                     "Quarters before the handoff must not shift output (quarter " + q + ")");
         }
+    }
+
+    @Test
+    void testProjectionWithoutPopulationColumnIsRefused() throws Exception {
+        assumeRamseyInputsAvailable();
+        Path scratch = copyMacroBundle();
+        Path proj = scratch.resolve("population_projection_Poland.csv");
+        List<String> lines = Files.readAllLines(proj);        // time,N,P -> time,N
+        StringBuilder sb = new StringBuilder("time,N\n");
+        for (int i = 1; i < lines.size(); i++) {
+            if (lines.get(i).isBlank()) continue;
+            String[] p = lines.get(i).split(",");
+            sb.append(p[0]).append(',').append(p[1]).append('\n');
+        }
+        Files.writeString(proj, sb.toString());
+        MacroModelManager manager = new MacroModelManager();
+        setIntField(manager, "simulationStartYear", 2023);
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> manager.initializeRamseyTrend(scratch.toString()));
+        assertTrue(ex.getMessage().contains("P column") && ex.getMessage().contains("re-export"),
+                ex.getMessage());
+    }
+
+    @Test
+    void testPopulationBeyondTheProjectionFollowsEmploymentAtTheLastRatio() throws Exception {
+        assumeRamseyInputsAvailable();
+        MacroModelManager m = new MacroModelManager();
+        setIntField(m, "simulationStartYear", 2023);
+        m.initializeRamseyTrend(MACRO_MODEL_PATH);
+        double[] n = getField(m, "ramseyProjN", double[].class);
+        double[] p = getField(m, "ramseyProjP", double[].class);
+        int lastRow = 151;                                      // 2023q1..2060q4 in population_projection_Poland.csv
+        double ratio = p[lastRow] / n[lastRow];
+        assertTrue(p[0] / n[0] < ratio, "the workbook's dependency ratio rises to 2060");
+        for (int t = lastRow + 1; t < p.length; t++) {
+            assertEquals(ratio, p[t] / n[t], 1e-12 * ratio, "ratio frozen at quarter " + t);
+        }
+    }
+
+    @Test
+    void testFrozenDependencyRatioAfterTheLastProjectionIndex() {
+        double[] n = {10, 11, 12, 13, 14, 15};
+        double[] p = {20, 24, 30, 0, 0, 0};
+        MacroModelManager.applyFrozenDependencyRatio(p, n, 2, 6);
+        double ratio = 30.0 / 12.0;
+        assertArrayEquals(new double[] {20, 24, 30}, java.util.Arrays.copyOf(p, 3), 0.0);
+        for (int t = 3; t < 6; t++) {
+            assertEquals(n[t] * ratio, p[t], 1e-12, "quarter " + t);
+        }
+    }
+
+    @Test
+    void testFrozenDependencyRatioLeavesAFullyCoveredHorizonUnchanged() {
+        double[] n = {10, 11, 12};
+        double[] p = {20, 24, 30};
+        MacroModelManager.applyFrozenDependencyRatio(p, n, 2, 3);
+        assertArrayEquals(new double[] {20, 24, 30}, p, 0.0);
     }
 
     /** Copy the deployed PL macro bundle into a scratch directory. */
@@ -343,7 +405,7 @@ class MacroModelManagerTest {
                 "Government trend should use the same baseline-relative rule as the manager");
         assertEquals(expectedNetExportsTrend, currentTrends.get("nx"), 1e-12,
                 "Net exports trend should use the same baseline-relative rule as the manager");
-        assertEquals(java.util.Set.of("w", "y", "c", "inv", "k", "g", "nx", "n_ramsey"), currentTrends.keySet(),
+        assertEquals(java.util.Set.of("w", "y", "c", "inv", "k", "g", "nx", "n_ramsey", "p_ramsey"), currentTrends.keySet(),
                 "The trend map carries exactly these keys, with no participation entry: the planner "
                 + "takes labour input as exogenous");
         assertFalse(Math.abs(wageTrend) < 1e-12,
@@ -599,6 +661,10 @@ class MacroModelManagerTest {
         RamseyTrendModel trend = getField(m, "ramseyTrend", RamseyTrendModel.class);
         assertEquals(trend.getSimQuarters(), projN.length);
         assertEquals((Integer) getField(m, "ramseyProjLen", Integer.class).intValue(), projN.length);
+        double[] projP = getField(m, "ramseyProjP", double[].class);
+        assertNotNull(projP);
+        assertEquals(projN.length, projP.length);
+        for (double v : projP) assertTrue(v > 0.0, "population path must be positive");
     }
 
     /**

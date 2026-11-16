@@ -61,7 +61,7 @@ These vary by country but are calibrated, not estimated:
 |-----------|-------------|--------|-------|
 | `chi_L` | Labor force share, L/WAP | Eurostat LFS | Age 15-64, estimation-sample mean |
 | `chi_u` | Unemployment **share**, U/WAP | `chi_L` × sample-mean ILO rate | **Not** the U/L rate |
-| `chi_n` | Total employment share, N/WAP | Derived: `chi_L - chi_u` | Total employment, not employees |
+| `chi_n` | Total employment share, N/WAP | Derived: `chi_L - chi_u` | Total employment, the concept of the observable `n` |
 | `delta` | Separation rate | OECD EPL data | Higher for flexible markets |
 | `lambda_w` | Wage stickiness | Institutional | Collective bargaining coverage |
 | `phi_pi`, `phi_y` | Taylor rule | Literature | ECB for €-zone, BoE for UK, Riksbank for Sweden |
@@ -99,14 +99,6 @@ These vary by country but are calibrated, not estimated:
 the OECD LFS participation rate 15-64, 2000q1-2025q1 mean 77.53%: Eurostat, the
 source of Sweden's, has no UK data after Brexit.*
 
-**Caveat on `chi_n`.** The observable feeding `n` is employees *excluding
-self-employed* (Poland: 0.5412 of WAP), while `chi_n` above is the *total*
-employment share (0.6777). The identity needs total employment, so using it here
-assumes self-employment moves proportionally with employees — which keeps the
-identity's coefficient difference at exactly 1. In Poland self-employment is 20%
-of employment, so this assumption is doing real work and should be revisited if
-the search-and-matching block is ever taken literally as a model of employee jobs.
-
 ### Tier 3: Estimated from Country Data
 
 Only `omega_h`, `phi_inv_r` and the shock standard deviations are estimated; every
@@ -129,9 +121,9 @@ maintain.
 
 ## Data Requirements per Country
 
-### Observables (8 time series, quarterly)
+### Series (8 observables and the population, quarterly)
 
-`varobs` in `Macromodel_template.mod` is the authority: `y inv c pi R n L h`.
+`varobs` in `Macromodel_template.mod` is the authority for the observables: `y inv c pi R n L h`.
 
 | Variable | Description | Source |
 |----------|-------------|--------|
@@ -140,11 +132,12 @@ maintain.
 | `c` | Household final consumption | National accounts |
 | `pi` | Inflation (HICP, QoQ annualised) | Eurostat |
 | `R` | Short-term interest rate | Central bank |
-| `n` | Employees, national concept | Labour force survey |
+| `n` | Persons in employment, employees and self-employed, national concept | National accounts (`namq_10_pe` `EMP_NC`; Destatis `ERW060`; OECD QNA table 0110 for the UK) |
 | `L` | Labour force, national concept | Labour force survey |
-| `h` | Hours per employee | Labour force survey |
+| `h` | Hours per person employed: total hours worked over persons in employment, both domestic concept | National accounts (`namq_10_a10_e` over `namq_10_pe`; Destatis `STD007`; OECD QNA table 0111 for the UK) |
+| `pop_level` | Resident population, all ages, census breaks spliced: the planner's consumers, not a DSGE observable | Eurostat `demo_pjan` (1 January); Destatis `BEV020` for Germany; ONS `UKPOP.A` (mid-year) for the UK |
 
-All eight are supplied as **Ramsey-detrended** 100×log-deviations by `ramsey_trend.m`,
+All eight observables are supplied as **Ramsey-detrended** 100×log-deviations by `ramsey_trend.m`,
 not as HP-filtered cycles. `R` and `pi` are rate variables and enter as demeaned
 percent. The HP-filtered file (`data_for_dynare_hp_{COUNTRY}.csv`) exists only as a
 benchmark for `run_detrending_benchmark.m` and is not the estimation input.
@@ -173,7 +166,8 @@ whole sample, with no splicing:
 |---|---|---|
 | Volumes (GDP, C, I, G, X, M) | Eurostat `CLV15_MEUR` | ONS chained volumes, re-referenced to 2015 and converted at the fixed 2015 rate |
 | D1, D11 | Eurostat `namq_10_gdp` | ONS `DTWM`, `DTWL` (S.1 uses: the domestic concept) |
-| Employees, hours | Eurostat `namq_10_pe`, `namq_10_a10_e` | OECD QNA tables 0110/0111 (hours in millions, rescaled) |
+| Persons in employment, hours | Eurostat `namq_10_pe`, `namq_10_a10_e` | OECD QNA tables 0110/0111 (hours in millions, rescaled) |
+| Resident population | Eurostat `demo_pjan`, 1 January (Germany: Destatis, quarterly) | ONS `UKPOP.A`, mid-year (30 June on q3) |
 | Price level | Eurostat HICP, X-13ARIMA-SEATS from Stata (`hicp_q_sa.dta`) | ONS CPI `D7BT`, the UK's HICP, X-13ARIMA-SEATS from Stata with the same spec (`hicp_q_sa_uk.dta`) |
 | 3-month rate | Euribor (ECB) or Eurostat `irt_st_m` | OECD STES, the same monthly-average concept |
 
@@ -181,8 +175,8 @@ Three checks in `make_datasets.do` hold these to the other countries' concepts
 (contract 39 in `Integration_Contracts.md`): the ONS-based GDP must lie within 5%
 of Eurostat's own UK `CLV15_MEUR` series where that exists (2026-10 vintage: -0.3%
 to +3.3%, ONS revisions since 2020), the fixed rate is read off Eurostat's UK GDP
-pair like Poland's and Sweden's, and hours per employee must lie in [200, 700] per
-quarter for every country. Where both exist, ONS `D7BT` equals Eurostat's UK HICP in
+pair like Poland's and Sweden's, and hours per person employed must lie in [200, 700]
+per quarter for every country. Where both exist, ONS `D7BT` equals Eurostat's UK HICP in
 all 299 months of 1996m1-2020m11.
 
 The re-referencing is not cosmetic. A chain-linked component is valued at its
@@ -204,6 +198,18 @@ force rises, and the UK's `L` goes from -0.41 in 2023q1 to +3.10 in 2025q1, agai
 sample standard deviation of 0.70. Poland's workbook steps the other way: `L_demo` grows
 2.3% over 2023 while the labour force is flat, and its `L` goes from +1.55 in 2023q1 to
 -1.10 in 2024q1.
+
+`demographic_P_{country}.csv` follows the workbook's population of all ages from the same
+quarter on, but the planner's in-sample consumers do not: like its in-sample workers they
+are the HP trend of the data (`pop_level`, as `N` is of `n_level`), and after the last data
+quarter both are chained on the workbook's growth. Poland's `P_demo` grows 2.5% over 2023,
+the workbook's step between its 2023 and 2024 columns, while the resident population of the
+data stage falls 0.4%; that step stays out of the in-sample population path and out of the
+consumption trend `C = P c`. Because the stacked solve is global, the forward paths of `N`
+and `P` still reach the in-sample trend: the planner of the first sample quarter already
+knows the dependency ratio of 2060 and saves for it, which shapes the in-sample capital and
+consumption trends and the estimated `c` observable. `run_full_workflow` re-solves step 0b
+when step 0c changed either demographic file.
 
 ### Currency: euro volumes, national-currency wages
 
@@ -258,7 +264,18 @@ Extend the Stata script `make_datasets.do` with a country branch. For each count
    `hicp_q_sa_uk.dta` from `make_datasets_hicp_uk.do`, selected through `hicp_file`
 5. Add the SimPaths population workbook as `input/{CC}/align_popProjections.xlsx`.
    `build_population_projection` reads its `Population_projections` sheet, or,
-   failing that, the sheet named after the country code (the SimPaths UK layout)
+   failing that, the sheet named after the country code (the SimPaths UK layout).
+   It supplies the forward growth of `N` (ages 15-64) and of `P` (all ages)
+6. Add the resident population series: a row in `series_codes_a` for annual figures
+   (Eurostat `demo_pjan`, 1 January) or in `series_codes_q` for a quarterly series, and
+   the locals `pop_freq`, `pop_var`, `pop_anchor_q` (the quarter an annual figure sits
+   on), `pop_divisor` (to thousand persons) and `pop_break_periods`. List in
+   `pop_break_periods` every period whose figure is the first on a new census basis,
+   from the source's own break flags (Eurostat's flag `b` in `demo_pjan`); a series the
+   source revises back after each census, or a register-based one, has none, and the
+   series block says so. `splice_breaks.ado` replaces the growth into each listed
+   period, `PROVENANCE_{Country}.txt` records each replacement, and
+   `tests/test_data_loading.m` fails if a quarterly log step of `pop_level` reaches 0.01
 
 ## Workflow: Creating a New Country Model
 
@@ -337,8 +354,8 @@ For all countries, verify the impact (t=0) responses in the exported bundle
 (`irfs_eps_L.csv`, `irfs_eps_h.csv`):
 - L↑ → w↓ (labour supply increase reduces wages)
 - L↑ → π↓ (disinflation from the wage channel)
-- h↑ → w↑ (hours increase **raises** the wage). `w` is compensation per
-  *employee*, and hours per employee raise the per-worker marginal product the
+- h↑ → w↑ (hours increase **raises** the wage). `w` is the bargained wage per
+  *worker*, and hours per person employed raise the per-worker marginal product the
   reset wage bargains over: in `Macromodel_template.mod`,
   ∂`w_star`/∂`h` = (1 − β·`lambda_w`)·`eta`·`alpha_n`·`omega_h` > 0 for any
   admissible calibration. A negative response here would indicate an export
@@ -347,7 +364,7 @@ For all countries, verify the impact (t=0) responses in the exported bundle
 - h↑ → π↓ (marginal cost falls: the marginal product rises at once, the
   staggered wage only partly)
 
-All four patterns hold in the committed Poland and UK bundles (checked 2026-11-07 on
+All four patterns hold in the committed Poland and UK bundles (checked 2026-11-08 on
 period 0 of `irfs_eps_L.csv` and `irfs_eps_h.csv`).
 
 Remember that the exported matrices hold **raw `ghu`** entries: a one-standard-deviation

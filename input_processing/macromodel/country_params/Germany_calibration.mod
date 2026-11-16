@@ -141,3 +141,4 @@ chi_u    = 0.0419;  // unemployment SHARE of WAP, U/WAP = chi_L * 0.0544
                     // NOT the U/L unemployment rate (that is 5.44%)
 
 chi_n    = chi_L - chi_u;   // = 0.7281 -> TOTAL employment / WAP
+                            // The observable feeding n is total employment, the same concept as this share.

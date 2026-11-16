@@ -69,7 +69,7 @@ public class MacroPathRecorder {
      * since the handoff quarter, and {var}_total, that trend's level times the DSGE cycle's factor
      * ({@link TrendCycle#totalPct}), also in percent since the handoff quarter. The wage's cycle is
      * the wage per hour {@code w - h}, so {@code w_total} is the wage SimPaths applies in the
-     * quarter; the state column {@code w} stays the DSGE's wage per employee.
+     * quarter; the state column {@code w} stays the DSGE's wage per worker.
      */
     private static final String[] TREND_COLUMN_VARS = {"w", "y", "c", "inv", "k"};
 
@@ -94,11 +94,16 @@ public class MacroPathRecorder {
      * anchor is mode-dependent and therefore not comparable across run modes —
      * see {@code MacroModelManager.startYearAtRiskWage} before reading an
      * early-year level difference as a treatment effect.
-     * n_realized_gap / h_realized_gap / w_trend_revision: the recursive Ramsey feedback's
-     * diagnostics (realized-vs-assumed headcount gap: SimPaths' workers with positive hours,
-     * scaled by lambda, against the planner's employees path, so it includes shifts in the
-     * employee share of workers; hours gap against SimPaths' own latch-year hours; % change
-     * in next year's trend wage from the re-solve); see
+     * p_ramsey: the planner's population against quarter 0, like n_ramsey.
+     * n_realized_gap / h_realized_gap / p_realized_gap / w_trend_revision: the recursive Ramsey
+     * feedback's diagnostics (realized-vs-assumed headcount gap: SimPaths' workers with positive
+     * hours, scaled by lambda, against the planner's workers path; hours gap against SimPaths'
+     * own latch-year hours; population gap 100 (delta_P - 1), SimPaths' population scaled by
+     * lambda_P against the planner's population path; % change in next year's trend wage from
+     * the re-solve). The level of the planner's P is a pure scale, so a population gap moves the
+     * wage only through the time shape of the P path: at rho = 1 it scales the whole remaining
+     * path and leaves the wage unchanged whatever its size. A workers gap moves the wage through
+     * capital per worker whatever the population does. See
      * {@code MacroModelManager.applyRamseyFeedbackWithRealized}. Zero in runs without a
      * Ramsey layer and until the feedback has latched its lambda.
      */
@@ -107,7 +112,8 @@ public class MacroPathRecorder {
         "total_population", "wap_level", "atrisk_level",
         "cat_0_share", "cat_1_share", "cat_2_share", "cat_3_share",
         "cat_0_meanHours", "cat_1_meanHours", "cat_2_meanHours", "cat_3_meanHours",
-        "wage_realized", "n_realized_gap", "h_realized_gap", "w_trend_revision"
+        "wage_realized", "n_realized_gap", "h_realized_gap", "w_trend_revision",
+        "p_ramsey", "p_realized_gap"
     };
 
     // ========== Inner Class for Quarter Data ==========

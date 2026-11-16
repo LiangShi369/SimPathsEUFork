@@ -2104,7 +2104,7 @@ fclose(fid);
 fprintf('    [OK] Summary saved: %s\n', summary_file);
 
 %% =========================================================================
-%% 15B. EXPORT DOCUMENTATION SUMMARY (rendered from WELLSIM_SVEC_Overleaf)
+%% 15B. EXPORT DOCUMENTATION SUMMARY (rendered by documentation_tables/refresh_documentation_tables)
 %% =========================================================================
 try
     dsge_summary = build_dsge_documentation_summary(config, fit_stats, param_table, moments, ...

@@ -6,12 +6,21 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
 % then detrends all 8 DSGE observables.
 %
 % The Ramsey model (open economy with government):
-%   max  Σ β^t N_t u(c_t),   u(c) = (c^{1-σ} - 1)/(1-σ)
-%   s.t. K_{t+1} = (1-δ)K_t + Y_t - N_t c_t - G_t - NX_t
+%   max  Σ β^t P_t u(c_t),   u(c) = (c^{1-σ} - 1)/(1-σ)
+%   s.t. K_{t+1} = (1-δ)K_t + Y_t - P_t c_t - G_t - NX_t
 %        Y_t = A_t K_t^α (N_t h_t)^{1-α}
 %        G_t = g_Y(t) × Y_t    (exogenous government spending share)
 %        NX_t = nx_Y(t) × Y_t  (exogenous net export share)
 %        A_{t+1} = (1+g_A) A_t
+%   P_t resident population (all ages), N_t persons in employment, h_t hours per person employed; C_t = P_t c_t
+%
+% In sample, P_t is the HP trend of the resident population pop_level, as N_t
+% is of n_level; after the last data quarter both grow with the workbook's
+% projection (demographic_P_{country}.csv and demographic_L_{country}.csv).
+% The handoff solve reads demographic_P from the handoff quarter on. Beyond the
+% last row of its source the dependency ratio is frozen, P_t = (P/N)_last × N_t,
+% in the in-sample and in the handoff solve alike, so N/P is asymptotically
+% constant and the balanced-growth closure below holds.
 %
 % G and NX are exogenous: their GDP shares are HP-filtered from data and
 % held constant (or slowly extrapolated) beyond the sample. The household
@@ -27,7 +36,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
 %   inv = 100 * [ln I_obs - ln I_trend]          (Ramsey investment residual)
 %   pi  = pi_obs - pi*                           (inflation target trend)
 %   R   = R_obs - R*_smooth                      (smoothed ex-ante real rate + pi*)
-%   n   = 100 * [ln n_obs - ln N_trend]          (structural employees)
+%   n   = 100 * [ln n_obs - ln N_trend]          (employment)
 %   L   = 100 * [ln L_obs - ln L_demo]           (demographic labor force)
 %   h   = 100 * [ln h_obs - ln h_trend]          (log-linear hours trend)
 %
@@ -200,17 +209,16 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     %% 3. CONSTRUCT LABOR INPUT TRENDS
     %% =====================================================================
     %
-    % Three exogenous inputs to the Ramsey model:
-    %   N_trend(t) = structural employees trend  [for production function]
-    %   h_trend(t) = exp(log-linear trend of h)  [hours per employee]
-    %   A(t)       = A_0 × (1 + g_A)^t           [TFP level]
+    % Four exogenous inputs to the Ramsey model:
+    %   N_trend(t) = employment trend                  [production function]
+    %   h_trend(t) = exp(log-linear trend of h)        [hours per person employed]
+    %   A(t)       = A_0 × (1 + g_A)^t                 [TFP level]
+    %   P_trend(t) = resident population trend         [consumers: utility weight, C = P c]
     %
-    % CRITICAL: N_trend must use the EMPLOYEES concept (excl. self-employed),
-    % because A_0 was calibrated in calibrate_growth_model.m using n_level
-    % (employees) and h_level (hours per employee). Using L × (1-NAWRU) =
-    % total employed (incl. self-employed) creates an ~11% labor input gap,
-    % inflating Y_trend by ~7% and producing a spurious output gap.
-    
+    % N_trend is the HP trend of n_level, all persons in employment, the
+    % concept A_0 was calibrated on in calibrate_growth_model.m (together with
+    % h_level, hours per person employed).
+
     fprintf('\n--- Constructing labor input trends ---\n');
     
     % 3a. Labor force: demographic trend (used for L̂ detrending only).
@@ -236,7 +244,9 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
         L_demo_post = [];
     end
     
-    % 3b. NAWRU (diagnostics only; N_trend does not use it, see 3c)
+    % 3b. NAWRU, for one diagnostic only: 3c checks the employment identity
+    % L(1-u*) against the employment trend once N_trend exists. N_trend does
+    % not use the NAWRU.
     nawru_file = artifact_path('data', sprintf('nawru_%s.csv', lower(country)));
     if exist(nawru_file, 'file')
         nawru_data = readtable(nawru_file);
@@ -251,21 +261,24 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
         fprintf('  NAWRU computed from HP trend of u_level\n');
     end
     
-    % 3c. Structural EMPLOYEES trend (for Ramsey production function)
-    % Uses HP-filtered n_level (employees, national concept, excl. self-empl.)
+    % 3c. Employment trend (for the Ramsey production function)
+    % HP-filtered n_level (all persons in employment, national concept).
     % This is consistent with:
     %   - A_0 calibration (uses n_level)
-    %   - h_level (hours per employee, not per total employed)
-    %   - The DSGE model's n̂ variable (employee employment gap)
+    %   - h_level (hours per person employed)
+    %   - The DSGE model's n̂ variable (employment gap)
     N_trend = hp_filter_trend(log(data.n_level), 160000);
     N_trend = exp(N_trend);
-    
-    % Report comparison: employees vs total employed
-    N_total_employed = L_demo .* (1 - nawru);
-    fprintf('  N_trend (employees, mean)      = %.1f thousand\n', mean(N_trend, 'omitnan'));
-    fprintf('  L*(1-NAWRU) (total empl, mean) = %.1f thousand\n', mean(N_total_employed, 'omitnan'));
-    fprintf('  Self-empl. gap at t=1: %.1f%%\n', ...
-            100*(N_total_employed(1) - N_trend(1))/N_trend(1));
+    fprintf('  N_trend (employment, mean) = %.1f thousand\n', mean(N_trend, 'omitnan'));
+
+    % Diagnostic (printed, never gated): with N all persons in employment,
+    % U = L - N holds in concept, so L_demo*(1-NAWRU) and N_trend measure the
+    % same employment; the gap is the difference between the concepts of the
+    % labour-force and employment series.
+    N_from_L1 = L_demo(1) * (1 - nawru(1));
+    fprintf('  L_demo*(1-NAWRU) vs N_trend at %s: %.1f vs %.1f (gap %+.2f%%)\n', ...
+            char(string(data.time(1))), N_from_L1, N_trend(1), ...
+            100 * (N_from_L1 - N_trend(1)) / N_trend(1));
 
     % 3d. Hours trend: log-linear
     ln_h = log(data.h_level);
@@ -275,8 +288,44 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     h_trend = exp(h_coeffs(1) * t_vec + h_coeffs(2));
     fprintf('  Hours trend: slope = %.6f per quarter (%.2f%% annual)\n', ...
             h_coeffs(1), h_coeffs(1)*400);
-    
-    % 3e. Government and net export shares (exogenous, for open-economy RC)
+
+    % 3e. Population trend: the planner's consumers (utility weight, C = P c)
+    % In sample, P_trend is the HP trend (lambda = 160,000) of the log resident
+    % population pop_level, computed here from the levels data as N_trend is
+    % from n_level; the data stage has spliced the census breaks before.
+    % demographic_P_{country}.csv carries the same trend in its in-sample rows
+    % (calibrate_growth_model.m) and, from the handoff quarter on, the workbook's
+    % projection of all ages (build_population_projection.m). The in-sample
+    % solve chains the rows after the last data quarter on P_trend(T), as N_ext
+    % is chained on L_demo (section 4); the handoff solve reads the file from the
+    % handoff quarter on (section 5b). Both freeze P/N beyond the last row.
+    if ~ismember('pop_level', data.Properties.VariableNames)
+        error('ramsey_trend:noPopLevel', ...
+              ['%s has no pop_level column; the planner''s consumers are the resident population.\n' ...
+               'Re-run stata/make_datasets.do for %s, then calibrate_growth_model(''%s'').'], ...
+              data_file, country, country);
+    end
+    P_trend = exp(hp_filter_trend(log(data.pop_level), 160000));
+    demo_P_file = artifact_path('data', sprintf('demographic_P_%s.csv', lower(country)));
+    if ~exist(demo_P_file, 'file')
+        error('ramsey_trend:noPopulation', ...
+              'Population trend not found: %s\nRun calibrate_growth_model(''%s'') first.', ...
+              demo_P_file, country);
+    end
+    demo_P_data = readtable(demo_P_file);
+    P_demo_full = demo_P_data.P_demo;
+    if length(P_demo_full) < T
+        error('ramsey_trend:shortPopulation', ...
+              ['%s has %d rows, fewer than the %d sample quarters.\n' ...
+               'Run calibrate_growth_model(''%s'') first.'], ...
+              demo_P_file, length(P_demo_full), T, country);
+    end
+    fprintf('  P_trend: HP trend of pop_level through %s; P_demo loaded from %s (n=%d)\n', ...
+            char(string(data.time(T))), demo_P_file, length(P_demo_full));
+    fprintf('  P_trend (population, mean) = %.1f thousand,  P/N at t=1: %.3f\n', ...
+            mean(P_trend, 'omitnan'), P_trend(1) / N_trend(1));
+
+    % 3f. Government and net export shares (exogenous, for open-economy RC)
     % G_t = g_Y(t) × Y_t,  NX_t = nx_Y(t) × Y_t
     % Smoothed with HP filter (λ=160,000) to extract structural shares.
     % COVID period interpolated to prevent pandemic-induced share distortion.
@@ -356,7 +405,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
 
     % Override the forward N extrapolation with the SimPaths-aligned
     % projection embedded in the post-sample tail of demographic_L_*.csv.
-    % L_demo and N_trend live in different units (labor force vs employees),
+    % L_demo and N_trend live in different units (labor force vs employment),
     % so we chain the override on L_demo's relative growth at the handoff.
     if ~isempty(L_demo_post)
         n_avail = min(length(L_demo_post), T_total - T);
@@ -369,6 +418,23 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
                 n_avail, (N_ext(T+n_avail)/N_ext(T))^(1/n_avail) - 1);
     end
 
+    % Consumers: P_trend through the last data quarter, then the rows of
+    % demographic_P after it chained on P_trend(T) with their own growth, as
+    % N_ext is chained on L_demo above, then the dependency ratio of the last
+    % row held on the N_ext path.
+    P_avail = [P_trend; P_trend(T) * P_demo_full(T+1:end) / P_demo_full(T)];
+    P_ext = extend_population_frozen_ratio(P_avail, N_ext, T_total);
+    n_P_avail = min(length(P_avail), T_total);
+    fprintf('  Population P: HP trend of pop_level for %d quarters, %d chained on demographic_P growth, beyond them P/N held at %.3f\n', ...
+            T, n_P_avail - T, P_ext(n_P_avail) / N_ext(n_P_avail));
+    if n_P_avail > T
+        fprintf(['  Population P growth into the quarter after %s: %+.5f%% (demographic_P: %+.5f%%); ' ...
+                 'P_demo/P_trend at %s: %.5f\n'], ...
+                char(string(data.time(T))), 100 * (P_ext(T+1) / P_ext(T) - 1), ...
+                100 * (P_demo_full(T+1) / P_demo_full(T) - 1), ...
+                char(string(data.time(T))), P_demo_full(T) / P_trend(T));
+    end
+
     fprintf('  Mode: EXOGENOUS labor (N taken as given)\n');
     fprintf('  K/Y (BGP target) = %.2f (quarterly)\n', KY_bgp);
 
@@ -376,7 +442,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     labScale = N_ext;     % exogenous labour scale (mirrors Java nPath)
     [K_path, c_path, Y_path, ~, ~, iter, converged] = ...
         ramsey_stacked_newton(K0, T_total, alpha, delta, beta, sigma, ...
-            gY_ext, nxY_ext, KY_bgp, A_ext, h_ext, labScale, econ, ...
+            gY_ext, nxY_ext, KY_bgp, A_ext, h_ext, labScale, P_ext, econ, ...
             tol, max_iter);
 
     c_try = c_path(1);   % retained for diagnostics/save compatibility
@@ -429,6 +495,11 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     handoff_labor_proj = handoff_n_full(handoff_idx:end);
     handoff_h_proj = handoff_h_full(handoff_idx:end);
 
+    % Consumers on the handoff calendar: demographic_P through its last row
+    % (within the contract horizon), then P/N frozen on handoff_n_full.
+    handoff_P_full = extend_population_frozen_ratio(P_demo_full(1:min(end, handoff_ref_total)), handoff_n_full, handoff_ref_total);
+    handoff_P_proj = handoff_P_full(handoff_idx:end);
+
     handoff_gY_full = extend_share(handoff_gY_hist, handoff_ref_total);
     handoff_nxY_full = extend_share(handoff_nxY_hist, handoff_ref_total);
     handoff_gY_proj = handoff_gY_full(handoff_idx:end);
@@ -440,6 +511,8 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     handoff_K0 = K_path(handoff_idx);
 
     handoff_n_ext = extend_level_path(handoff_labor_proj, handoff_total_len, 20);
+    % Beyond the projection the dependency ratio is held at its last value.
+    handoff_P_ext = extend_population_frozen_ratio(handoff_P_proj, handoff_n_ext, handoff_total_len);
     % Tapered, not flat-rate: see the note in extend_exogenous. The tail is a
     % terminal-condition device, and an hours path still declining at the fitted
     % rate contradicts the balanced-growth condition the solve imposes.
@@ -456,28 +529,37 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     [handoff_K_path, handoff_c_path, handoff_Y_path, ~, handoff_N_path, ~, handoff_converged] = ...
         ramsey_stacked_newton(handoff_K0, handoff_total_len, alpha, delta, beta, sigma, ...
             handoff_gY_ext, handoff_nxY_ext, KY_bgp, handoff_A_ext, handoff_h_ext, ...
-            handoff_lab_scale, handoff_econ, tol, max_iter);
+            handoff_lab_scale, handoff_P_ext, handoff_econ, tol, max_iter);
 
     if ~handoff_converged
         warning('SimPaths handoff forward solve did not converge cleanly for %s.', simpaths_handoff_time);
     end
 
     handoff_N0 = handoff_N_path(1);
+    handoff_P0 = handoff_P_ext(1);
     handoff_Y0 = handoff_Y_path(1);
-    handoff_C0 = handoff_N0 * handoff_c_path(1);
+    handoff_C0 = handoff_P0 * handoff_c_path(1);
     handoff_I0 = handoff_Y0 - handoff_C0 - handoff_gY_proj(1) * handoff_Y0 - handoff_nxY_proj(1) * handoff_Y0;
     handoff_w0 = (1 - alpha) * handoff_Y0 / (handoff_N0 * handoff_h_proj(1));
     handoff_r0 = alpha * handoff_Y0 / handoff_K_path(1) - delta;
 
     fprintf('  SimPaths handoff row recomputed at %s (K=%.1f, Y=%.1f, N=%.1f)\n', ...
             simpaths_handoff_time, handoff_K_path(1), handoff_Y0, handoff_N0);
-    
+
+    % Forward reporting window of the handoff solve: 148 quarters, 2023q1 to
+    % 2059q4 for a 2023q1 handoff (printed as +37y). Used for the dependency
+    % ratio here and for the forward wage CAGR in section 10.
+    fwd_q = min(148, handoff_proj_len);
+    fprintf('  Dependency ratio P/N: %.3f at %s, %.3f at +37y\n', ...
+            handoff_P0 / handoff_N0, simpaths_handoff_time, ...
+            handoff_P_ext(fwd_q) / handoff_N_path(fwd_q));
+
     %% =====================================================================
     %% 5. EXTRACT TREND PATHS FOR SAMPLE PERIOD
     %% =====================================================================
     
     K_trend = K_path(1:T);
-    c_trend_pc = c_path(1:T);    % per-capita consumption
+    c_trend_pc = c_path(1:T);    % consumption per head
     Y_trend_q  = Y_path(1:T);    % quarterly GDP
     
     % N_trend is already set: the HP-filtered n_level from Section 3c.
@@ -493,7 +575,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     
     % --- C, I, G, NX trends from the open-economy Ramsey model ---
     % With Y = C + I + G + NX, the model directly produces:
-    %   C_trend = N × c_per_capita  (from Euler equation)
+    %   C_trend = P × c per head    (from Euler equation)
     %   G_trend = g_Y × Y_trend     (exogenous share)
     %   NX_trend = nx_Y × Y_trend   (exogenous share)
     %   I_trend = Y - C - G - NX    (residual investment)
@@ -502,7 +584,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     % Ramsey overstates the private-consumption share whenever G+NX absorb a
     % large fraction of output in the country sample.
     
-    C_trend_det = N_trend .* c_trend_pc;  % aggregate private consumption
+    C_trend_det = P_trend .* c_trend_pc;  % C_trend = P × c per head
     G_trend     = gY_smooth .* Y_trend_q;
     NX_trend    = nxY_smooth .* Y_trend_q;
     I_trend_det = Y_trend_q - C_trend_det - G_trend - NX_trend;
@@ -679,6 +761,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     trend.r_star_annual = r_star_annual;        % Ramsey MPK (annual, for reference)
     trend.r_star_smooth = r_star_smooth;        % Smoothed ex-ante real rate (for R detrending)
     trend.N = N_trend;
+    trend.P = P_trend;                  % Resident population (consumers)
     trend.L = L_demo;
     trend.h = h_trend;
     trend.pi_star = pi_star;
@@ -742,6 +825,9 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     ref.h = h_trend(1:handoff_idx);
     ref.g_Y = gY_smooth(1:handoff_idx);               % Government spending share (for Java solver)
     ref.nx_Y = nxY_smooth(1:handoff_idx);             % Net export share (for Java solver)
+    % P is the LAST column: RamseyTrendModel.loadReferenceCSV reads the first
+    % ten columns by position and the columns after them by header.
+    ref.P = P_trend(1:handoff_idx);                   % Resident population (consumers)
 
     ref_file = artifact_path('output', sprintf('growth_model_reference_%s.csv', lower(country)), 'create', true);
     ref.K(end) = handoff_K_path(1);
@@ -754,6 +840,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     ref.h(end) = handoff_h_proj(1);
     ref.g_Y(end) = handoff_gY_proj(1);
     ref.nx_Y(end) = handoff_nxY_proj(1);
+    ref.P(end) = handoff_P0;
     writetable(ref, ref_file);
     fprintf('  ✓ %s (through SimPaths handoff quarter %s)\n', ref_file, simpaths_handoff_time);
     
@@ -776,7 +863,8 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
                  'c_try', 'iter', 'converged', 'gY_smooth', 'nxY_smooth', ...
                  'g_A_annual_path', 'terminal_growth', ...
                  'handoff_K_path', 'handoff_Y_path', 'handoff_c_path', ...
-                 'handoff_N_path', 'handoff_h_ext', 'handoff_gY_ext', 'handoff_nxY_ext'};
+                 'handoff_N_path', 'handoff_h_ext', 'handoff_gY_ext', 'handoff_nxY_ext', ...
+                 'handoff_P_ext', 'P_trend', 'P_ext'};   % P_ext: the in-sample solve's consumers
     save(artifact_path('output', sprintf('ramsey_trend_%s.mat', lower(country)), 'create', true), save_vars{:});
     fprintf('  ✓ ramsey_trend_%s.mat\n', lower(country));
     
@@ -820,7 +908,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     % the "exogenous wage" slope read off MacroPaths.csv). Uses the same
     % forward Newton solution that produces the SimPaths handoff contract,
     % so the slope here matches what the Java RamseyTrendModel projects.
-    fwd_q = min(148, handoff_proj_len);  % 37 years (e.g. 2023q1 -> 2060q1)
+    % fwd_q is the forward reporting window set in section 5b.
     w_fwd = (1 - alpha) * handoff_Y_path(1:fwd_q) ./ ...
             (handoff_N_path(1:fwd_q) .* handoff_h_ext(1:fwd_q));
     fwd_years = (fwd_q - 1) / 4;
@@ -829,6 +917,11 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     fprintf('  Forward w_trend CAGR (%s +%.0fy) = %.2f%%/yr\n', ...
             simpaths_handoff_time, fwd_years, ...
             100 * diagnostics.forward_wage_cagr_annual);
+
+    % Dependency ratio of the handoff solve, at the handoff and at the end of
+    % the forward reporting window.
+    diagnostics.dependency_ratio_handoff = handoff_P0 / handoff_N0;
+    diagnostics.dependency_ratio_2060 = handoff_P_ext(fwd_q) / handoff_N_path(fwd_q);
 
     fprintf('  C/Y (model) = %.2f%%  I/Y (model) = %.2f%%  (actual GFCF: %.2f%%)\n', ...
             100*diagnostics.CY_model, 100*diagnostics.IY_model, 100*diagnostics.IY_actual);
@@ -1001,15 +1094,19 @@ end
 
 
 function f = ramsey_stacked_residuals(z, K0, alpha, delta, beta, sigma, ...
-                                       gY, nxY, KY_bgp, econ, Tt)
+                                       gY, nxY, KY_bgp, econ, P, Tt)
 % RAMSEY_STACKED_RESIDUALS  Stacked-time perfect-foresight residual vector.
 %
 % Unknown layout (length 2*Tt-1), K_1 fixed at K0:
-%   z(2t-1)=c_t, z(2t)=K_{t+1}  for t=1..Tt-1;  z(2*Tt-1)=c_Tt.
+%   z(2t-1)=c_t (consumption per head), z(2t)=K_{t+1}  for t=1..Tt-1;
+%   z(2*Tt-1)=c_Tt.
 % Residuals (all dimensionless, O(1)):
-%   row 2t-1 : resource    K_{t+1}/RHS - 1
+%   row 2t-1 : resource    K_{t+1}/RHS - 1,
+%                          RHS = (1-delta)K_t + Y_t - P_t c_t - (g_Y+nx_Y)_t Y_t
 %   row 2t   : Euler       c_{t+1}/[c_t (beta(1+r_{t+1}))^{1/sigma}] - 1
 %   row 2Tt-1: terminal    K_Tt/(KY_bgp*Y_Tt) - 1
+% P is the exogenous population path (consumers); the population weight of
+% the objective cancels from the Euler row.
 % Returns [] if the point is infeasible.
     m = 2*Tt - 1;
     f = zeros(m, 1);
@@ -1021,9 +1118,9 @@ function f = ramsey_stacked_residuals(z, K0, alpha, delta, beta, sigma, ...
         if ~(Kt > 0) || ~(ct > 0) || ~(Knext > 0) || ~isfinite(Kt) || ~isfinite(ct)
             f = []; return;
         end
-        [Nt, Yt, ~] = econ(t, Kt, ct);
+        [~, Yt, ~] = econ(t, Kt, ct);
         if ~isfinite(Yt) || Yt <= 0, f = []; return; end
-        rhsK = (1-delta)*Kt + Yt - Nt*ct - (gY(t)+nxY(t))*Yt;
+        rhsK = (1-delta)*Kt + Yt - P(t)*ct - (gY(t)+nxY(t))*Yt;
         if ~(rhsK > 0) || ~isfinite(rhsK), f = []; return; end
         f(2*t-1) = Knext/rhsK - 1;
 
@@ -1048,7 +1145,7 @@ end
 
 function [K, c, Y, l, N, iter, converged] = ramsey_stacked_newton( ...
         K0, Tt, alpha, delta, beta, sigma, gY, nxY, KY_bgp, A, h, ...
-        labScale, econ, tol, max_iter)
+        labScale, P, econ, tol, max_iter)
 % RAMSEY_STACKED_NEWTON  Damped Newton on the stacked-time Ramsey system.
 %
 % Solves the Euler + resource constraints for all Tt quarters jointly with
@@ -1056,6 +1153,7 @@ function [K, c, Y, l, N, iter, converged] = ramsey_stacked_newton( ...
 % tridiagonal (each quarter couples only adjacent unknowns) and is solved
 % with a sparse direct factorisation, so saddle-path conditioning is
 % irrelevant (handles anticipated/delayed permanent shocks).
+% P is the population path (length Tt); c is returned per head.
     m = 2*Tt - 1;
     z = zeros(m, 1);
 
@@ -1072,18 +1170,20 @@ function [K, c, Y, l, N, iter, converged] = ramsey_stacked_newton( ...
     end
     invShare = max(0.03, min(0.45, (G_term - 1 + delta) * KY_bgp));
     Kg = K0;
-    % Per-capita consumption carried across periods. The exogenous econ
+    % Consumption per head carried across periods. The exogenous econ
     % ignores c (N is given), but the solver's econ interface takes (t, K, c)
     % and the previous period's guessed c is the consistent value to pass.
+    % econ supplies N for output; private absorption is divided by P.
     [Ng1, ~, ~] = econ(1, K0, 1);   % the exogenous econ ignores the c arg
     Yg1 = A(1) * K0^alpha * (Ng1*h(1))^(1-alpha);
-    cg_prev = max(1e-6*Yg1/Ng1, (1 - gY(1) - nxY(1) - invShare) * Yg1 / Ng1);
+    Pg1 = P(1);
+    cg_prev = max(1e-6*Yg1/Pg1, (1 - gY(1) - nxY(1) - invShare) * Yg1 / Pg1);
     for t = 1:Tt
         [Ng, ~, ~] = econ(t, Kg, cg_prev);   % the exogenous econ ignores c
         Yg = A(t) * Kg^alpha * (Ng*h(t))^(1-alpha);
         iG = invShare * Yg;
         privAbs = (1 - gY(t) - nxY(t)) * Yg - iG;
-        cG = max(privAbs/Ng, 1e-6*Yg/Ng);
+        cG = max(privAbs/P(t), 1e-6*Yg/P(t));
         cg_prev = cG;
         if t < Tt
             z(2*t-1) = cG;
@@ -1095,7 +1195,7 @@ function [K, c, Y, l, N, iter, converged] = ramsey_stacked_newton( ...
     end
 
     f = ramsey_stacked_residuals(z, K0, alpha, delta, beta, sigma, ...
-            gY, nxY, KY_bgp, econ, Tt);
+            gY, nxY, KY_bgp, econ, P, Tt);
     if isempty(f)
         error('ramsey_stacked_newton:infeasibleGuess', ...
               'Initial guess infeasible. Check scenario/path assumptions.');
@@ -1127,11 +1227,11 @@ function [K, c, Y, l, N, iter, converged] = ramsey_stacked_newton( ...
             step = 1e-7 * max(1, abs(zj));
             z(j) = zj + step;
             fp = ramsey_stacked_residuals(z, K0, alpha, delta, beta, sigma, ...
-                    gY, nxY, KY_bgp, econ, Tt);
+                    gY, nxY, KY_bgp, econ, P, Tt);
             if isempty(fp)
                 z(j) = zj - step;
                 fp = ramsey_stacked_residuals(z, K0, alpha, delta, beta, sigma, ...
-                        gY, nxY, KY_bgp, econ, Tt);
+                        gY, nxY, KY_bgp, econ, P, Tt);
                 step = -step;
             end
             z(j) = zj;
@@ -1179,7 +1279,7 @@ function [K, c, Y, l, N, iter, converged] = ramsey_stacked_newton( ...
         while lambda > 1e-10
             zt = z + lambda*d;
             ft = ramsey_stacked_residuals(zt, K0, alpha, delta, beta, sigma, ...
-                    gY, nxY, KY_bgp, econ, Tt);
+                    gY, nxY, KY_bgp, econ, P, Tt);
             if ~isempty(ft)
                 nn = max(abs(ft));
                 if nn < (1 - 1e-4*lambda)*nrm || lambda < 1e-8
@@ -1245,6 +1345,24 @@ function path_ext = extend_level_path(path_sample, total_length, window_size)
     growth_q = (path_sample(sample_length) / path_sample(sample_length - window))^(1 / window) - 1;
     for t = sample_length + 1:total_length
         path_ext(t) = path_ext(t - 1) * (1 + growth_q);
+    end
+end
+
+
+function P_ext = extend_population_frozen_ratio(P_avail, N_ext, T_total)
+% EXTEND_POPULATION_FROZEN_RATIO  Population path with the dependency ratio frozen.
+%
+% P_avail is authoritative for its first n = min(numel(P_avail), T_total)
+% quarters. Beyond them the dependency ratio is held at its value in quarter n,
+%   P_ext(t) = N_ext(t) * P_ext(n) / N_ext(n),   t > n,
+% so P has no tail rule of its own: it follows N, whatever N's tail rule, and
+% N/P is asymptotically constant as the balanced-growth closure requires.
+% N_ext must have at least T_total rows.
+    n = min(numel(P_avail), T_total);
+    P_ext = zeros(T_total, 1);
+    P_ext(1:n) = P_avail(1:n);
+    for t = n+1:T_total
+        P_ext(t) = N_ext(t) * P_ext(n) / N_ext(n);
     end
 end
 

@@ -150,5 +150,5 @@ shocks;
     var R;      stderr 0.2;      // Interest rate: Riksbank policy-linked
     var n;      stderr 0.3;      // Employment
     var L;      stderr 0.25;     // Labor force: 2021 LFS redesign break
-    var h;      stderr 0.3;      // Hours per employee
+    var h;      stderr 0.3;      // Hours per person employed
 end;

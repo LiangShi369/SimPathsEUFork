@@ -33,7 +33,7 @@ function test_name_collisions()
     fprintf('=================================================================\n\n');
 
     root = fileparts(fileparts(mfilename('fullpath')));
-    folders = {'', 'internal', 'diagnostics', 'tests'};
+    folders = {'', 'internal', 'diagnostics', 'documentation_tables', 'tests'};
 
     % Every function we own, by file name.
     ours = containers.Map('KeyType', 'char', 'ValueType', 'char');

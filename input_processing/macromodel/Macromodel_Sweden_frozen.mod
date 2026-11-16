@@ -1,6 +1,6 @@
 // =========================================================================
 // FROZEN MODEL - AUTO-GENERATED
-// Generated: 2026-10-23 15:08:39
+// Generated: 2026-11-08 15:36:11
 // Source: Macromodel_Sweden (estimation results)
 // DO NOT EDIT MANUALLY - regenerate with generate_frozen_model.m
 // =========================================================================
@@ -229,7 +229,7 @@ lambda_w = 0.75;
 // used heavily in 2020, and working-time accounts are common in the industrial
 // agreements.
 rho_h    = 0.85;    // hours persistence (as Germany, above Poland/Spain's 0.80)
-omega_h  = 0.324568;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point; ESTIMATED)
+omega_h  = 0.326464;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point; ESTIMATED)
 
 // ----- DIRECT LABOR FORCE -> WAGE EFFECT (CALIBRATED) -----
 psi_wL   = -0.05;   // direct L->w elasticity (negative: more L -> lower w)
@@ -253,7 +253,7 @@ delta_k  = 0.025;   // quarterly depreciation ~9.6% annual
                     // delta_k governs the cyclical capital law of motion only.
 rho_inv  = 0.85;    // investment persistence (same starting point)
 phi_inv_y = 0.3;    // investment sensitivity to output gap (structural floor)
-phi_inv_r = 0.140109;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
+phi_inv_r = 0.138878;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
 
 // =========================================================================
 // STEADY STATE LABOR MARKET (Sweden, 2001q1-2025q1 sample)
@@ -284,14 +284,7 @@ chi_u    = 0.0589;  // unemployment SHARE of WAP, U/WAP = chi_L * 0.072685
                     // Implied U/L = chi_u/chi_L = 7.27%, vs sample mean 7.27%
 
 chi_n    = chi_L - chi_u;   // = 0.7511 -> TOTAL employment / WAP
-                            // Note: the observable feeding n is employees excl.
-                            // self-employed. Using the total employment share here
-                            // assumes self-employment moves proportionally with
-                            // employees, which keeps the identity's coefficient
-                            // difference at exactly 1. Sweden has a LOW
-                            // self-employment share (~10% of employment, against
-                            // Poland's 20%), so this assumption does less work
-                            // here than in any other country file.
+                            // The observable feeding n is total employment, the same concept as this share.
 
 
 // =========================================================================
@@ -444,14 +437,14 @@ end;
 //
 // These are STARTING values; Bayesian estimation will update them.
 shocks;
-    var eps_a;      stderr 1.2346;  // ESTIMATED    // technology
-    var eps_d;      stderr 0.3347;  // ESTIMATED    // demand
-    var eps_r;      stderr 0.4795;  // ESTIMATED    // monetary: active, independent Riksbank
-    var eps_L;      stderr 0.3004;  // ESTIMATED    // labor force: migration-driven swings
+    var eps_a;      stderr 1.2431;  // ESTIMATED    // technology
+    var eps_d;      stderr 0.3468;  // ESTIMATED    // demand
+    var eps_r;      stderr 0.4808;  // ESTIMATED    // monetary: active, independent Riksbank
+    var eps_L;      stderr 0.3007;  // ESTIMATED    // labor force: migration-driven swings
     var eps_sep;    stderr 0.10;    // separation: moderate turnover
-    var eps_h;      stderr 0.4336;  // ESTIMATED    // hours: a real margin here (korttidsarbete)
-    var eps_p;      stderr 1.4903;  // ESTIMATED    // cost-push: floating SEK pass-through
-    var eps_inv;    stderr 2.8246;  // ESTIMATED    // investment: ICT/R&D-heavy, volatile
+    var eps_h;      stderr 0.4912;  // ESTIMATED    // hours: a real margin here (korttidsarbete)
+    var eps_p;      stderr 1.5153;  // ESTIMATED    // cost-push: floating SEK pass-through
+    var eps_inv;    stderr 2.8229;  // ESTIMATED    // investment: ICT/R&D-heavy, volatile
 end;
 
 // =========================================================================
@@ -571,7 +564,7 @@ shocks;
     var R;      stderr 0.2;      // Interest rate: Riksbank policy-linked
     var n;      stderr 0.3;      // Employment
     var L;      stderr 0.25;     // Labor force: 2021 LFS redesign break
-    var h;      stderr 0.3;      // Hours per employee
+    var h;      stderr 0.3;      // Hours per person employed
 end;
 
 
@@ -584,9 +577,9 @@ varobs y inv c pi R n L h;
 // c      = Consumption gap (detrended log private consumption, % deviation)
 // pi     = Inflation rate (QoQ annualized, %)
 // R      = Nominal interest rate (3m interbank rate, %)
-// n      = Employment gap (detrended log employment, % deviation)
+// n      = Employment gap (detrended log employment, all persons in employment, % deviation)
 // L      = Labor force gap (detrended log labor force, % deviation)
-// h      = Hours per employee gap (detrended, % deviation)
+// h      = Hours per person employed gap (detrended, % deviation)
 //
 // 8 observables, 8 shocks → just-identified
 

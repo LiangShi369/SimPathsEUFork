@@ -20,8 +20,8 @@ function info = write_hours_projection(growth_mat, output_dir, country)
 % would project different hours from the same bundle with no error anywhere.
 % Emitting the path leaves one computation instead of two.
 %
-% The employment side works the same way: population_projection_*.csv is
-% written here and read there.
+% The demographic side works the same way: population_projection_*.csv
+% (time,N,P) is written here and read there.
 %
 % FORMAT: `time,h`, one row per quarter, starting at the handoff quarter so the
 % first row coincides with the last row of growth_model_reference_*.csv. Length is

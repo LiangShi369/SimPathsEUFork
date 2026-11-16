@@ -428,7 +428,7 @@ public class RamseyScenarioTest {
         double[] gY = new double[quarters];
         double[] nxY = new double[quarters];
 
-        baseline.solveForPath(K0, A0, N, h, gY, nxY, quarters);
+        baseline.solveForPath(K0, A0, N, h, N.clone(), gY, nxY, quarters);
         RamseyTrendModel.TrendState baselineYear1 = baseline.stepYear();
         baseline.resetStepping();
         // Step to year 10 for robust comparison
@@ -447,7 +447,7 @@ public class RamseyScenarioTest {
         scenarioModel.loadParams(paramsFile);
         scenarioModel.loadTerminalState(terminalFile);
         scenarioModel.setScenario(sc, 2025);
-        scenarioModel.solveForPath(K0, A0, N, h, gY, nxY, quarters);
+        scenarioModel.solveForPath(K0, A0, N, h, N.clone(), gY, nxY, quarters);
 
         RamseyTrendModel.TrendState scenarioYear1 = scenarioModel.stepYear();
         scenarioModel.resetStepping();
@@ -496,7 +496,7 @@ public class RamseyScenarioTest {
         double A0 = baseline.getA();
         double[] gY = new double[quarters];
         double[] nxY = new double[quarters];
-        baseline.solveForPath(K0, A0, N, h, gY, nxY, quarters);
+        baseline.solveForPath(K0, A0, N, h, N.clone(), gY, nxY, quarters);
 
         // Zero scenario
         Path zeroCsv = tempDir.resolve("zero_scenario.csv");
@@ -515,7 +515,7 @@ public class RamseyScenarioTest {
         // hasScenario() should be false for all-zero scenario
         assertFalse(withZero.hasScenario(),
                 "All-zero scenario should not count as active");
-        withZero.solveForPath(K0, A0, N, h, gY, nxY, quarters);
+        withZero.solveForPath(K0, A0, N, h, N.clone(), gY, nxY, quarters);
 
         // Compare quarter by quarter
         for (int q = 0; q < quarters; q++) {

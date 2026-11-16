@@ -14,7 +14,7 @@ function summary = build_ramsey_documentation_summary(params, country, diagnosti
     summary = struct();
     summary.metadata = struct();
     summary.metadata.country = country;
-    summary.metadata.model_version = 'v17';
+    summary.metadata.model_version = 'v22';
 
     summary.structural = struct();
     summary.structural.base_year = params.base_year;
@@ -44,6 +44,8 @@ function summary = build_ramsey_documentation_summary(params, country, diagnosti
     summary.base_year_values.L0 = base.L;
     summary.base_year_values.h0 = base.h;
     summary.base_year_values.A0 = base.A_implied;
+    summary.base_year_values.P0 = base.P;
+    summary.base_year_values.dependency_ratio0 = base.P / base.N;
     summary.base_year_values.CY = params.expenditure_shares.CY_base;
     summary.base_year_values.IY = params.expenditure_shares.IY_base;
     summary.base_year_values.GY = params.expenditure_shares.GY_base;

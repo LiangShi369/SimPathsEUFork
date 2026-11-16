@@ -46,7 +46,7 @@ function ramsey_projection_plot(country, options)
 
     required = {'handoff_K_path', 'handoff_Y_path', 'handoff_c_path', ...
                 'handoff_N_path', 'handoff_h_ext', 'handoff_gY_ext', ...
-                'handoff_nxY_ext', 'simpaths_handoff_time', 'params'};
+                'handoff_nxY_ext', 'handoff_P_ext', 'simpaths_handoff_time', 'params'};
     missing = required(~isfield(S, required));
     if ~isempty(missing)
         error('ramsey_projection_plot:BundleIncomplete', ...
@@ -67,7 +67,12 @@ function ramsey_projection_plot(country, options)
     gYq = S.handoff_gY_ext(1:length(Kq));
     nxYq = S.handoff_nxY_ext(1:length(Kq));
 
-    Cq = Nq .* cq;
+    Pq = S.handoff_P_ext(1:length(Kq));
+    Pq = Pq(:);
+
+    % handoff_c_path is consumption per head of the resident population, so
+    % aggregate consumption scales with P. Output per worker and hours stay on N.
+    Cq = Pq .* cq;
     Iq = Yq - Cq - gYq .* Yq - nxYq .* Yq;
     wq = (1 - alpha) * Yq ./ (Nq .* hq);
 
@@ -94,8 +99,11 @@ function ramsey_projection_plot(country, options)
 
     years = start_year_proj:end_year_proj;
     n_years = numel(years);
-    ann = annualize_complete_years([wq, Yq, Cq, Iq, Kq], quarter_year, years);
+    depratio_q = Pq ./ Nq;                 % residents per person employed
+    hph_q      = Nq .* hq ./ Pq;           % hours worked per resident
+    ann = annualize_complete_years([wq, Yq, Cq, Iq, Kq, depratio_q, hph_q], quarter_year, years);
     Wann = ann(:,1); Yann = ann(:,2); Cann = ann(:,3); Iann = ann(:,4); Kann = ann(:,5);
+    DRann = ann(:,6); HPHann = ann(:,7);
 
     % --- Investment-rate vs capital-widening diagnostic (6th panel) ---
     % Capital accumulates as K_{t+1} = (1-delta)K_t + I_t, so the capital-
@@ -166,10 +174,12 @@ function ramsey_projection_plot(country, options)
     pct_C = 100 * (Cann ./ base_C - 1);
     pct_I = 100 * (Iann ./ base_I - 1);
     pct_K = 100 * (Kann ./ base_K - 1);
+    pct_DR  = 100 * (DRann  ./ depratio_q(1) - 1);
+    pct_HPH = 100 * (HPHann ./ hph_q(1) - 1);
 
     fig = figure('Name', sprintf('Ramsey Projection - %s', country), ...
                  'Color', 'w', 'Position', [100 100 1500 850]);
-    layout = tiledlayout(fig, 3, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
+    layout = tiledlayout(fig, 4, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 
     plot_panel(years, pct_W, 'Wage trend');
     plot_panel(years, pct_Y, 'Output trend');
@@ -180,6 +190,7 @@ function ramsey_projection_plot(country, options)
     plot_saving_panel(years, sIann, sNatann, sNonCann, options.simpaths_saving_rate);
     plot_saving_deviation_panel(years, sIann, sNatann, sNonCann, sYdann);
     plot_household_rate_panel(years, sYdann, options.simpaths_saving_rate);
+    plot_dependency_panel(years, pct_DR, pct_HPH);
 
     layout_title = sprintf('Ramsey ex-ante projection -- %s (%d-%d)', ...
                            country, years(first_idx), years(find(valid,1,'last')));
@@ -214,6 +225,27 @@ function plot_panel(years, values, title_str)
     title(title_str);
     ylabel('% from first year');
     legend('Baseline', 'Scenario', 'Location', 'best', 'FontSize', 7, 'Box', 'on');
+    tick_step = max(1, round((years(end) - years(1)) / 8));
+    xticks(years(1):tick_step:years(end));
+    xtickangle(0);
+end
+
+
+function plot_dependency_panel(years, pct_dr, pct_hph)
+% PLOT_DEPENDENCY_PANEL  Dependency ratio P/N and hours worked per resident
+% N*h/P, annual averages indexed against the handoff quarter like the other
+% tiles.
+    nexttile;
+    plot(years, zeros(size(years)), '--', 'Color', [0.5 0.5 0.5], 'LineWidth', 1.0);
+    hold on;
+    h1 = plot(years, pct_dr,  '-',  'Color', [0.10 0.25 0.55], 'LineWidth', 1.6);
+    h2 = plot(years, pct_hph, '--', 'Color', [0.75 0.20 0.20], 'LineWidth', 1.6);
+    hold off;
+    xlim([years(1) years(end)]);
+    grid on;
+    title('Dependency ratio and hours worked per head');
+    ylabel('% from first year');
+    legend([h1 h2], {'P/N', 'N\cdot h/P'}, 'Location', 'best', 'FontSize', 7, 'Box', 'on');
     tick_step = max(1, round((years(end) - years(1)) / 8));
     xticks(years(1):tick_step:years(end));
     xtickangle(0);

@@ -33,8 +33,10 @@
     "nawru_file": "nawru_germany.csv",
     "demographic_L_source": "PLACEHOLDER: HP trend (lambda=160000) of the in-sample labour force, written by calibrate_growth_model.m; no projection tail. Intended source: Eurostat population projections + Destatis labor force participation.",
     "demographic_L_file": "demographic_L_germany.csv",
+    "demographic_P_source": "Up to the SimPaths handoff quarter: HP trend (lambda=160000) of the resident population (pop_level, census breaks spliced in the data stage), written by calibrate_growth_model.m. After it: growth path of SimPaths align_popProjections.xlsx (all ages), written by build_population_projection.m.",
+    "demographic_P_file": "demographic_P_germany.csv",
     "hours_trend_method": "log_linear",
-    "x_comment": "nawru_file is read for diagnostics only. demographic_L_file has no post-sample tail, so ramsey_trend.m extends N at its trailing 20-quarter trend growth rate, untapered, until build_population_projection.m supplies a projection. Hours: log-linear trend fitted to observed."
+    "x_comment": "nawru_file is read for diagnostics only. demographic_L_file has no post-sample tail, so ramsey_trend.m extends N at its trailing 20-quarter trend growth rate, untapered, until build_population_projection.m supplies a projection. Hours: log-linear trend fitted to observed. The planner reads demographic_P_file in full and holds P/N at its last value beyond it."
   },
   "solver": {
     "method": "stacked_newton_lbj",

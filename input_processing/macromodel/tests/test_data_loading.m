@@ -121,6 +121,27 @@ function test_data_loading()
     end
 
     %% ================================================================
+    fprintf('\nTEST 8: every levels file carries a spliced resident population\n');
+    % A census step in demo_pjan is 2.0-2.5%% between two 1 January figures; a true
+    % quarterly population change is an order of magnitude smaller. The splice in
+    % make_datasets.do removes the step before anything is smoothed.
+    for i = 1:numel(countries)
+        level_file = artifact_path('data', sprintf('data_for_dynare_levels_%s.csv', countries{i}));
+        if ~exist(level_file, 'file')
+            fprintf('  [SKIP] %s not present\n', level_file);
+            continue;
+        end
+        tbl = trim_trailing_missing(readtable(level_file));
+        has_col = ismember('pop_level', tbl.Properties.VariableNames);
+        ok = has_col && all(isfinite(tbl.pop_level)) && all(tbl.pop_level > 0);
+        max_step = NaN;
+        if ok, max_step = max(abs(diff(log(tbl.pop_level)))); end
+        [n_pass, n_fail] = check(ok && max_step < 0.01, ...
+            sprintf('%-8s pop_level present, positive, largest quarterly log step %.4f < 0.01', ...
+                    countries{i}, max_step), n_pass, n_fail);
+    end
+
+    %% ================================================================
     fprintf('\n-----------------------------------------------------------------\n');
     fprintf('  %d passed, %d failed\n', n_pass, n_fail);
     fprintf('-----------------------------------------------------------------\n\n');

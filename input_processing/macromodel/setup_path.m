@@ -13,7 +13,7 @@ function added = setup_path(options)
 %
 % WHY THIS IS NEEDED
 %   MATLAB's addpath is NOT recursive, and the model's code lives in
-%   subfolders (internal/, diagnostics/, tests/). Only the current folder is
+%   subfolders (internal/, diagnostics/, documentation_tables/, tests/). Only the current folder is
 %   searched automatically, so without this call a function in one of those
 %   subfolders is simply "undefined".
 %
@@ -39,7 +39,7 @@ function added = setup_path(options)
     % Code folders only. Data folders (data, country_params) are addressed by
     % path from the code and must NOT be on the MATLAB path -- a .m file
     % appearing in one of them would then shadow or be shadowed unpredictably.
-    code_dirs = {'internal', 'diagnostics', 'tests'};
+    code_dirs = {'internal', 'diagnostics', 'documentation_tables', 'tests'};
 
     added = {};
     current = path;

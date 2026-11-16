@@ -131,8 +131,4 @@ chi_u    = 0.1137;  // unemployment SHARE of WAP, U/WAP = chi_L * 0.15369
                     // Implied U/L = chi_u/chi_L = 15.36%, vs sample mean 15.37%
 
 chi_n    = chi_L - chi_u;   // = 0.6263 -> TOTAL employment / WAP
-                            // Note: the observable feeding n is employees excl.
-                            // self-employed. Using the total employment share here
-                            // assumes self-employment moves proportionally with
-                            // employees, which keeps the identity's coefficient
-                            // difference at exactly 1.
+                            // The observable feeding n is total employment, the same concept as this share.

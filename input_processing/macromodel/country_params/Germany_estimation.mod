@@ -166,5 +166,5 @@ shocks;
     var R;      stderr 0.2;      // Interest rate: ~1.5% std dev → 0.2% meas. error
     var n;      stderr 0.3;      // Employment: ~1.5% std dev → 0.3% meas. error
     var L;      stderr 0.15;     // Labor force: ~0.3% std dev → 0.15% meas. error
-    var h;      stderr 0.3;      // Hours per employee: ~1.0% std dev → 0.3% meas. error
+    var h;      stderr 0.3;      // Hours per person employed: ~1.0% std dev → 0.3% meas. error
 end;

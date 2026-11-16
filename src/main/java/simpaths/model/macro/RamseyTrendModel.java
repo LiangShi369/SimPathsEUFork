@@ -14,17 +14,28 @@ import org.apache.log4j.Logger;
  *
  * <p>Solves the deterministic Ramsey optimal savings problem:</p>
  * <pre>
- *   max  Σ β^t N_t u(c_t),   u(c) = (c^{1-σ} - 1)/(1-σ)
- *   s.t. K_{t+1} = (1-δ)K_t + Y_t - N_t·c_t - g_Y(t)·Y_t - nx_Y(t)·Y_t
+ *   max  Σ β^t P_t u(c_t),   u(c) = (c^{1-σ} - 1)/(1-σ)
+ *   s.t. K_{t+1} = (1-δ)K_t + Y_t - P_t·c_t - (g_Y(t) + nx_Y(t))·Y_t
  *        Y_t = A_t · K_t^α · (N_t·h_t)^{1-α}
  *        A_{t+1} = (1 + g_A) · A_t
+ *
+ *   C_t = P_t·c_t,   I_t = Y_t - C_t - G_t - NX_t,
+ *   w_t = (1-α)·Y_t/(N_t·h_t),   r_t = α·Y_t/K_t - δ
  * </pre>
  *
- * <p>where g_Y(t) is the government spending share of GDP and nx_Y(t) is the
- * net exports share of GDP, both exogenously given. The Euler equation is
- * unaffected by G and NX (household optimization does not change), so the
- * terminal BGP K/Y ratio is pinned down by the growth-corrected modified
- * golden rule and the implied terminal MPK.</p>
+ * <p>where P_t is the resident population of all ages (the consumers, one head one
+ * weight), c_t consumption per head, N_t the number of persons in employment, h_t
+ * hours per person employed, and g_Y(t) and nx_Y(t) the government spending and net
+ * exports shares of GDP. The exogenous paths are A, N, h, P, g_Y and nx_Y. The
+ * population weight cancels from the first-order conditions, so the Euler equation
+ * is c_{t+1}/c_t = [β(1+r_{t+1})]^{1/σ}, unaffected by P, G and NX, and the
+ * terminal BGP K/Y ratio is pinned down by the growth-corrected modified golden
+ * rule and the implied terminal MPK. The level of P is a pure scale: scaling the
+ * whole path scales c by its inverse and leaves K, Y, C, w and r unchanged, so P moves
+ * the allocation only through the time shape of its path; labour input N·h moves it
+ * through capital per worker whatever P does. Beyond the last quarter passed to
+ * {@link #solveForPath} the dependency ratio P/N is held at its value in that
+ * quarter, so N/P is constant wherever the terminal closure acts.</p>
  *
  * <p>Solved via a stacked-time Newton (LBJ) perfect-foresight solve. The
  * transversality condition is approximated by requiring K/Y to converge to
@@ -36,8 +47,8 @@ import org.apache.log4j.Logger;
  *   <li><b>MATLAB (estimation pipeline)</b>: Detrend historical observables.
  *       Implemented in {@code ramsey_trend.m} with identical algorithm.</li>
  *   <li><b>Java (SimPaths runtime)</b>: Compute forward trend paths from
- *       the terminal state of the estimation sample, using SimPaths'
- *       projected labor force and hours as exogenous inputs.</li>
+ *       the terminal state of the estimation sample, using the projected
+ *       employment, hours and population as exogenous inputs.</li>
  * </ol>
  *
  * <p>Both implementations read the same {@code growth_params_{COUNTRY}.json}
@@ -163,11 +174,17 @@ public class RamseyTrendModel {
     /** Solved output path */
     private double[] solvedY;
 
-    /** Exogenous labor (employees) path */
+    /** Exogenous employment path (persons in employment), extended over the terminal tail */
     private double[] pathN;
 
-    /** Exogenous hours per worker path */
+    /** Exogenous hours per person employed path, extended over the terminal tail */
     private double[] pathH;
+
+    /**
+     * Exogenous resident population path, all ages (the planner's consumers), extended
+     * over the terminal tail at the dependency ratio of the last quarter passed in
+     */
+    private double[] pathP;
 
     /** Exogenous TFP path */
     private double[] pathA;
@@ -354,21 +371,24 @@ public class RamseyTrendModel {
     /**
      * Solve the Ramsey model for the optimal consumption and capital paths.
      *
-    * <p>Given exogenous paths for labor (N, employees), hours (h), government spending share (gY),
-    * net exports share (nxY), initial capital K_0, and initial TFP A_0, this method solves
-    * the full stacked perfect-foresight system subject to the Euler equation and terminal
-    * transversality condition.</p>
+     * <p>Given exogenous paths for employment (N, persons in employment), hours per person
+     * employed (h), the resident population (P), the government spending share (gY), the net
+     * exports share (nxY), initial capital K_0 and initial TFP A_0, this method solves the full
+     * stacked perfect-foresight system subject to the Euler equation and the terminal
+     * transversality condition. Beyond {@code quarters} the population follows the extended
+     * employment path at the dependency ratio P/N of quarter {@code quarters - 1}.</p>
      *
      * @param K0      Initial capital stock
      * @param A0      Initial TFP level
-     * @param N       Exogenous labor path (employees, quarterly, length = simQuarters)
-     * @param h       Exogenous hours per worker path (quarterly, length = simQuarters)
-     * @param gY      Exogenous government spending share path (quarterly, length = simQuarters)
-     * @param nxY     Exogenous net exports share path (quarterly, length = simQuarters)
+     * @param N       Exogenous employment path (persons in employment, quarterly, length = quarters)
+     * @param h       Exogenous hours per person employed path (quarterly, length = quarters)
+     * @param P       Exogenous resident population path, all ages (quarterly, length = quarters)
+     * @param gY      Exogenous government spending share path (quarterly, length = quarters)
+     * @param nxY     Exogenous net exports share path (quarterly, length = quarters)
      * @param quarters Number of simulation quarters (the "in-sample" or forward horizon)
      * @throws IllegalStateException If parameters not loaded
      */
-    public void solveForPath(double K0, double A0, double[] N, double[] h,
+    public void solveForPath(double K0, double A0, double[] N, double[] h, double[] P,
                              double[] gY, double[] nxY, int quarters) {
         if (!paramsLoaded) {
             throw new IllegalStateException("Parameters not loaded. Call loadParams() first.");
@@ -387,6 +407,10 @@ public class RamseyTrendModel {
                     "N length (%d) and h length (%d) must match quarters (%d)",
                     N.length, h.length, quarters));
         }
+        if (P.length != quarters) {
+            throw new IllegalArgumentException(String.format(
+                    "P length (%d) must match quarters (%d)", P.length, quarters));
+        }
         if (gY.length != quarters || nxY.length != quarters) {
             throw new IllegalArgumentException(String.format(
                     "gY length (%d) and nxY length (%d) must match quarters (%d)",
@@ -394,6 +418,7 @@ public class RamseyTrendModel {
         }
         validateExogenousInput(N, "N");
         validateExogenousInput(h, "h");
+        validateExogenousInput(P, "P");
         validateShareInput(gY, "gY");
         validateShareInput(nxY, "nxY");
 
@@ -419,6 +444,7 @@ public class RamseyTrendModel {
         // Build extended exogenous paths
         double[] nExt = extendExogenous(N, totalQ, TAIL_DEMOGRAPHIC_WINDOW);
         double[] hExt = extendWithTaperedGrowth(h, totalQ, TAIL_HOURS_WINDOW);
+        double[] pExt = extendWithFrozenRatio(P, nExt, totalQ);
         double[] aExt = buildTfpPathVarying(A0, totalQ, gAQArr);
         double[] gYExt = extendShare(gY, totalQ);
         double[] nxYExt = extendShare(nxY, totalQ);
@@ -441,6 +467,7 @@ public class RamseyTrendModel {
 
         this.pathN = new double[totalQ];
         this.pathH = new double[totalQ];
+        this.pathP = pExt;
         this.pathA = aExt;
         this.pathGY = gYExt;
         this.pathNXY = nxYExt;
@@ -481,7 +508,7 @@ public class RamseyTrendModel {
         solvedC = new double[totalQ];
         solvedY = new double[totalQ];
 
-        int iter = stackedNewtonSolve(K0, aExt, nExt, hExt, gYExt, nxYExt, totalQ,
+        int iter = stackedNewtonSolve(K0, aExt, nExt, hExt, pExt, gYExt, nxYExt, totalQ,
                 alphaArr, deltaArr, betaArr, sigmaArr, gTerminal,
                 solvedK, solvedC, solvedY);
 
@@ -580,9 +607,10 @@ public class RamseyTrendModel {
 
         double kVal = solvedK[quarterIdx];
         double yVal = solvedY[quarterIdx];
-        double cVal = solvedC[quarterIdx];  // per capita
-        double nVal = pathN[quarterIdx];    // employees
+        double cVal = solvedC[quarterIdx];  // per head
+        double nVal = pathN[quarterIdx];    // persons in employment
         double hVal = pathH[quarterIdx];
+        double pVal = pathP[quarterIdx];    // resident population
 
         // Use time-varying alpha if solved with scenario, otherwise baseline
         double alpha = (solvedAlpha != null) ? solvedAlpha[quarterIdx] : alphaK;
@@ -593,13 +621,13 @@ public class RamseyTrendModel {
         double rQuarterly = alpha * yVal / kVal - delta;
         double rAnnual = Math.pow(1.0 + rQuarterly, 4) - 1.0;
 
-        double cAgg = nVal * cVal;
+        double cAgg = pVal * cVal;
         double gVal = pathGY[quarterIdx] * yVal;
         double nxVal = pathNXY[quarterIdx] * yVal;
         double iVal = yVal - cAgg - gVal - nxVal;
 
         return new TrendState(yVal, cAgg, iVal, kVal, wage, rQuarterly, rAnnual, nVal,
-                pathA[quarterIdx], gVal, nxVal);
+                pathA[quarterIdx], gVal, nxVal, pVal);
     }
 
     /**
@@ -623,7 +651,7 @@ public class RamseyTrendModel {
 
         double ySum = 0, cSum = 0, iSum = 0, kSum = 0;
         double wSum = 0, rqSum = 0, nSum = 0;
-        double gSum = 0, nxSum = 0;
+        double gSum = 0, nxSum = 0, pSum = 0;
 
         for (int q = 0; q < 4; q++) {
             TrendState qs = getTrendAtQuarter(currentQuarterIdx + q);
@@ -636,6 +664,7 @@ public class RamseyTrendModel {
             nSum += qs.labor();
             gSum += qs.government();
             nxSum += qs.netExports();
+            pSum += qs.population();
         }
 
         currentQuarterIdx += 4;
@@ -655,7 +684,8 @@ public class RamseyTrendModel {
                 nSum / 4.0,   // average N
                 aVal,         // end-of-year A
                 gSum / 4.0,   // average quarterly G
-                nxSum / 4.0   // average quarterly NX
+                nxSum / 4.0,  // average quarterly NX
+                pSum / 4.0    // average P
         );
     }
 
@@ -710,18 +740,23 @@ public class RamseyTrendModel {
      * Stacked-time residual vector for the perfect-foresight Ramsey system.
      *
      * <p>Unknown layout (length 2T-1), K_0 fixed at {@code K0}:
-     * u[2t]=c_t, u[2t+1]=K_{t+1} for t=0..T-2; u[2T-2]=c_{T-1}.
+     * u[2t]=c_t (consumption per head), u[2t+1]=K_{t+1} for t=0..T-2; u[2T-2]=c_{T-1}.
      * Residuals (all dimensionless, O(1)):</p>
      * <ul>
-     *   <li>row 2t  (t=0..T-2): resource constraint K_{t+1}/RHS - 1</li>
+     *   <li>row 2t  (t=0..T-2): resource constraint K_{t+1}/RHS - 1,
+     *       RHS = (1-δ)K_t + Y_t - P_t·c_t - (g_Y + nx_Y)_t·Y_t</li>
      *   <li>row 2t+1 (t=0..T-2): Euler c_{t+1}/[c_t(β(1+r_{t+1}))^{1/σ}] - 1</li>
      *   <li>row 2T-2: terminal transversality K_{T-1}/(kyBgp·Y_{T-1}) - 1</li>
      * </ul>
      *
+     * <p>{@code pPath} is the population path (the consumers); the population weight of
+     * the objective cancels from the Euler row.</p>
+     *
      * @return residual array of length 2T-1, or null if the point is infeasible
      */
     private double[] stackedResiduals(double[] u, double K0, double[] aPath, double[] nPath,
-                                      double[] hPath, double[] gYPath, double[] nxYPath, int T,
+                                      double[] hPath, double[] pPath, double[] gYPath,
+                                      double[] nxYPath, int T,
                                       double[] alphaArr, double[] deltaArr, double[] betaArr,
                                       double[] sigmaArr) {
         int m = 2 * T - 1;
@@ -734,9 +769,9 @@ public class RamseyTrendModel {
 
             double[] e = periodEconomics(t, Kt, ct, aPath, nPath, hPath, alphaArr);
             if (e == null) return null;
-            double nT = e[0], yT = e[1];
+            double yT = e[1];
 
-            double rhsK = (1.0 - deltaArr[t]) * Kt + yT - nT * ct
+            double rhsK = (1.0 - deltaArr[t]) * Kt + yT - pPath[t] * ct
                     - (gYPath[t] + nxYPath[t]) * yT;
             if (!(rhsK > 0) || !Double.isFinite(rhsK) || !(Knext > 0)) return null;
             f[2 * t] = Knext / rhsK - 1.0;
@@ -776,11 +811,11 @@ public class RamseyTrendModel {
      */
     private int stackedNewtonCore(double[] u, double K0,
                                    double[] aPath, double[] nPath, double[] hPath,
-                                   double[] gYPath, double[] nxYPath, int T,
+                                   double[] pPath, double[] gYPath, double[] nxYPath, int T,
                                    double[] alphaArr, double[] deltaArr, double[] betaArr,
                                    double[] sigmaArr) {
         int m = 2 * T - 1;
-        double[] f = stackedResiduals(u, K0, aPath, nPath, hPath, gYPath, nxYPath, T,
+        double[] f = stackedResiduals(u, K0, aPath, nPath, hPath, pPath, gYPath, nxYPath, T,
                 alphaArr, deltaArr, betaArr, sigmaArr);
         if (f == null) {
             throw new IllegalStateException(
@@ -813,12 +848,12 @@ public class RamseyTrendModel {
                 double uj = u[j];
                 double step = 1e-7 * Math.max(1.0, Math.abs(uj));
                 u[j] = uj + step;
-                double[] fp = stackedResiduals(u, K0, aPath, nPath, hPath, gYPath, nxYPath, T,
+                double[] fp = stackedResiduals(u, K0, aPath, nPath, hPath, pPath, gYPath, nxYPath, T,
                         alphaArr, deltaArr, betaArr, sigmaArr);
                 u[j] = uj;
                 if (fp == null) {
                     u[j] = uj - step;
-                    fp = stackedResiduals(u, K0, aPath, nPath, hPath, gYPath, nxYPath, T,
+                    fp = stackedResiduals(u, K0, aPath, nPath, hPath, pPath, gYPath, nxYPath, T,
                             alphaArr, deltaArr, betaArr, sigmaArr);
                     u[j] = uj;
                     step = -step;
@@ -870,7 +905,7 @@ public class RamseyTrendModel {
             double[] fTrial = null;
             while (lambda > 1e-10) {
                 for (int i = 0; i < m; i++) uTrial[i] = u[i] + lambda * rhs[i];
-                fTrial = stackedResiduals(uTrial, K0, aPath, nPath, hPath, gYPath, nxYPath, T,
+                fTrial = stackedResiduals(uTrial, K0, aPath, nPath, hPath, pPath, gYPath, nxYPath, T,
                         alphaArr, deltaArr, betaArr, sigmaArr);
                 if (fTrial != null) {
                     newNorm = infNorm(fTrial);
@@ -902,7 +937,7 @@ public class RamseyTrendModel {
      * @return number of Newton iterations used
      */
     private int stackedNewtonSolve(double K0, double[] aPath, double[] nPath, double[] hPath,
-                                    double[] gYPath, double[] nxYPath, int T,
+                                    double[] pPath, double[] gYPath, double[] nxYPath, int T,
                                     double[] alphaArr, double[] deltaArr, double[] betaArr,
                                     double[] sigmaArr,
                                     double gTerminal, double[] kOut, double[] cOut,
@@ -911,7 +946,7 @@ public class RamseyTrendModel {
         double[] u = new double[m];
 
         // Feasible BGP-like initial guess: integrate forward with a constant
-        // BGP investment share.
+        // BGP investment share; private absorption is shared over the population.
         double Kg = K0;
         for (int t = 0; t < T; t++) {
             double nG = nPath[t];
@@ -921,7 +956,7 @@ public class RamseyTrendModel {
             invShare = Math.max(0.03, Math.min(0.45, invShare));
             double iG = invShare * yG;
             double privAbs = (1.0 - gYPath[t] - nxYPath[t]) * yG - iG;
-            double cG = Math.max(privAbs / nG, 1e-6 * yG / nG);
+            double cG = Math.max(privAbs / pPath[t], 1e-6 * yG / pPath[t]);
             if (t < T - 1) {
                 u[2 * t] = cG;
                 double KnextG = (1.0 - deltaArr[t]) * Kg + iG;
@@ -932,7 +967,7 @@ public class RamseyTrendModel {
             }
         }
 
-        int it = stackedNewtonCore(u, K0, aPath, nPath, hPath, gYPath, nxYPath, T,
+        int it = stackedNewtonCore(u, K0, aPath, nPath, hPath, pPath, gYPath, nxYPath, T,
                 alphaArr, deltaArr, betaArr, sigmaArr);
 
         // Reconstruct full paths from the converged unknowns.
@@ -1091,6 +1126,43 @@ public class RamseyTrendModel {
         for (int t = last; t < totalLen; t++) {
             logGrowth *= rho;
             out[t] = out[t - 1] * Math.exp(logGrowth);
+        }
+        return out;
+    }
+
+    /**
+     * Extend a population path past its last quarter at that quarter's dependency ratio:
+     * {@code out[t] = nExt[t] * p[last] / nExt[last]} for {@code t >= p.length}.
+     *
+     * <p>Mirrors {@code extend_population_frozen_ratio} in ramsey_trend.m, used there in
+     * both solves. The population has no tail rule of its own: it follows the employment
+     * path, whatever that path's tail rule, so N/P is constant wherever the balanced-growth
+     * closure acts.</p>
+     *
+     * @param p        population path, authoritative for its whole length
+     * @param nExt     employment path over at least {@code totalLen} quarters; the ratio is
+     *                 taken at quarter {@code p.length - 1} of this path
+     * @param totalLen length of the extended path
+     * @return population path of length {@code totalLen}
+     */
+    static double[] extendWithFrozenRatio(double[] p, double[] nExt, int totalLen) {
+        if (p == null || p.length == 0) {
+            throw new IllegalArgumentException("p must be non-null and non-empty");
+        }
+        if (totalLen < p.length) {
+            throw new IllegalArgumentException(String.format(
+                    "totalLen (%d) must be >= p length (%d)", totalLen, p.length));
+        }
+        if (nExt == null || nExt.length < totalLen) {
+            throw new IllegalArgumentException(String.format(
+                    "nExt length (%s) must be >= totalLen (%d)",
+                    nExt == null ? "null" : String.valueOf(nExt.length), totalLen));
+        }
+        double[] out = new double[totalLen];
+        System.arraycopy(p, 0, out, 0, p.length);
+        int last = p.length - 1;
+        for (int t = p.length; t < totalLen; t++) {
+            out[t] = nExt[t] * p[last] / nExt[last];
         }
         return out;
     }
@@ -1403,13 +1475,14 @@ public class RamseyTrendModel {
     /**
      * Load the MATLAB reference CSV for cross-validation.
      *
-     * <p>Expected columns: time,K,Y,C,I,w,r_star,N,L,h[,g_Y,nx_Y]</p>
-     * <p>The g_Y and nx_Y columns are optional (default 0). Further columns are
-     * ignored.</p>
+     * <p>Expected columns: time,K,Y,C,I,w,r_star,N,L,h in this order, then g_Y, nx_Y
+     * and P located by header.</p>
+     * <p>The g_Y and nx_Y columns are optional (default 0). The P column (the resident
+     * population, the planner's consumers) is mandatory. Further columns are ignored.</p>
      *
      * @param csvPath Path to growth_model_reference_{country}.csv
      * @return List of ReferenceRow records
-     * @throws IOException If the file cannot be read
+     * @throws IOException If the file cannot be read, or its header has no P column
      */
     public static List<ReferenceRow> loadReferenceCSV(Path csvPath) throws IOException {
         List<String> lines = Files.readAllLines(csvPath);
@@ -1417,14 +1490,20 @@ public class RamseyTrendModel {
 
         if (lines.isEmpty()) return rows;
 
-        // Parse header to find optional column indices
+        // Parse header to find the columns located by name
         String[] headers = MacroCsv.splitRow(lines.get(0));
         int gYCol = -1;
         int nxYCol = -1;
+        int pCol = -1;
         for (int i = 0; i < headers.length; i++) {
             String h = headers[i].trim();
             if (h.equalsIgnoreCase("g_Y")) gYCol = i;
             if (h.equalsIgnoreCase("nx_Y")) nxYCol = i;
+            if (h.equals("P")) pCol = i;
+        }
+        if (pCol < 0) {
+            throw new IOException("Reference CSV missing mandatory P column: " + csvPath
+                    + ". The planner's consumers are the resident population; re-export the macro files.");
         }
 
         // Skip header
@@ -1439,6 +1518,12 @@ public class RamseyTrendModel {
                     ? Double.parseDouble(parts[gYCol].trim()) : 0.0;
             double nxYVal = (nxYCol >= 0 && nxYCol < parts.length)
                     ? Double.parseDouble(parts[nxYCol].trim()) : 0.0;
+            if (pCol >= parts.length) {
+                throw new IOException(String.format(
+                        "Reference CSV %s: row %d has no P value (%d fields, P is column %d); "
+                        + "re-export the macro files.", csvPath, i + 1, parts.length, pCol + 1));
+            }
+            double pVal = Double.parseDouble(parts[pCol].trim());
 
             rows.add(new ReferenceRow(
                     parts[0].trim(),                    // time
@@ -1452,7 +1537,8 @@ public class RamseyTrendModel {
                     Double.parseDouble(parts[8].trim()), // L
                     Double.parseDouble(parts[9].trim()), // h
                     gYVal,                               // g_Y
-                    nxYVal                               // nx_Y
+                    nxYVal,                              // nx_Y
+                    pVal                                 // P
             ));
         }
 
@@ -1523,22 +1609,41 @@ public class RamseyTrendModel {
         return pathA[q];
     }
 
+    /** Length of the solved path including the terminal tail (simulation quarters + tail). */
+    int extendedLength() {
+        if (!solved) throw new IllegalStateException("Model not solved");
+        return pathN.length;
+    }
+
+    /** Employment at quarter {@code t} of the extended path, terminal tail included. */
+    double pathNAt(int t) {
+        if (!solved) throw new IllegalStateException("Model not solved");
+        return pathN[t];
+    }
+
+    /** Population at quarter {@code t} of the extended path, terminal tail included. */
+    double pathPAt(int t) {
+        if (!solved) throw new IllegalStateException("Model not solved");
+        return pathP[t];
+    }
+
     // ========== Records ==========
 
     /**
      * Trend state at a given point in time.
      *
      * @param output           Quarterly real output (Y_trend)
-     * @param consumption      Quarterly aggregate consumption (C_trend = N × c)
+     * @param consumption      Quarterly aggregate consumption (C_trend = P × c)
      * @param investment       Quarterly investment (I_trend = Y - C - G - NX)
      * @param capitalStock     Capital stock (K)
      * @param wage             Real wage per effective labor unit (MPL)
      * @param rQuarterly       Natural interest rate (quarterly, MPK - δ)
      * @param rAnnual          Natural interest rate (annualized)
-     * @param labor            Labor input (N, employees)
+     * @param labor            Labor input (N, persons in employment)
      * @param tfp              Total factor productivity level (A)
      * @param government       Quarterly government spending (G = g_Y × Y)
      * @param netExports       Quarterly net exports (NX = nx_Y × Y)
+     * @param population       Resident population, all ages (P, the planner's consumers)
      */
     public record TrendState(
             double output,
@@ -1551,7 +1656,8 @@ public class RamseyTrendModel {
             double labor,
             double tfp,
             double government,
-            double netExports
+            double netExports,
+            double population
     ) {}
 
     /**
@@ -1564,17 +1670,18 @@ public class RamseyTrendModel {
      * @param I      Investment
      * @param w      Wage per effective labor unit
      * @param rStar  Natural interest rate (quarterly)
-     * @param N      Employees
+     * @param N      Persons in employment
      * @param L      Labor force
-     * @param h      Hours per employee
+     * @param h      Hours per person employed
      * @param gY     Government spending share of GDP (0 if not available)
      * @param nxY    Net exports share of GDP (0 if not available)
+     * @param P      Resident population, all ages (the planner's consumers)
      */
     public record ReferenceRow(
             String time,
             double K, double Y, double C, double I,
             double w, double rStar, double N, double L, double h,
-            double gY, double nxY
+            double gY, double nxY, double P
     ) {}
 }
 

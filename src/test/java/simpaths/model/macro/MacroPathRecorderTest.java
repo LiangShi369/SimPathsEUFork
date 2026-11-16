@@ -242,6 +242,7 @@ class MacroPathRecorderTest {
         recorder.recordRamseyOnlyYear(2025);
         recorder.amendTrendForYear(2025, "n_realized_gap", 2.5);
         recorder.amendTrendForYear(2025, "w_trend_revision", -0.6);
+        recorder.amendTrendForYear(2025, "p_realized_gap", -0.7);
 
         Path exportDir = tempDir.resolve("feedback-columns");
         recorder.exportToCSV(exportDir.toString(), "MacroPaths.csv");
@@ -250,11 +251,14 @@ class MacroPathRecorderTest {
         String header = lines.get(0);
         assertTrue(header.contains("n_realized_gap"), "Header should carry the realized-gap diagnostic");
         assertTrue(header.contains("w_trend_revision"), "Header should carry the wage-revision diagnostic");
+        assertTrue(header.contains("p_realized_gap"), "Header should carry the population-gap diagnostic");
+        assertTrue(header.contains("p_ramsey"), "Header should carry the planner's population");
 
         Map<String, Integer> columns = headerIndex(header);
         String[] firstRow = lines.get(1).split(",");
         assertEquals(2.5, Double.parseDouble(firstRow[columns.get("n_realized_gap")]), 1e-9);
         assertEquals(-0.6, Double.parseDouble(firstRow[columns.get("w_trend_revision")]), 1e-9);
+        assertEquals(-0.7, Double.parseDouble(firstRow[columns.get("p_realized_gap")]), 1e-9);
     }
 
     private static Map<String, Integer> headerIndex(String headerLine) {

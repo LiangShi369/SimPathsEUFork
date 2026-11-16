@@ -1,18 +1,18 @@
-*! version 1.2.0  14aug2026
+*! version 1.3.0  08nov2026
 program define get_data
     // set trace on
     // set tracedepth 1
 
     version 18.0
     #d ;
-    syntax , 
+    syntax ,
         series_codes(name)
         tframe(string) // target frame
-        startdate(string) 
+        startdate(string) // a quarter (2005q1); a year (2004) with freq(annual)
         enddate(string)
-        [   
+        [
             replace // to replace existing target frame
-            FREQuency(string)   // default is quarterly; monthly and daily also possible
+            FREQuency(string)   // default is quarterly; annual, monthly and daily also possible
             AGGregation(string) // default is no aggregation; currently available: quarter_mean, quarter_end
             KEEPPartial         // keep quarters whose source months are not all published
         ]
@@ -50,13 +50,28 @@ program define get_data
         exit 198
     }
 
-    // Initialize the target frame
+    // Initialize the target frame: yearly for an annual series, whose startdate() and
+    // enddate() are years; quarterly otherwise, with the dates given as quarters.
+    if inlist("`frequency'", "annual", "a") {
+        local t0 = real("`startdate'")
+        local t1 = real("`enddate'")
+        if missing(`t0') | missing(`t1') {
+            display as error "freq(annual) takes startdate() and enddate() as years, e.g. startdate(2004); got `startdate' and `enddate'."
+            exit 198
+        }
+        local tfmt %ty
+    }
+    else {
+        local t0 = tq(`startdate')
+        local t1 = tq(`enddate')
+        local tfmt %tq
+    }
     cap frame drop `tframe'
     frame create `tframe'
-    local length = tq(`enddate') - tq(`startdate') + 1
+    local length = `t1' - `t0' + 1
     frame `tframe': set obs `length'
-    frame `tframe': gen time = tq(`startdate') + _n - 1
-    frame `tframe': format time %tq
+    frame `tframe': gen time = `t0' + _n - 1
+    frame `tframe': format time `tfmt'
 
     // Now loop through the series and fetch them one by one
     tempname temp_series
@@ -98,6 +113,12 @@ program define get_data
                 gen time = qofd(date(period_start_day, "YMD"))
                 format time %tq
             }
+            else if "`frequency'" == "annual" | "`frequency'" == "a" {
+                cap drop time
+                gen time = yofd(date(period_start_day, "YMD"))
+                format time %ty
+                quietly tsset time, yearly
+            }
             else if "`frequency'" == "monthly" | "`frequency'" == "m" {
                 cap drop time
                 gen time = mofd(date(period_start_day, "YMD"))
@@ -109,7 +130,7 @@ program define get_data
                 format time %td
             }
             else {
-                display as error "Unsupported frequency: `frequency'. Use 'quarterly', 'monthly', or 'daily'."
+                display as error "Unsupported frequency: `frequency'. Use 'quarterly', 'annual', 'monthly', or 'daily'."
                 exit 198
             }
 
@@ -199,7 +220,8 @@ program define get_data
 end
 
 // Change log
-// v1.1.0: 
+// v1.3.0: freq(annual): a yearly target frame, with startdate() and enddate() given as years.
+// v1.1.0:
 //      - Previously, the length of the created dateframe was arbitrarily set to the length of the first
 //        series fetched. Now, it is determined based on the start and end dates.
 // v1.0.0: Initial version
