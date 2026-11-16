@@ -1,4 +1,4 @@
-# run_ramsey_feedback_experiment_parallel.ps1 — Ramsey feedback arms, run concurrently
+# run_parallel.ps1 — multirun arms, one per config, run concurrently
 #
 # Each arm needs its own copy of the project because the H2 input database is
 # locked by the running JVM: two multirun processes cannot share one input/
@@ -36,13 +36,21 @@
 # load prints to stderr and returns from main at exit code 0, so a typo'd config
 # name would otherwise pass as a successful run of the defaults. Every clone is
 # additionally checked for the known failure strings, for having produced an
-# output directory, and for a MacroPaths.csv of the expected length.
+# output directory, and for a MacroPaths.csv of the expected length: four quarters
+# for every year from the config's startYear to its endYear, for each seed. Every
+# config therefore has to set both years; the preflight refuses one that does not.
+#
+# With maxNumberOfRuns > 1, SimPaths writes every run of a JVM into one output
+# folder (<stamp>_<seed>_0) and tells the runs apart by the `run` column.
+#
+# The script runs from scripts/ or from a copy in the project root; it looks for
+# the project (pom.xml) in its own folder first, then one level up.
 #
 # Usage:
-#   .\run_ramsey_feedback_experiment_parallel.ps1                       # 1 seeds, N JVMs (corresponding to the number of configs)
-#   .\run_ramsey_feedback_experiment_parallel.ps1 -SeedsPerArm 40 -ClonesPerArm 2 -JavaHeap 5g
-#   .\run_ramsey_feedback_experiment_parallel.ps1 -CollectOnly          # salvage finished runs
-#   .\run_ramsey_feedback_experiment_parallel.ps1 -CleanupWorkers
+#   .\scripts\run_parallel.ps1                       # 1 seed, one JVM per config
+#   .\scripts\run_parallel.ps1 -SeedsPerArm 40 -ClonesPerArm 2 -JavaHeap 5g
+#   .\scripts\run_parallel.ps1 -CollectOnly          # salvage finished runs
+#   .\scripts\run_parallel.ps1 -CleanupWorkers
 
 [CmdletBinding()]
 param(
@@ -62,7 +70,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$baseDir   = $PSScriptRoot
+$baseDir = $PSScriptRoot
+if (-not (Test-Path (Join-Path $baseDir "pom.xml"))) {
+    $baseDir = Split-Path $PSScriptRoot -Parent
+    if (-not (Test-Path (Join-Path $baseDir "pom.xml"))) {
+        Write-Error "No pom.xml in $PSScriptRoot or its parent: run the script from scripts/ or the project root."
+        exit 1
+    }
+}
 $configDir = Join-Path $baseDir "config"
 $outputDir = Join-Path $baseDir "output"
 $jarName   = "multirun.jar"
@@ -89,11 +104,31 @@ $seedsPerClone = $SeedsPerArm / $ClonesPerArm
 $jvmCount = $Configs.Count * $ClonesPerArm
 Write-Host "  $($Configs.Count) arms x $ClonesPerArm clone(s) = $jvmCount JVMs, $seedsPerClone seeds each, $SeedsPerArm seeds per arm"
 
+# The MacroPaths.csv length each clone must reach. The clones get copies of these
+# configs with only randomSeed and maxNumberOfRuns rewritten, so the years hold for
+# them too. A config without both years would run multirun.jar's defaults, whose
+# horizon this script cannot know.
+$expectedRows = @{}
 foreach ($cfg in $Configs) {
-    if (-not (Test-Path (Join-Path $configDir $cfg))) {
-        Write-Error "Config not found: $(Join-Path $configDir $cfg)"
+    $cfgPath = Join-Path $configDir $cfg
+    if (-not (Test-Path $cfgPath)) {
+        Write-Error "Config not found: $cfgPath"
         exit 1
     }
+    $text  = Get-Content $cfgPath
+    $start = $text | Select-String -Pattern '^startYear\s*:\s*(\d+)\s*$' | Select-Object -First 1
+    $end   = $text | Select-String -Pattern '^endYear\s*:\s*(\d+)\s*$'   | Select-Object -First 1
+    if ($null -eq $start -or $null -eq $end) {
+        Write-Error "$cfg must set both startYear and endYear at the top level: the script checks each run's length against them."
+        exit 1
+    }
+    $years = [int]$end.Matches[0].Groups[1].Value - [int]$start.Matches[0].Groups[1].Value + 1
+    if ($years -lt 1) {
+        Write-Error "$cfg has endYear before startYear."
+        exit 1
+    }
+    $expectedRows[$cfg] = $seedsPerClone * $years * 4
+    Write-Host ("  {0}: {1} years, {2} MacroPaths.csv rows per clone" -f $cfg, $years, $expectedRows[$cfg])
 }
 Write-Host "  [OK] $($Configs.Count) config(s) present"
 
@@ -284,7 +319,7 @@ foreach ($j in $jobs) {
     # The decisive check: MacroPaths.csv must hold every seed for the full horizon.
     # A JVM that died mid-run still leaves a directory behind.
     if (-not $bad) {
-        $expected = $seedsPerClone * 152    # 38 years x 4 quarters
+        $expected = $expectedRows[$j.Config]
         foreach ($dir in $produced) {
             $mp = Join-Path $dir.FullName "csv\MacroPaths.csv"
             if (-not (Test-Path $mp)) { $bad = $true; $why = "no MacroPaths.csv - the run did not finish" }
@@ -345,8 +380,8 @@ foreach ($cfg in $Configs) {
     $collected += [PSCustomObject]@{ Config = $cfg; Output = $target; Rows = $rows }
 }
 
-$manifest = Join-Path $outputDir ("{0}_ramsey_feedback_parallel_manifest.txt" -f $runStamp)
-$lines = @("# Ramsey feedback parallel run, $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+$manifest = Join-Path $outputDir ("{0}_parallel_manifest.txt" -f $runStamp)
+$lines = @("# Parallel multirun, $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
            "# jar built: $($jarTime.ToString('yyyy-MM-dd HH:mm:ss'))",
            "# $SeedsPerArm seeds per arm, base seed $BaseSeed, $ClonesPerArm clone(s) per arm",
            "# merged MacroPaths.csv only; per-clone full outputs remain under $WorkRoot",

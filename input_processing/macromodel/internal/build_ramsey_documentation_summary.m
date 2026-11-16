@@ -14,7 +14,6 @@ function summary = build_ramsey_documentation_summary(params, country, diagnosti
     summary = struct();
     summary.metadata = struct();
     summary.metadata.country = country;
-    summary.metadata.model_version = 'v22';
 
     summary.structural = struct();
     summary.structural.base_year = params.base_year;

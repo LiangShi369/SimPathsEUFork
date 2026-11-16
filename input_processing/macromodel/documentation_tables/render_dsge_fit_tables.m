@@ -5,7 +5,6 @@ function result = render_dsge_fit_tables(summary_input, moments_output_file, vd_
         summary_input
         moments_output_file (1,:) char = ''
         vd_output_file (1,:) char = ''
-        options.model_version (1,:) char = ''
         options.write_files (1,1) logical = true
     end
 
@@ -13,16 +12,8 @@ function result = render_dsge_fit_tables(summary_input, moments_output_file, vd_
     validate_documentation_summary(summary, 'dsge');
 
     country = summary.metadata.country;
-    model_version = options.model_version;
-    if isempty(model_version) && isfield(summary.metadata, 'model_version')
-        model_version = summary.metadata.model_version;
-    end
-    if isempty(model_version)
-        model_version = 'v17';
-    end
-
-    moments_text = build_moments_table(summary, country, model_version);
-    vd_text = build_vd_table(summary, country, model_version);
+    moments_text = build_moments_table(summary, country);
+    vd_text = build_vd_table(summary, country);
 
     if options.write_files && ~isempty(moments_output_file)
         render_latex_table(moments_output_file, moments_text, ...
@@ -63,7 +54,7 @@ function summary = load_summary(summary_input)
     error('summary_input must be a struct or a JSON file path.');
 end
 
-function latex_text = build_moments_table(summary, country, model_version)
+function latex_text = build_moments_table(summary, country)
     bs = char(92);
     row_break = [bs bs];
     observables = {'y', 'inv', 'c', 'pi', 'R', 'n', 'L', 'h'};
@@ -72,7 +63,7 @@ function latex_text = build_moments_table(summary, country, model_version)
     lines = {
         [bs 'begin{table}[H]']
         [bs 'centering']
-        [bs 'caption{Standard deviations and autocorrelations (' country ', ' model_version ')}']
+        [bs 'caption{Standard deviations and autocorrelations (' country ')}']
         [bs 'label{tab:moments_' lower_country '}']
         [bs 'begin{tabular}{lcccc}']
         [bs 'toprule']
@@ -100,7 +91,7 @@ function latex_text = build_moments_table(summary, country, model_version)
     latex_text = strjoin(lines, newline);
 end
 
-function latex_text = build_vd_table(summary, country, model_version)
+function latex_text = build_vd_table(summary, country)
     bs = char(92);
     row_break = [bs bs];
     observables = {'y', 'inv', 'c', 'pi', 'R', 'n', 'L', 'h'};
@@ -110,7 +101,7 @@ function latex_text = build_vd_table(summary, country, model_version)
     lines = {
         [bs 'begin{table}[H]']
         [bs 'centering']
-        [bs 'caption{Posterior mean variance decomposition (' country ', ' model_version ', percent shares)}']
+        [bs 'caption{Posterior mean variance decomposition (' country ', percent shares)}']
         [bs 'label{tab:vd_' lower_country '}']
         [bs 'begin{tabular}{lcccccccc}']
         [bs 'toprule']

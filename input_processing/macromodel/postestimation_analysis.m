@@ -2119,8 +2119,7 @@ try
     dsge_summary_file = artifact_path('output', fullfile('documentation_data', 'dsge', sprintf('dsge_postestimation_%s.json', doc_country)));
     write_json_summary(dsge_summary, dsge_summary_file, ...
         'country', doc_country, ...
-        'source_function', 'postestimation_analysis', ...
-        'model_version', 'v17');
+        'source_function', 'postestimation_analysis');
     documentation_status = sprintf('summary exported to %s', dsge_summary_file);
 catch documentation_error
     documentation_status = sprintf('documentation export failed: %s', documentation_error.message);
@@ -2210,7 +2209,6 @@ function summary = build_dsge_documentation_summary(config, fit_stats, param_tab
     summary.metadata = struct();
     summary.metadata.source_function = 'postestimation_analysis';
     summary.metadata.model_name = config.model_name;
-    summary.metadata.model_version = 'v17';
 
     summary.fit = struct();
     summary.fit.log_mdd_laplace = fit_stats.log_mdd_laplace;

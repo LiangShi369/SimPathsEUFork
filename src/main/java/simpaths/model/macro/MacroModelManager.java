@@ -109,7 +109,7 @@ public class MacroModelManager {
     @GUIparameter(description = "Enable verbose macro diagnostics (iteration internals and sample micro logs)")
     private boolean verboseMacroLogging = false;
 
-    @GUIparameter(description = "Path to exogenous shock scenario CSV (relative to MacroModel dir, empty = baseline with no exogenous shocks)")
+    @GUIparameter(description = "Path to exogenous shock scenario CSV (relative to the bundle folder, empty = baseline with no exogenous shocks)")
     private String dsgeShockScenario = "";
 
     /** Maximum state deviation before stability check fires (log-deviation units, default 10.0) */
@@ -135,8 +135,11 @@ public class MacroModelManager {
      */
     private boolean pathRecordingEnabled = true;
 
-    @GUIparameter(description = "CSV file name for Ramsey scenario (relative to MacroModel dir, empty = baseline)")
+    @GUIparameter(description = "CSV file name for Ramsey scenario (relative to the bundle folder, empty = baseline)")
     private String ramseyScenario = "";
+
+    @GUIparameter(description = "Macro bundle folder; empty = input/<country>/MacroModel")
+    private String macroBundleDir = "";
 
     /**
      * The planner's belief about how much of a realized labour-supply surprise is permanent,
@@ -580,20 +583,19 @@ public class MacroModelManager {
     // ========== Internal Methods ==========
     
     /**
-     * Initialize the macro layers from the bundle in {@code input/<CC>/MacroModel}: the
-     * labour-supply aggregator, the Ramsey trend when configured and, with the DSGE layer on,
+     * Initialize the macro layers from the bundle folder ({@link #resolveBundleDir}:
+     * {@code mm_macroBundleDir}, else {@code input/<CC>/MacroModel}): the labour-supply aggregator, the Ramsey trend when configured and, with the DSGE layer on,
      * the state-space DSGE model and its shock scenario.
      */
     private void initialize(String countryCode, Set<Person> persons) {
         // Catch an invalid flag combination before loading any macro artefacts.
         validateRamseyFeedbackConfig();
 
-        String macroModelPath = "input" + File.separator + countryCode +
-                               File.separator + "MacroModel";
+        String macroModelPath = resolveBundleDir(countryCode);
 
         // Validate directory exists
-        File macroDir = new File(macroModelPath);
-        if (!macroDir.exists() || !macroDir.isDirectory()) {
+        File macroDir = macroModelPath == null ? null : new File(macroModelPath);
+        if (macroDir == null || !macroDir.exists() || !macroDir.isDirectory()) {
             String msg = String.format(
                 "DSGE model directory not found: %s%n" +
                 "Expected dynamic model files (policy_A.csv, policy_Bs.csv, etc.).%n" +
@@ -1836,14 +1838,20 @@ public class MacroModelManager {
      * <p>Creates only a {@link LaborSupplyAggregator} and a {@link MacroPathRecorder}.
      * No model files are loaded from disk; the MacroModel directory is not required.
      * All DSGE/Ramsey state remains null/zero.</p>
+     *
+     * <p>Deliberately no {@link #requireVerifiedBundle} check: this mode reads only the
+     * variable names in {@code model_info.json} to label the {@code MacroPaths.csv} columns,
+     * and no number from the bundle enters the run. The default configuration
+     * ({@code mm_macroModel: off}, recorder on) runs in this mode, so the check would stop
+     * every macro-off run after a failed MATLAB export.</p>
      */
     private void initializeRecorderOnly(String countryCode) {
         laborSupplyAggregator = new LaborSupplyAggregator();
         laborSupplyAggregator.setLogEnabled(logMacroState);
 
         trendOnlyPathRecorder = pathRecordingEnabled ? new MacroPathRecorder() : null;
-        if (countryCode != null && !countryCode.isBlank()) {
-            String macroModelPath = "input" + File.separator + countryCode + File.separator + "MacroModel";
+        String macroModelPath = resolveBundleDir(countryCode);
+        if (macroModelPath != null) {
             applyRecorderSchema(macroModelPath, trendOnlyPathRecorder);
         }
 
@@ -2439,6 +2447,28 @@ public class MacroModelManager {
 
     public void setRamseyScenario(String ramseyScenario) {
         this.ramseyScenario = ramseyScenario;
+    }
+
+    public void setMacroBundleDir(String macroBundleDir) {
+        this.macroBundleDir = macroBundleDir;
+    }
+
+    /**
+     * The bundle folder this run reads: {@code mm_macroBundleDir} when set, otherwise
+     * {@code input/{countryCode}/MacroModel}. A second bundle, such as one handed off at an
+     * earlier quarter for a backtest, needs its own folder because {@code BundleProvenanceTest}
+     * (contract 18) hashes the country default.
+     *
+     * @return the folder, or {@code null} when neither a folder nor a country is given
+     */
+    String resolveBundleDir(String countryCode) {
+        if (macroBundleDir != null && !macroBundleDir.isBlank()) {
+            return macroBundleDir.trim();
+        }
+        if (countryCode == null || countryCode.isBlank()) {
+            return null;
+        }
+        return "input" + File.separator + countryCode + File.separator + "MacroModel";
     }
 
     public double getMaxBounds() {

@@ -4,7 +4,6 @@ function result = render_posterior_parameter_table(summary_input, output_file, o
     arguments
         summary_input
         output_file (1,:) char = ''
-        options.model_version (1,:) char = ''
         options.write_file (1,1) logical = true
     end
 
@@ -13,13 +12,6 @@ function result = render_posterior_parameter_table(summary_input, output_file, o
 
     country = summary.metadata.country;
     lower_country = lower(country);
-    model_version = options.model_version;
-    if isempty(model_version) && isfield(summary.metadata, 'model_version')
-        model_version = summary.metadata.model_version;
-    end
-    if isempty(model_version)
-        model_version = 'v17';
-    end
 
     row_order = {'sigma_a', 'sigma_d', 'sigma_r', 'sigma_p', 'sigma_h', 'sigma_L', 'sigma_inv', 'omega_h', 'phi_inv_r'};
     label_map = get_posterior_label_map();
@@ -31,7 +23,7 @@ function result = render_posterior_parameter_table(summary_input, output_file, o
         [bs 'begin{table}[H]']
         [bs 'centering']
         [bs 'begin{threeparttable}']
-        [bs 'caption{Posterior parameter estimates (' country ', ' model_version ')}']
+        [bs 'caption{Posterior parameter estimates (' country ')}']
         [bs 'label{tab:post_means_' lower_country '}']
         [bs 'begin{tabular}{lcccc}']
         [bs 'toprule']

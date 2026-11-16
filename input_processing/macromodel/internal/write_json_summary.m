@@ -12,7 +12,6 @@ function normalized_summary = write_json_summary(summary, output_file, options)
         output_file (1,:) char
         options.country (1,:) char = ''
         options.source_function (1,:) char = ''
-        options.model_version (1,:) char = ''
         options.pretty_print (1,1) logical = true
     end
 
@@ -31,12 +30,6 @@ function normalized_summary = write_json_summary(summary, output_file, options)
     if ~isfield(normalized_summary.metadata, 'source_function') || isempty(normalized_summary.metadata.source_function)
         if ~isempty(options.source_function)
             normalized_summary.metadata.source_function = options.source_function;
-        end
-    end
-
-    if ~isfield(normalized_summary.metadata, 'model_version') || isempty(normalized_summary.metadata.model_version)
-        if ~isempty(options.model_version)
-            normalized_summary.metadata.model_version = options.model_version;
         end
     end
 

@@ -546,8 +546,7 @@ function calibrate_growth_model(country)
         validate_documentation_summary(ramsey_summary, 'ramsey');
         write_json_summary(ramsey_summary, summary_file, ...
             'country', country, ...
-            'source_function', 'calibrate_growth_model', ...
-            'model_version', 'v22');
+            'source_function', 'calibrate_growth_model');
         documentation_status = sprintf('summary exported to %s', summary_file);
     catch documentation_error
         documentation_status = sprintf('documentation export failed: %s', documentation_error.message);

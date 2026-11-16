@@ -979,8 +979,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
         validate_documentation_summary(ramsey_summary, 'ramsey');
         write_json_summary(ramsey_summary, summary_file, ...
             'country', country, ...
-            'source_function', 'ramsey_trend', ...
-            'model_version', 'v17');
+            'source_function', 'ramsey_trend');
     catch documentation_error
         warning('ramsey_trend:DocumentationExportFailed', '%s', documentation_error.message);
     end

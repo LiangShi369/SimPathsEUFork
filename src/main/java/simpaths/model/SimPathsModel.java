@@ -342,11 +342,14 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
     @GUIparameter(description = "Record macro-level labor supply paths (MacroPaths.csv) even with mm_macroModel: off")
     private boolean mm_useMacroPathRecorder = true;
 
-    @GUIparameter(description = "CSV file name for exogenous DSGE shock scenario (relative to MacroModel dir, empty = no scenario)")
+    @GUIparameter(description = "CSV file name for exogenous DSGE shock scenario (relative to the bundle folder, empty = no scenario)")
     private String mm_dsgeShockScenario = "";
 
-    @GUIparameter(description = "CSV file name for Ramsey growth model scenario (relative to MacroModel dir, empty = baseline)")
+    @GUIparameter(description = "CSV file name for Ramsey growth model scenario (relative to the bundle folder, empty = baseline)")
     private String mm_ramseyScenario = "";
+
+    @GUIparameter(description = "Macro bundle folder (empty = input/<country>/MacroModel); scenario CSVs are read from it too")
+    private String mm_macroBundleDir = "";
 
     @GUIparameter(description = "Persistence of the realized employment and hours gaps in the planner's belief: 1 = permanent, 0 = current year only")
     private double mm_ramseyFeedbackPersistence = 1.0;
@@ -416,6 +419,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         Parameters.freezeWageGrowthForRamseyTrend = mm_macroModel.usesRamseyTrend();
         macroManager.setDsgeShockScenario(mm_dsgeShockScenario);
         macroManager.setRamseyScenario(mm_ramseyScenario);
+        macroManager.setMacroBundleDir(mm_macroBundleDir);
         macroManager.setMaxBounds(mm_dsgeMaxStateDeviation);
         macroManager.setRamseyFeedbackPersistence(mm_ramseyFeedbackPersistence);
 
@@ -800,6 +804,8 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
             line = "mm_dsgeShockScenario: " + mm_dsgeShockScenario;
             pw.println(line);
             line = "mm_ramseyScenario: " + mm_ramseyScenario;
+            pw.println(line);
+            line = "mm_macroBundleDir: " + mm_macroBundleDir;
             pw.println(line);
             line = "mm_dsgeMaxStateDeviation: " + mm_dsgeMaxStateDeviation;
             pw.println(line);

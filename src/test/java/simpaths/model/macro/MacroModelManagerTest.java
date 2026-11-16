@@ -518,6 +518,107 @@ class MacroModelManagerTest {
                 "Without the marker the same folder must pass the check");
     }
 
+    // ---- mm_macroBundleDir: the bundle folder is configurable per run ----
+
+    @Test
+    void testBlankBundleDirFallsBackToCountryFolder() {
+        MacroModelManager manager = new MacroModelManager();
+        for (String blank : new String[] {null, "", "   "}) {
+            manager.setMacroBundleDir(blank);
+            assertEquals(Paths.get("input", "PL", "MacroModel").toString(), manager.resolveBundleDir("PL"),
+                    "a blank bundle folder must mean the country default, got blank='" + blank + "'");
+        }
+    }
+
+    @Test
+    void testConfiguredBundleDirReplacesCountryFolder(@TempDir Path tempDir) throws Exception {
+        assumeRamseyInputsAvailable();
+        Path bundle = tempDir.resolve("MacroModel_backtest");
+        Files.createDirectories(bundle);
+        try (var files = Files.list(Paths.get(MACRO_MODEL_PATH))) {
+            for (Path f : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator) {
+                Files.copy(f, bundle.resolve(f.getFileName()));
+            }
+        }
+
+        MacroModelManager manager = new MacroModelManager();
+        manager.setUseDsge(false);
+        manager.setMacroBundleDir(bundle.toString());
+        // input/XX/MacroModel does not exist: only the configured folder can satisfy this.
+        invokeInitialize(manager, "XX");
+
+        assertNotNull(getField(manager, "ramseyTrend", RamseyTrendModel.class),
+                "The Ramsey trend should load from the configured folder");
+        MacroPathRecorder recorder = getField(manager, "trendOnlyPathRecorder", MacroPathRecorder.class);
+        assertEquals(13, getField(recorder, "stateNames", String[].class).length,
+                "The recorder schema should come from the configured folder's model_info.json");
+    }
+
+    @Test
+    void testConfiguredBundleDirThatDoesNotExistFailsNamingIt(@TempDir Path tempDir) {
+        Path missing = tempDir.resolve("no_such_bundle");
+        MacroModelManager manager = new MacroModelManager();
+        manager.setUseDsge(false);
+        manager.setMacroBundleDir(missing.toString());
+
+        RuntimeException ex = initializeFailure(manager, "PL");
+        assertTrue(ex.getMessage().contains(missing.toString()),
+                "A missing configured folder must fail naming it, not fall back to the country default; got: "
+                        + ex.getMessage());
+    }
+
+    /** The marker check's call site in initialize; until now only the static method had a test. */
+    @Test
+    void testInitializeRefusesBundleCarryingNotVerifiedMarker(@TempDir Path tempDir) throws Exception {
+        Path bundle = tempDir.resolve("MacroModel");
+        Files.createDirectories(bundle);
+        Files.writeString(bundle.resolve(MacroModelManager.BUNDLE_NOT_VERIFIED_MARKER), "refused\n");
+        MacroModelManager manager = new MacroModelManager();
+        manager.setUseDsge(false);
+        manager.setMacroBundleDir(bundle.toString());
+
+        RuntimeException ex = initializeFailure(manager, "PL");
+        assertTrue(ex instanceof IllegalStateException, ex.toString());
+        // Without the call, initialize fails on the missing growth_params instead: the marker name tells them apart.
+        assertTrue(ex.getMessage().contains(MacroModelManager.BUNDLE_NOT_VERIFIED_MARKER),
+                "initialize must refuse a marked bundle, got: " + ex.getMessage());
+    }
+
+    /** Decision: recorder-only reads only model_info.json's variable names, so a refused bundle does not stop it. */
+    @Test
+    void testRecorderOnlyRunsOnBundleCarryingNotVerifiedMarker(@TempDir Path tempDir) throws Exception {
+        assumeRamseyInputsAvailable();
+        Path bundle = tempDir.resolve("MacroModel");
+        Files.createDirectories(bundle);
+        Files.copy(Paths.get(MACRO_MODEL_PATH, "model_info.json"), bundle.resolve("model_info.json"));
+        Files.writeString(bundle.resolve(MacroModelManager.BUNDLE_NOT_VERIFIED_MARKER), "refused\n");
+        MacroModelManager manager = new MacroModelManager();
+        manager.setMacroBundleDir(bundle.toString());
+
+        Method initializeRecorderOnly = MacroModelManager.class
+                .getDeclaredMethod("initializeRecorderOnly", String.class);
+        initializeRecorderOnly.setAccessible(true);
+        assertDoesNotThrow(() -> initializeRecorderOnly.invoke(manager, "PL"));
+
+        MacroPathRecorder recorder = getField(manager, "trendOnlyPathRecorder", MacroPathRecorder.class);
+        assertEquals(13, getField(recorder, "stateNames", String[].class).length,
+                "Recorder-only should still label its columns from the configured folder");
+    }
+
+    private static void invokeInitialize(MacroModelManager manager, String countryCode) throws Exception {
+        Method initialize = MacroModelManager.class
+                .getDeclaredMethod("initialize", String.class, java.util.Set.class);
+        initialize.setAccessible(true);
+        initialize.invoke(manager, countryCode, Collections.emptySet());
+    }
+
+    /** What initialize itself throws, unwrapped from the reflective call. */
+    private static RuntimeException initializeFailure(MacroModelManager manager, String countryCode) {
+        InvocationTargetException ite = assertThrows(InvocationTargetException.class,
+                () -> invokeInitialize(manager, countryCode));
+        return (RuntimeException) ite.getCause();
+    }
+
     @Test
     void testSmoothTerminalDemographicClosureTapersGrowthToZero() throws Exception {
         double[] path = new double[12];

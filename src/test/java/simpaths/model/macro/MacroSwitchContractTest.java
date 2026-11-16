@@ -39,6 +39,7 @@ class MacroSwitchContractTest {
         EXPECTED.put("mm_useMacroPathRecorder",           "boolean true");
         EXPECTED.put("mm_dsgeShockScenario",              "String ");
         EXPECTED.put("mm_ramseyScenario",                 "String ");
+        EXPECTED.put("mm_macroBundleDir",                 "String ");
         EXPECTED.put("mm_ramseyFeedbackPersistence",      "double 1.0");
         EXPECTED.put("mm_dsgeMaxStateDeviation",          "double 10.0");
     }

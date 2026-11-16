@@ -46,7 +46,8 @@ across a run in §4, and what the feedback assumes about employment and populati
 
 ### 2.2 Bundle files consumed
 
-Under `input/{COUNTRY}/MacroModel/` (the bundle the MATLAB exporters write):
+Under `input/{COUNTRY}/MacroModel/` (the bundle the MATLAB exporters write), or the folder `mm_macroBundleDir`
+names (§6.1):
 
 - DSGE layer: `policy_A.csv`, `policy_Bs.csv`, `policy_C.csv`, `policy_D.csv`, `shock_params.csv`,
   `model_info.json`
@@ -438,6 +439,10 @@ All under `model_args`:
 - `mm_useMacroPathRecorder` (boolean, default `true`; records path regardless of `mm_macroModel`)
 - `mm_dsgeShockScenario` (string; ignored unless `mm_macroModel` runs the DSGE)
 - `mm_ramseyScenario` (string; ignored unless `mm_macroModel` runs the Ramsey layer)
+- `mm_macroBundleDir` (string, default empty = `input/{CC}/MacroModel`; the bundle folder, against which
+  the two scenario names resolve too. A second bundle, such as one handed off at an earlier quarter for a
+  backtest, lives in its own folder because `BundleProvenanceTest` hashes only `input/{CC}/MacroModel`.
+  A folder that does not exist fails a macro-on run; recorder-only runs read only `model_info.json` from it)
 - `mm_dsgeMaxStateDeviation` (double, default `10.0`; DSGE stability bound in log-deviation units)
 - `mm_macroLogging` (`off | state | verbose`, default `off`; `verbose` implies `state`)
 - `mm_ramseyFeedbackPersistence` (double, default `1.0`, range `[0,1]`; the planner's belief about how

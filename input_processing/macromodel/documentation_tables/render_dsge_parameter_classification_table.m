@@ -5,7 +5,6 @@ function result = render_dsge_parameter_classification_table(dsge_summary_dir, c
         dsge_summary_dir (1,:) char
         calibration_dir (1,:) char
         output_file (1,:) char = ''
-        options.model_version (1,:) char = 'v17'
         options.write_file (1,1) logical = true
     end
 
@@ -146,7 +145,7 @@ function specs = get_row_specs()
         row_spec('Calibrated Parameters -- Shock Persistence', 'Separation persistence', ['$' bs 'rho_{sep}$'], 'calibration', 'rho_sep', 2, 'Fixed persistence')
         row_spec('Calibrated Parameters -- Shock Persistence', 'Demand persistence', ['$' bs 'rho_d$'], 'calibration', 'rho_d', 2, 'Fixed persistence')
         row_spec('Calibrated Parameters -- Shock Persistence', 'Investment persistence', ['$' bs 'rho_{' bs 'mathrm{inv}}$'], 'calibration', 'rho_inv', 2, 'Fixed persistence')
-        row_spec('Calibrated Parameters -- Shock Persistence', 'Investment accelerator', ['$' bs 'phi_{' bs 'mathrm{inv},y}$'], 'calibration', 'phi_inv_y', 2, 'Restored structural floor')
+        row_spec('Calibrated Parameters -- Shock Persistence', 'Investment accelerator', ['$' bs 'phi_{' bs 'mathrm{inv},y}$'], 'calibration', 'phi_inv_y', 2, ['Fixed (collinear with $' bs 'rho_{' bs 'mathrm{inv}}$ in estimation)'])
         row_spec('Fixed Shock Standard Deviations', 'Separation shock std.', ['$' bs 'sigma_{sep}$'], 'calibration', 'sigma_sep', 2, 'Fixed for identification stability') ...
     ];
 end
