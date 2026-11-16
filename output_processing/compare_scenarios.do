@@ -5,7 +5,7 @@
  *          unified script:
  *          1) DSGE cycle variables (y, c, pi, r, ...)
  *          2) Ramsey structural trends (w_trend, y_trend, ...)
- *          3) Totals (cycle + trend: w_total, y_total, ...)
+ *          3) Totals (trend level x cycle factor: w_total, y_total, ...)
  *          4) Population & labour levels (l_level, h_level, n_ramsey)
  *          5) Labour-category shares and mean hours (cat_*_share, cat_*_meanHours)
  *
@@ -49,8 +49,8 @@ local do_cycle_level_graphs = 1 // DSGE levels (baseline vs scenario)
 local do_cycle_diff_graphs = 1 // DSGE differences (scenario - baseline)
 local do_trend_level_graphs = 1 // Ramsey trend levels (baseline vs scenario)
 local do_trend_diff_graphs = 1 // Ramsey trend differences (scenario - baseline)
-local do_total_level_graphs = 1 // Total levels (cycle + trend) (baseline vs scenario)
-local do_total_diff_graphs = 1 // Total differences (cycle + trend) (scenario - baseline)
+local do_total_level_graphs = 1 // Total levels (trend level x cycle factor) (baseline vs scenario)
+local do_total_diff_graphs = 1 // Total differences (trend level x cycle factor) (scenario - baseline)
 local do_pop_level_graphs = 1 // Population & labour levels (baseline vs scenario)
 local do_pop_level_LN_graph = 1 // L and N levels only (baseline + scenario) — the Demographics panel restricted to the two coupling variables
 local do_category_share_graphs = 0 // labour category shares: baseline stack, scenario stack, scenario-baseline differences
@@ -239,7 +239,7 @@ local cycle_labels `" "Output y" "Consumption c" "Investment inv" "Inflation π"
 local trend_vars   "w_trend y_trend c_trend inv_trend k_trend"
 local trend_labels `" "Wage trend" "Output trend" "Consumption trend" "Investment trend" "Capital trend" "'
 
-// ----- 4c. Total variables (cycle + trend) -----
+// ----- 4c. Total variables (trend level x cycle factor) -----
 local total_vars   "w_total y_total c_total inv_total k_total"
 local total_labels `" "Total wage" "Total output" "Total consumption" "Total investment" "Total capital" "'
 
@@ -385,7 +385,7 @@ if _rc == 0 {
     label var diff_ky_ratio_idx "ΔCapital-output ratio K/Y (scenario - baseline)"
 }
 
-// Same K/Y ratio at the TOTAL (cycle + trend) level, from k_total / y_total.
+// Same K/Y ratio at the TOTAL (trend level x cycle factor) level, from k_total / y_total.
 // Identical to the trend version in shock-free runs (cycle ~ 0) but carries the
 // cyclical capital-output dynamics in shock scenarios.
 cap confirm variable k_total y_total k_total_base y_total_base
@@ -518,7 +518,7 @@ if _rc == 0 {
 
 
 // ============================================================================
-// 8. PANEL 4: TOTAL LEVEL COMPARISON (cycle + trend)
+// 8. PANEL 4: TOTAL LEVEL COMPARISON (trend level x cycle factor)
 // ============================================================================
 
 local total_level_graphs ""
@@ -542,7 +542,7 @@ foreach var of local total_vars {
     local ++i
 }
 
-// 6th total panel: capital-output ratio K/Y (total = cycle + trend)
+// 6th total panel: capital-output ratio K/Y (total = trend level x cycle factor)
 cap confirm variable ky_ratio_tot_idx ky_ratio_tot_idx_base
 if _rc == 0 {
     local title = cond(1, `"title("Capital-output ratio K/Y", size(small))"', "")
@@ -1219,7 +1219,7 @@ quietly {
 
     // --- Total variables ---
     noi display _newline
-    noi display as text "TOTAL VARIABLES (cycle + trend)"
+    noi display as text "TOTAL VARIABLES (trend level x cycle factor)"
     noi display as text "{hline 80}"
     noi display as text %20s "Variable" %15s "Max |diff|" %15s "Mean diff" %15s "Last diff" %15s "Last level"
     noi display as text "{hline 80}"

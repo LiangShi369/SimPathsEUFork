@@ -152,7 +152,7 @@ cap label var eps_inv "Investment shock ε_inv"
 
 // Capital-deepening trend columns (may not exist in older CSVs)
 cap label var w_trend "Wage trend"
-cap label var w_total "Total wage (cycle + trend)"
+cap label var w_total "Total wage per hour (trend level x factor of the hourly cycle w - h)"
 
 // ============================================================================
 // 3. GRAPH SETTINGS
@@ -188,7 +188,7 @@ mata: shock_legs   = ("x",          "R",              "d",                 "pi",
 mata: shock_gnames = ("x",          "r",              "d",                 "pi_shock",        "l",            "h",       "inv_shock",       "sepshock",        "matchshock")
 
 // Variables WITHOUT shocks: (var, title, gname)
-// Note: w is handled separately below as a custom two-line panel (w_cycle + w_total)
+// Note: w is handled separately below, in its own panel and in a w_total/w_trend panel
 mata: noshock_vars   = ("v",          "n",          "y",        "c",            "gap",        "w_star",        "u",             "u_rate",               "m",        "mc",             "theta",        "k")
 mata: noshock_titles = ("Vacancies v", "Employment n", "Output y", "Consumption c", "Output gap", "Reset wage w*", "Unemployment u", "Unemployment rate gap", "Matches m", "Marginal cost mc", "Tightness θ", "Capital stock k")
 mata: noshock_gnames = ("v",          "n",          "y",        "c",            "gap",        "wstar",         "u",             "urate",                "m",        "mc",             "theta",        "k")
@@ -197,17 +197,17 @@ mata: noshock_gnames = ("v",          "n",          "y",        "c",            
 
 local created_graphs ""
 
-// Panel 1: w (DSGE cycle component only) — if available
+// Panel 1: w, the DSGE's wage per employee (SimPaths applies the hourly cycle w - h) — if available
 cap confirm variable w
 if (_rc == 0) {
     twoway (line w yq, `lstyle_var'), ///
-        title("Wage cycle w", size(medium)) ///
+        title("Wage per employee w", size(medium)) ///
         `gopts' legend(off) ///
         name(g_w, replace)
     local created_graphs "`created_graphs' g_w"
 }
 
-// Panel 2: w_total (cycle + capital-deepening trend) — only if both columns exist
+// Panel 2: w_total (Ramsey trend level x factor of the hourly cycle w - h) — only if both columns exist
 cap confirm variable w_total
 local has_wtotal = (_rc == 0)
 cap confirm variable w_trend
@@ -347,7 +347,7 @@ if (`have_wtotal') {
         `combine_graphs', ///
         cols(5) rows(5) ///
         title("DSGE Quarterly Paths (% deviation from steady state) - `integration_label' integration", size(medium)) ///
-        subtitle("Dashed: shocks / trend.  w = DSGE cycle only; w{sub:tot} = trend + cycle.", size(small)) ///
+        subtitle("Dashed: shocks / trend.  w = DSGE wage per employee; w{sub:tot} = trend level x factor of the hourly cycle w - h.", size(small)) ///
         note("Source: SimPaths DSGE Module.", size(vsmall)) ///
         graphregion(color(white)) ///
         xsize(16) ysize(12) ///
@@ -377,7 +377,7 @@ if (`has_any_trend') {
         `log_graphs', ///
         cols(3) rows(2) ///
         title("Ramsey Trend + DSGE Cycle (log level, relative to baseline) - `integration_label' integration", size(medium)) ///
-        subtitle("Solid: total (trend + cycle).  Dashed: Ramsey trend only.", size(small)) ///
+        subtitle("Solid: total (trend level x cycle factor).  Dashed: Ramsey trend only.", size(small)) ///
         note("Source: SimPaths DSGE Module.  Log index = ln(1 + %deviation/100).", size(vsmall)) ///
         graphregion(color(white)) ///
         xsize(16) ysize(10) ///
@@ -414,7 +414,7 @@ qui {
 
     cap confirm variable w_total
     if (_rc == 0) {
-        noi di _n "Trend/Cycle Decomposition (Ramsey trend + DSGE cycle):"
+        noi di _n "Trend/Cycle Decomposition (Ramsey trend level x DSGE cycle factor):"
         noi di "------------------------------------------------------"
         local decomp_vars ""
         foreach v in w y c inv k {

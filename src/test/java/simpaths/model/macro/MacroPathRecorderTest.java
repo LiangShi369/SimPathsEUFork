@@ -107,8 +107,13 @@ class MacroPathRecorderTest {
         assertFalse(header.contains("eps_match"), "Fallback header should not include eps_match, which the model does not have");
         }
 
+    /**
+     * Each total is the trend's level times the cycle's factor,
+     * {@code trend + 100 (exp(cycle/100) - 1) (1 + trend/100)}; the literals are computed by hand
+     * from the trends and cycles set below (adding them would give 1.25, 2.5, 3.6, 4.7, 5.75).
+     */
     @Test
-    void testRecordQuarterExportsTrendPlusCycleTotals() throws IOException {
+    void testRecordQuarterExportsTotalsAsTrendTimesCycle() throws IOException {
         MacroPathRecorder recorder = new MacroPathRecorder();
         recorder.setVariableNames(
                 new String[]{"w", "k", "s2", "s3", "s4", "s5", "s6", "s7", "s8"},
@@ -171,15 +176,39 @@ class MacroPathRecorderTest {
         assertEquals("0.5000000000", row[columns.get("y")]);
         assertEquals("0.1250000000", row[columns.get("eps_L")]);
         assertEquals("1.000000000", row[columns.get("w_trend")]);
-        assertEquals("1.250000000", row[columns.get("w_total")]);
+        assertEquals(1.2528158881853035, Double.parseDouble(row[columns.get("w_total")]), 1e-8);
         assertEquals("2.000000000", row[columns.get("y_trend")]);
-        assertEquals("2.500000000", row[columns.get("y_total")]);
+        assertEquals(2.5112771276589085, Double.parseDouble(row[columns.get("y_total")]), 1e-8);
         assertEquals("3.000000000", row[columns.get("c_trend")]);
-        assertEquals("3.600000000", row[columns.get("c_total")]);
+        assertEquals(3.619857713568681, Double.parseDouble(row[columns.get("c_total")]), 1e-8);
         assertEquals("4.000000000", row[columns.get("inv_trend")]);
-        assertEquals("4.700000000", row[columns.get("inv_total")]);
+        assertEquals(4.730553955752249, Double.parseDouble(row[columns.get("inv_total")]), 1e-8);
         assertEquals("5.000000000", row[columns.get("k_trend")]);
-        assertEquals("5.750000000", row[columns.get("k_total")]);
+        assertEquals(5.790460521676064, Double.parseDouble(row[columns.get("k_total")]), 1e-8);
+    }
+
+    /**
+     * {@code w_total} combines the trend with the hourly cycle {@code w - h}, the wage SimPaths
+     * applies: trend 10, {@code w} 0.30 and {@code h} 0.50 give
+     * {@code 10 + 100 (exp(-0.002) - 1) 1.1}, computed by hand.
+     */
+    @Test
+    void testWageTotalUsesTheHourlyCycle() throws IOException {
+        MacroPathRecorder recorder = new MacroPathRecorder();   // default schema: w is state 3, h state 6
+        recorder.setCurrentTrends(Map.of("w", 10.0));
+        double[] states = new double[13];
+        states[3] = 0.30;
+        states[6] = 0.50;
+        recorder.recordQuarter(2040, 1, new DSGEState(states, new double[9]), new double[8]);
+
+        Path exportDir = tempDir.resolve("hourly");
+        recorder.exportToCSV(exportDir.toString(), "MacroPaths.csv");
+        List<String> lines = Files.readAllLines(exportDir.resolve("MacroPaths.csv"));
+        Map<String, Integer> columns = headerIndex(lines.get(0));
+        String[] row = lines.get(1).split(",");
+
+        assertEquals(0.30, Double.parseDouble(row[columns.get("w")]), 1e-12, "w stays the DSGE's own variable");
+        assertEquals(9.780219853406637, Double.parseDouble(row[columns.get("w_total")]), 1e-8);
     }
 
     @Test

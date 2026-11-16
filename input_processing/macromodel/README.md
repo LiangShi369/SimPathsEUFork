@@ -3,7 +3,8 @@
 This folder produces the macro bundle SimPaths reads from `input/{CC}/MacroModel/`:
 a Ramsey growth model for the long-run path of capital, output, consumption and
 the real wage, and an estimated New-Keynesian DSGE model for cyclical deviations
-around it. SimPaths applies `w_total = w_trend + w_cycle` to wages and, once per
+around it. SimPaths multiplies wages by the trend wage's level times the cycle's
+factor, `(1 + w_trend/100) exp(w_cycle/100)`, and, once per
 simulated year, feeds its realized employment and hours back into a re-solve of
 the Ramsey path. Nothing here affects a SimPaths run unless `mm_macroModel` is
 switched on in the YAML config (default `off`). Poland and the UK ship bundles.

@@ -1610,8 +1610,10 @@ public class MacroModelManager {
      * ({@link #applyRamseyRecursiveFeedback}).</p>
      *
      * <p>In order: the trend (the planner's path advanced one year, or zero without a planner);
-     * the level diagnostics for MacroPaths.csv; the DSGE step; wage = cycle + trend; the wage
-     * update before the labour market; the realised-wage index; logging and diagnostics.</p>
+     * the level diagnostics for MacroPaths.csv; the DSGE step; the wage, the trend's level times
+     * the factor of the DSGE's hourly wage cycle {@code w - h} ({@link TrendCycle#totalPct},
+     * {@link DSGEState#getHourlyWageDeviation}); the wage update before the labour market; the
+     * realised-wage index; logging and diagnostics.</p>
      */
     private void runDsgePass(int year, Set<Person> persons) {
         if (useRamseyTrend && ramseyTrend != null && ramseyTrend.isSolved()) {
@@ -1636,7 +1638,7 @@ public class MacroModelManager {
 
         DSGEState annualState = dynamicDsgeModel.stepAnnual(shockScenario, year);
 
-        wageDeviation = annualState.getWageDeviation() + capitalDeepeningWageAdjustment;
+        wageDeviation = TrendCycle.totalPct(capitalDeepeningWageAdjustment, annualState.getHourlyWageDeviation());
         inflationDeviation = annualState.getInflationDeviation();
 
         // Update individual wages with the new deviation before the labour market runs.
@@ -2046,14 +2048,14 @@ public class MacroModelManager {
             System.out.println("--- DSGE Shocks ---");
             System.out.println(String.format("  Scenario shocks:     %s", scenarioApplied ? "APPLIED" : "none"));
             System.out.println("--- DSGE State Evolution (Annual Average) ---");
-            System.out.println(String.format("  Wage deviation:      %+.4f%%", state.getWageDeviation()));
+            System.out.println(String.format("  Wage per employee:   %+.4f%%", state.getWageDeviation()));
             System.out.println(String.format("  Inflation deviation: %+.4f pp", state.getInflationDeviation()));
             System.out.println(String.format("  Output deviation:    %+.4f%%", state.getOutputDeviation()));
             System.out.println(String.format("  Employment dev:      %+.4f%%", state.getEmploymentDeviation()));
             System.out.println(String.format("  Labor force dev:     %+.4f%%", state.getLaborForceDeviation()));
             System.out.println(String.format("  Hours deviation:     %+.4f%%", state.getHoursDeviation()));
-            System.out.println("--- Wage Decomposition ---");
-            System.out.println(String.format("  DSGE cycle:          %+.4f%%", state.getWageDeviation()));
+            System.out.println("--- Wage Decomposition (total = trend level x cycle factor) ---");
+            System.out.println(String.format("  DSGE cycle per hour: %+.4f%% (w - h, 100 x log)", state.getHourlyWageDeviation()));
             String trendLabel = (useRamseyTrend && ramseyTrend != null) ? "Ramsey trend" : "No trend layer";
             System.out.println(String.format("  %s:   %+.4f%%", trendLabel, capitalDeepeningWageAdjustment));
             System.out.println(String.format("  Total wage dev:      %+.4f%%", wageDeviation));
@@ -2064,8 +2066,8 @@ public class MacroModelManager {
         }
         
         if (logMacroState) {
-            log.info(String.format("DSGE Year %d: wage_dev=%.3f%% (cycle=%.3f%% + trend=%.3f%%), inflation_dev=%.3f%%, scenario %s",
-                year, wageDeviation, state.getWageDeviation(), capitalDeepeningWageAdjustment,
+            log.info(String.format("DSGE Year %d: wage_dev=%.3f%% (trend=%.3f%% times hourly cycle=%.3f%%), inflation_dev=%.3f%%, scenario %s",
+                year, wageDeviation, capitalDeepeningWageAdjustment, state.getHourlyWageDeviation(),
                 inflationDeviation, scenarioApplied ? "APPLIED" : "none"));
         }
     }

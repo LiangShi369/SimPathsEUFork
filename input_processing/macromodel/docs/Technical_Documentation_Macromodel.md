@@ -38,6 +38,7 @@ and the LaTeX model documentation `SimPaths_Macro_Model_Documentation.tex` in th
 | **v18** | **Oct 20, 2026** | **Ramsey Model: endogenous labour supply removed (JuergenWiemers/SimPathsEU#28). The Ramsey layer solves exogenous labour only; SimPaths' realized labour reaches the planner through the yearly re-solve (`mm_ramseyFeedbackMargins`, `SimPaths_Coupling.md` §8.1).** |
 | **v19** | **Nov 6, 2026** | **The DSGE is one-way: it takes no input from SimPaths and runs on scenario shocks only (contract 38). SimPaths' employment and hours reach the planner alone, counted once a year after the labour market; the feedback is always on with one persistence `mm_ramseyFeedbackPersistence` (`mm_ramseyFeedbackMargins` and `mm_ramseyFeedbackHoursPersistence` removed). The labour-force and hours shocks are ordinary shocks: the frozen models and bundles carry the calibrated ρ_L, ρ_h (the `for_simpaths_export` switch is gone), every shock is in σ-units, and the bundle declares `deviation_scale` (contracts 1, 37).** |
 | v20 | Nov 7, 2026 | Rewritten as a current-state reference; estimates, moments and IRFs are read from their sources (frozen model files, bundle, post-estimation output) instead of being copied here. |
+| v21 | Nov 7, 2026 | The wage SimPaths applies is the trend wage's level times the cycle's factor, $(1 + w^{trend}/100)\exp(w^{cycle}/100)$, instead of the sum of the two percentages, and the cycle is the DSGE's wage per hour $w - h$ instead of its wage per employee $w$ (contract 40). The `*_total` columns of `MacroPaths.csv` follow the same rule. |
 
 ---
 
@@ -60,9 +61,11 @@ The macro layer splits the macroeconomy into two components:
 **Moving steady state.** The DSGE is estimated on deviations of the observables from the Ramsey trend (output,
 consumption, investment) and from the labour, inflation and interest-rate trends built in the same step
 (section 2.5). Its steady state is therefore the trend path itself: a zero DSGE state means the economy is on
-the trend, and the cycle wage is a percent deviation around the trend wage. SimPaths applies the sum,
-$w^{total}_t = w^{trend}_t + w^{cycle}_t$, as a wage multiplier $1 + w^{total}_t/100$
-(`SimPaths_Coupling.md` §3).
+the trend, and the cycle wage is a 100 × log deviation around the trend wage of the same year. SimPaths applies
+their product as a wage multiplier, $1 + w^{total}_t/100 = (1 + w^{trend}_t/100)\,\exp(w^{cycle}_t/100)$, so a
+cycle keeps its size however far the trend has moved (contract 40). Both are wages per hour: the trend wage is
+$(1-\alpha)Y/(Nh)$, and the cycle is $w^{cycle}_t = w_t - h_t$, because the model's $w$ is the bargained wage per
+employee (section 3.5; `SimPaths_Coupling.md` §3.2).
 
 **The DSGE is one-way.** It takes no input from SimPaths: its shocks come from a scenario file only, all zero
 without one, and it hands SimPaths the cycle wage (contract 38). SimPaths' labour supply reaches the macro side
@@ -82,8 +85,9 @@ The mechanism, the persistence semantics and the treatment of hours are in `SimP
 align_popProjections.xlsx --(growth of the population aged 15-64)--> Ramsey planner (N path)
 SimPaths realized workers and hours (end of year) -----------------> Ramsey re-solve of the remaining path
 Ramsey planner --> w_trend: % change of the hourly wage since the handoff quarter, annual mean
-Scenario shocks (sigma-units) --> DSGE: 4 quarterly steps, annual mean --> w_cycle, pi_cycle
-SimPaths wages <-- w_total = w_trend + w_cycle      (pi_cycle is recorded in MacroPaths.csv, applied to no agent)
+Scenario shocks (sigma-units) --> DSGE: 4 quarterly steps, annual mean --> w_cycle = w - h (per hour), pi_cycle
+SimPaths wages x (1 + w_total/100) = (1 + w_trend/100) exp(w_cycle/100)
+                                                    (pi_cycle is recorded in MacroPaths.csv, applied to no agent)
 ```
 
 Which layers run is set by `mm_macroModel` (`off | ramsey | dsge | ramsey_dsge`, default `off`;
@@ -430,7 +434,9 @@ modes are in the frozen model, the shock standard deviations also in `shock_para
   Since the DSGE takes no input from SimPaths, at runtime it acts only on labour-force shocks a scenario sets.
 - **Hours are a pure AR(1).** Hours respond to no other variable of the model; only $\varepsilon^h$ moves
   them, and they enter production and, through $mpl$, marginal cost, vacancy posting and bargaining. The DSGE
-  has no hours choice; on the micro side SimPaths' household choice sets hours.
+  has no hours choice; on the micro side SimPaths' household choice sets hours. Since $mpl$ is the marginal
+  product of an employee, the bargained $w$ is a wage per employee and rises with hours; the wage per hour is
+  $w - h$, which is the cycle SimPaths applies (section 1.1).
 - **Calibrated persistence of the labour force and hours.** With $L$ and $h$ observed AR(1) processes,
   $\rho_L$ and $\rho_h$ are collinear with their innovation standard deviations, so the persistence is
   calibrated and the standard deviation estimated. The frozen model and the bundle carry these calibrated
@@ -496,7 +502,7 @@ One rule for every shock (contract 3):
   one-quarter effect and can trip the stability bound `mm_dsgeMaxStateDeviation` (default 10, in the model's
   units).
 - `model_info.json` declares `deviation_scale = 100`: the model is in 100 × log-deviation units, so the wage
-  deviation is a percent. The exporter checks the datafile's scale before writing anything, and Java refuses a
+  deviation is a 100 × log deviation, which Java converts to a level factor with $\exp(x/100)$ (section 1.1). The exporter checks the datafile's scale before writing anything, and Java refuses a
   bundle that lacks the key or declares another value (contract 1).
 
 **Scenario files.** `_macroScenario_*.csv` in the bundle folder, named by `mm_dsgeShockScenario`, with columns
@@ -507,7 +513,7 @@ through the state dynamics. They are written by hand; no exporter writes them.
 **Annual step.** In each simulated year, before SimPaths' labour market, `DSGEModel.stepAnnual` runs four
 quarterly steps on that year's scenario shocks and returns the mean of the four quarterly values of every state
 and jump. The state carries over from year to year and starts at zero (the steady state). The cycle wage is the
-annual mean of `w`; the inflation deviation is the annual mean of `pi`.
+annual mean of the wage per hour, `w - h`; the inflation deviation is the annual mean of `pi`.
 
 ---
 

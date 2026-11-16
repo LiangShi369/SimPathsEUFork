@@ -65,7 +65,11 @@ public class MacroPathRecorder {
 
     /**
      * Ordered list of variables for which trend/total columns are exported.
-     * For each entry, the CSV gets two extra columns: {var}_trend and {var}_total.
+     * For each entry, the CSV gets two extra columns: {var}_trend, the Ramsey trend in percent
+     * since the handoff quarter, and {var}_total, that trend's level times the DSGE cycle's factor
+     * ({@link TrendCycle#totalPct}), also in percent since the handoff quarter. The wage's cycle is
+     * the wage per hour {@code w - h}, so {@code w_total} is the wage SimPaths applies in the
+     * quarter; the state column {@code w} stays the DSGE's wage per employee.
      */
     private static final String[] TREND_COLUMN_VARS = {"w", "y", "c", "inv", "k"};
 
@@ -356,9 +360,8 @@ public class MacroPathRecorder {
         // Append trend and total for each tracked variable
         for (String var : TREND_COLUMN_VARS) {
             double trend = record.trends.getOrDefault(var, 0.0);
-            double cycle = findCycleValue(var, record);
             sb.append(",").append(formatValue(trend));
-            sb.append(",").append(formatValue(cycle + trend));
+            sb.append(",").append(formatValue(TrendCycle.totalPct(trend, cycleForTotal(var, record))));
         }
 
         // Append extra plain columns
@@ -397,6 +400,16 @@ public class MacroPathRecorder {
         }
 
         return Math.max(lastRun, 0) + 1;
+    }
+
+    /**
+     * The cycle a {@code {var}_total} column combines with the trend: the variable's own DSGE
+     * deviation, except for the wage, whose total uses the wage per hour {@code w - h}
+     * ({@link DSGEState#getHourlyWageDeviation}), the cycle SimPaths applies.
+     */
+    private double cycleForTotal(String varName, QuarterRecord record) {
+        double cycle = findCycleValue(varName, record);
+        return "w".equals(varName) ? cycle - findCycleValue("h", record) : cycle;
     }
 
     /**

@@ -342,7 +342,8 @@ For all countries, verify the impact (t=0) responses in the exported bundle
   reset wage bargains over: in `Macromodel_template.mod`,
   ∂`w_star`/∂`h` = (1 − β·`lambda_w`)·`eta`·`alpha_n`·`omega_h` > 0 for any
   admissible calibration. A negative response here would indicate an export
-  bug, not the expected pattern.
+  bug, not the expected pattern. The wage per hour, `w − h`, falls, and that
+  is the cycle SimPaths applies (`SimPaths_Coupling.md` §3.2).
 - h↑ → π↓ (marginal cost falls: the marginal product rises at once, the
   staggered wage only partly)
 

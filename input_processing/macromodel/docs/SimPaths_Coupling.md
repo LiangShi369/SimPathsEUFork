@@ -18,14 +18,14 @@ The macro stack has two orthogonal layers:
 SimPaths population projection -------> Ramsey trend model (trend layer)
 SimPaths realized employment, hours --> Ramsey trend model (yearly re-solve, always on, §8.1)
 Scenario shocks (mm_dsgeShockScenario) -> DSGE cycle model (quarterly state-space)
-SimPaths receives: delta_w_total = delta_w_cycle + delta_w_trend, delta_pi = delta_pi_cycle
+SimPaths receives: w_total = 100 ((1 + w_trend/100) exp(w_cycle/100) - 1) (§3.2), delta_pi = delta_pi_cycle
 ```
 
 ### Design principles
 
 1. Opt-in macro layer via `mm_macroModel` (default `off`)  
 2. Macro model provides trend (Ramsey growth model) and cycle (DSGE) decomposition; the two layers are selected together by `mm_macroModel`: `off | ramsey | dsge | ramsey_dsge`
-3. SimPaths wage application uses total wage effect (trend + cycle changes)
+3. SimPaths applies one wage, the trend wage's level times the cycle's factor, both measured on the wage per hour (§3.2)
 4. The DSGE takes no input from SimPaths. SimPaths' labour supply reaches the macro side through the planner alone, counted once a year after the labour market and the population alignment (§4, §7.1).
 5. Path recording is completely decoupled from the macro model usage (controlled via `mm_useMacroPathRecorder`, default `true`).
 6. Realized employment and hours are fed back into the Ramsey re-solve whenever a Ramsey layer runs, with one persistence `mm_ramseyFeedbackPersistence` (default `1.0`) for both.
@@ -103,14 +103,21 @@ one movement twice, in the trend wage and in the cycle wage.
 
 ### 3.2 DSGE -> SimPaths outputs
 
-- `delta_w_cycle`: cyclical wage deviation (%) from DSGE annual aggregation
-- `delta_w_trend`: secular wage trend (%) from Ramsey projection
-- `delta_w_total = delta_w_cycle + delta_w_trend`
-- `delta_pi`: inflation deviation (%) (cycle component)
+- `w_trend`: the planner's wage per hour, `(1-alpha) Y / (N h)`, in percent against the handoff quarter (§3.3).
+- `w_cycle`: the DSGE's wage per hour, `w - h`, averaged over the four quarters of the year: a 100·log deviation
+  from that year's trend wage (`DSGEState.getHourlyWageDeviation`). The DSGE's own `w` is the bargained wage per
+  employee, which hours per employee raise (`MULTI_COUNTRY_WORKFLOW.md`, sign checks); net of `h` it is the wage
+  per hour, the concept of the trend wage and of the wages SimPaths multiplies. After a positive hours shock `w`
+  rises slightly while `w - h` falls.
+- `w_total = 100 ((1 + w_trend/100) exp(w_cycle/100) - 1)`: the trend wage's level times the cycle's factor, in
+  percent against the handoff quarter (`TrendCycle.totalPct`, contract 40). A cycle therefore keeps its size
+  however far the trend has moved. The sum of the two percentages would measure the cycle against the
+  handoff-quarter wage instead of the trend wage of the year and shrink it by `1 / (1 + w_trend/100)`: on the
+  Poland setup `w_trend` is about +42% by 2040 (one seed, 2026-11-06), which would leave the cycle at 0.7 of its
+  size. Without scenario shocks `w_cycle = 0` and `w_total = w_trend` exactly.
+- `delta_pi`: inflation deviation (%) (cycle component), recorded only (§4.5).
 
-In SimPaths wage equations, macro feedback is applied as:
-
-`wageMultiplier = 1 + (delta_w_total / 100)`
+SimPaths multiplies every potential wage by `1 + w_total / 100` (§3.3).
 
 ### 3.3 How the macro wage enters SimPaths, and how that differs from the `wage_growth` index
 
@@ -121,8 +128,8 @@ single number, the wage deviation `dw` in percent:
 | `mm_macroModel` | `dw` |
 |---|---|
 | `ramsey` | `w_trend(t) = 100 (w(t) / w(q0) - 1)`: the Ramsey trend wage `w = (1-alpha) Y / (N h)`, averaged over the four quarters of year `t`, relative to the handoff quarter `q0`, the first quarter of the start year (`advanceRamseyTrend`). A cumulative level against the start, not a growth rate; already nonzero in the start year |
-| `dsge` | `w_cycle(t)`: the DSGE's annual-average wage deviation from its steady state (a 100·log deviation, applied as a percent) |
-| `ramsey_dsge` | `w_trend(t) + w_cycle(t)` |
+| `dsge` | `100 (exp(w_cycle(t)/100) - 1)`: the percent form of the DSGE's annual-average wage per hour `w - h`, a 100·log deviation from its steady state (§3.2) |
+| `ramsey_dsge` | `w_total(t) = 100 ((1 + w_trend(t)/100) exp(w_cycle(t)/100) - 1)`: the trend's level times the cycle's factor (§3.2) |
 
 `MacroModelManager.updatePotentialHourlyEarnings` then runs `Person.updateFullTimeHourlyEarnings` for every
 person:
@@ -172,7 +179,7 @@ independent of `mm_macroModel`.
 
 | | Macro off: exogenous index | Macro on: Ramsey / DSGE |
 |---|---|---|
-| Source | Excel index, extended at its last observed growth ratio | Forward-solved `w = (1-alpha) Y / (N h)`, plus the optional DSGE cycle |
+| Source | Excel index, extended at its last observed growth ratio | Forward-solved `w = (1-alpha) Y / (N h)`, times the factor of the optional DSGE cycle |
 | Entry point | Regressor inside the wage equation | Multiplier on the equation's output |
 | Pass-through | Partial, as estimated, shaped by the lag | One for one on the level, by construction |
 | Heterogeneity | One index; its effect differs between the `a` and `b` specifications (`W1ma`/`W1fa` vs `W1mb`/`W1fb`) through the lag | The same multiplier for everyone |
@@ -190,7 +197,6 @@ SimPaths' own labour supply moves. Out of sample the two trends would stack, hen
   equally.
 - The planner's wage is compensation per employee, while SimPaths' wage equation is estimated on pooled employee
   and self-employment income (§8.1, "Employees versus all workers").
-- The DSGE deviation is a 100·log deviation applied as `1 + x/100`, exact only for small `x`.
 
 ---
 
@@ -203,9 +209,10 @@ At `DSGEMacroUpdate`, after union matching and fertility, before `LabourMarketAn
 1. Advance the Ramsey trend one year along the currently solved path, giving `w_trend(t)` (Ramsey modes). From
    `startYear+2` on this requires the end-of-year feedback of `t-1` to have run; otherwise the run stops (§8.1).
 2. Step the DSGE four quarters on the scenario's shocks for `t` (zero without a scenario) and average them into
-   the annual cycle values `w_cycle(t)`, `pi_cycle(t)` (DSGE modes). The step is the same in every year, the
-   start year included (`MacroModelManager.runDsgePass`).
-3. Compose the total wage effect `w_trend + w_cycle` and apply it to every person's potential wage (§3.3).
+   the annual cycle values `w_cycle(t)`, the wage per hour `w - h`, and `pi_cycle(t)` (DSGE modes). The step is
+   the same in every year, the start year included (`MacroModelManager.runDsgePass`).
+3. Combine them into `w_total`, the trend wage's level times the cycle's factor (§3.2), and apply it to every
+   person's potential wage (§3.3).
 4. Record the year's row, with in-year level indices that step 5 overwrites.
 
 At `MacroEndYearCapture`, after mortality and population alignment:
@@ -215,7 +222,7 @@ At `MacroEndYearCapture`, after mortality and population alignment:
    of SimPaths' labour supply the macro side uses (§7.1).
 
 Nothing is iterated within the year. The order of steps 1 and 2 does not matter for the wage: neither layer
-reads the other's output within the year, and the wage is the sum. The labour market of year `t` reaches wages
+reads the other's output within the year, and the wage is their product. The labour market of year `t` reaches wages
 in `t+1` through one channel, the planner's re-solve on the post-alignment count; the DSGE never sees it.
 The one dependency between the layers is conceptual: the DSGE is estimated on Ramsey-detrended data, so the
 Ramsey path is its steady state, which is why `mm_macroModel: dsge` alone is diagnostic (§6.1).
@@ -223,7 +230,7 @@ Ramsey path is its steady state, which is why `mm_macroModel: dsge` alone is dia
 ### 4.1 One simulated year
 
 Events in the order `yearlySchedule` fires them, top to bottom. Lavender boxes are SimPaths events, amber the
-two link points, blue the macro layer; `dw = w_trend + w_cycle`, in percent.
+two link points, blue the macro layer; `dw = w_total = 100 ((1 + w_trend/100) exp(w_cycle/100) - 1)`, in percent.
 
 ```mermaid
 ---
@@ -256,7 +263,7 @@ flowchart TB
 
   R -- "w_trend(t) = 100 (w(t)/w(q0) - 1)" --> M
   SC -- "shocks of the 4 quarters of t<br/>(zero without a scenario)" --> D
-  D -- "w_cycle(t), pi_cycle(t)" --> M
+  D -- "w_cycle(t) = w - h (per hour),<br/>pi_cycle(t)" --> M
   E -- "L_sim(t), h(t)<br/>(post-labour-market, post-alignment)" --> RS
   RS -- "revised path, used from t+1" --> R
 
@@ -304,9 +311,9 @@ sequenceDiagram
         end
         opt DSGE modes
             M->>D: stepAnnual on the scenario's shocks for t (zero without a scenario)
-            D-->>M: w_cycle(t), pi_cycle(t)
+            D-->>M: w_cycle(t) (annual mean of w - h), pi_cycle(t)
         end
-        M->>S: labWageHrly x (1 + (w_trend + w_cycle)/100) for all persons
+        M->>S: labWageHrly x (1 + w_total/100), w_total = trend level x cycle factor, for all persons
         M->>C: row t: trend, cycle, wage_realized and the pre-alignment level indices
         S->>S: LabourMarketAndIncomeUpdate: at-risk pool, labour-supply choice at the new wages, earnings, tax-benefit match, disposable income
         opt t = startYear+1
@@ -337,8 +344,8 @@ sequenceDiagram
 |---|---|---|---|---|---|
 | Offline (MATLAB) | micro to macro | `population_projection_{CC}.csv` (the employees level at the handoff quarter, grown with the projected population aged 15-64) and `hours_projection_{CC}.csv` | `input/{CC}/align_popProjections.xlsx`, the projection SimPaths' population alignment uses; the hours trend fitted to observed hours | the forward Ramsey solve | before the run |
 | `DSGEMacroUpdate` | macro to micro | `w_trend(t)`, cumulative percent against the handoff quarter | the Ramsey path solved at the end of `t-1` (`advanceRamseyTrend`) | the wage multiplier | `startYear` |
-| `DSGEMacroUpdate` | macro to micro | `w_cycle(t)`; `pi_cycle(t)` is computed too | the DSGE annual average after four quarterly steps on the scenario's shocks | the wage multiplier (`pi_cycle` is only recorded) | `startYear`; zero without scenario shocks |
-| `DSGEMacroUpdate` | macro to micro | every person's potential wage times `1 + (w_trend + w_cycle)/100` | `Person.updateFullTimeHourlyEarnings` (§3.3) | labour-supply choice, earnings, tax-benefit match | `startYear` |
+| `DSGEMacroUpdate` | macro to micro | `w_cycle(t)`, the wage per hour `w - h`; `pi_cycle(t)` is computed too | the DSGE annual average after four quarterly steps on the scenario's shocks | the wage multiplier (`pi_cycle` is only recorded) | `startYear`; zero without scenario shocks |
+| `DSGEMacroUpdate` | macro to micro | every person's potential wage times `1 + w_total/100`, the trend's level times the cycle's factor (§3.2) | `Person.updateFullTimeHourlyEarnings` (§3.3) | labour-supply choice, earnings, tax-benefit match | `startYear` |
 | End of `LabourMarketAndIncomeUpdate` | micro to macro | the `l_level`/`h_level` start anchors, latched once (`latchStartYearAnchorsPostLabourMarket`) | the post-labour-market population | the `l_level`/`h_level` indices and the gate of `participation_rate`, `workers_over_atRiskPool` (§7.2) | `startYear+1`, once |
 | `MacroEndYearCapture` | micro to macro | post-alignment level indices (`l_level`, `h_level`, `wap_level`, `cat_*`, `wage_realized`) | `computeRawAggregates` after mortality and population alignment | `MacroPaths.csv` only | `startYear` (`l_level`, `h_level` from `startYear+1`, §7.2) |
 | `MacroEndYearCapture` | micro to macro | `L_sim(t)`, `h(t)`; the `lambda` latch, then `delta_t`, `delta_h` and the Ramsey re-solve | the same post-alignment snapshot | the Ramsey path from `t+1` on, hence next year's `w_trend` | `lambda` in `startYear+1`; re-solves from `startYear+2` |
@@ -348,10 +355,10 @@ sequenceDiagram
 
 | Year | Labour market | Wage multiplier | DSGE (DSGE modes) | Ramsey feedback |
 |---|---|---|---|---|
-| `startYear` | none (`firstYearSched`) | `w_trend + w_cycle`; `w_trend` already nonzero | initialised, stepped on the scenario's shocks | none |
-| `startYear+1` | yes | `w_trend + w_cycle` | stepped on the scenario's shocks | `lambda` and the hours base latched at year end, no re-solve |
-| `startYear+2` | yes | `w_trend + w_cycle` | stepped on the scenario's shocks | first gap and first re-solve at year end, effective from `startYear+3` |
-| later | yes | `w_trend + w_cycle` | the same step | yearly |
+| `startYear` | none (`firstYearSched`) | `w_total`; `w_trend` already nonzero | initialised, stepped on the scenario's shocks | none |
+| `startYear+1` | yes | `w_total` | stepped on the scenario's shocks | `lambda` and the hours base latched at year end, no re-solve |
+| `startYear+2` | yes | `w_total` | stepped on the scenario's shocks | first gap and first re-solve at year end, effective from `startYear+3` |
+| later | yes | `w_total` | the same step | yearly |
 
 `w_cycle` is zero in every year without scenario shocks.
 
@@ -688,6 +695,12 @@ The macro paths are exported to:
 
 - `output/{run_id}/csv/MacroPaths.csv`
 
+One row per quarter. The DSGE's states, jumps and shocks are written as the model has them. For `w`, `y`, `c`,
+`inv` and `k`, `{var}_trend` is the Ramsey trend in percent against the handoff quarter and `{var}_total` that
+trend's level times the DSGE cycle's factor, `100 ((1 + trend/100) exp(cycle/100) - 1)` (`TrendCycle.totalPct`).
+For the wage the cycle is the wage per hour `w - h`, so `w_total` is the wage SimPaths applies in the quarter, while
+the state column `w` is the DSGE's wage per employee.
+
 ### 9.2 Logging
 
 - Year-level macro logging: `mm_macroLogging: state`
@@ -709,6 +722,7 @@ The macro paths are exported to:
 - `DSGEShockScenario.java`
 - `RamseyTrendModel.java`
 - `RamseyScenario.java`
+- `TrendCycle.java` (how a trend and a cycle combine into one level, contract 40)
 - `MacroCsv.java`, `MacroJson.java` (readers for the bundle's CSV and JSON files)
 
 ### 10.2 Tests
@@ -719,7 +733,8 @@ The macro paths are exported to:
 forward solve), `DSGEBundleContractTest`, `DSGEIntegrationTest`, `DSGEIrfParityTest`,
 `DSGEModelTest`, `DSGEShockScenarioTest`, `DSGEStateTest`, `DsgeOneWayTest` (contract 38),
 `LaborSupplyAggregatorTest`, `LevelDiagnosticsTest`, `MacroJsonTest`, `MacroModelManagerTest`,
-`MacroPathRecorderTest`, `MacroScenarioConfigTest`, `MacroSwitchContractTest`, `RamseyRecursiveFeedbackTest`,
+`MacroPathRecorderTest`, `MacroScenarioConfigTest`, `MacroSwitchContractTest`, `MacroWageCompositionTest`
+(contract 40), `RamseyRecursiveFeedbackTest`,
 `RamseyScenarioTest`, `RamseyTrendModelTest` (MATLAB parity against `src/test/resources/macro/exogenous/` at
 `RELATIVE_TOLERANCE = 1e-9`),
 `ScenarioLoaderParityTest`. `MacroTestSupport` holds the helpers that drive a manager through the schedule.
