@@ -296,6 +296,257 @@ class MacroModelManagerTest {
         assertArrayEquals(new double[] {20, 24, 30}, p, 0.0);
     }
 
+    // ========== Ramsey scenario: the planner's workers N and population P ==========
+
+    /** A Poland manager initialised on {@code bundle}, optionally with a Ramsey scenario and an input scenario folder. */
+    private static MacroModelManager newRamseyManager(String bundle, String ramseyScenario, Path inputScenarioDir)
+            throws Exception {
+        MacroModelManager m = new MacroModelManager();
+        setIntField(m, "simulationStartYear", 2023);
+        if (ramseyScenario != null) m.setRamseyScenario(ramseyScenario);
+        if (inputScenarioDir != null) m.setInputScenarioDir(inputScenarioDir.toString());
+        m.initializeRamseyTrend(bundle);
+        return m;
+    }
+
+    @Test
+    void testZeroPathDeviationsLeaveThePlannerBitIdentical(@TempDir Path tempDir) throws Exception {
+        assumeRamseyInputsAvailable();
+        Files.writeString(tempDir.resolve("zero.csv"), "year, N, P\n2011, 0, 0\n2060, 0, 0\n");
+        MacroModelManager base = newRamseyManager(MACRO_MODEL_PATH, null, null);
+        MacroModelManager scen = newRamseyManager(MACRO_MODEL_PATH, "zero.csv", tempDir);
+
+        assertArrayEquals(getField(base, "ramseyProjN", double[].class),
+                getField(scen, "ramseyProjN", double[].class), 0.0);
+        assertArrayEquals(getField(base, "ramseyProjP", double[].class),
+                getField(scen, "ramseyProjP", double[].class), 0.0);
+        RamseyTrendModel baseTrend = getField(base, "ramseyTrend", RamseyTrendModel.class);
+        RamseyTrendModel scenTrend = getField(scen, "ramseyTrend", RamseyTrendModel.class);
+        assertEquals(baseTrend.getSimQuarters(), scenTrend.getSimQuarters());
+        for (int q = 0; q < baseTrend.getSimQuarters(); q++) {
+            var b = baseTrend.getTrendAtQuarter(q);
+            var s = scenTrend.getTrendAtQuarter(q);
+            assertEquals(b.wage(), s.wage(), 0.0, "wage, quarter " + q);
+            assertEquals(b.output(), s.output(), 0.0, "output, quarter " + q);
+            assertEquals(b.consumption(), s.consumption(), 0.0, "consumption, quarter " + q);
+            // A record compares double components with Double.compare: every field, bit for bit.
+            assertEquals(b, s, "trend state, quarter " + q);
+        }
+    }
+
+    @Test
+    void testPathDeviationsScaleNandPWithGeometricInterpolation(@TempDir Path tempDir) throws Exception {
+        assumeRamseyInputsAvailable();
+        Files.writeString(tempDir.resolve("step.csv"), "year, N, P\n2029, 0, 0\n2030, 0.10, 0.04\n");
+        MacroModelManager base = newRamseyManager(MACRO_MODEL_PATH, null, null);
+        MacroModelManager scen = newRamseyManager(MACRO_MODEL_PATH, "step.csv", tempDir);
+        double[] baseN = getField(base, "ramseyProjN", double[].class);
+        double[] baseP = getField(base, "ramseyProjP", double[].class);
+        double[] scenN = getField(scen, "ramseyProjN", double[].class);
+        double[] scenP = getField(scen, "ramseyProjP", double[].class);
+        int last = scenN.length - 1;
+
+        // Quarter j is calendar year 2023 + j/4: 2029q1 is j = 24.
+        for (int j = 0; j < 24; j++) {
+            assertEquals(baseN[j], scenN[j], 0.0, "N before the deviation, quarter " + j);
+            assertEquals(baseP[j], scenP[j], 0.0, "P before the deviation, quarter " + j);
+        }
+        assertEquals(1.0, scenN[24] / baseN[24], 1e-15);                          // 2029q1
+        assertEquals(Math.pow(1.10, 0.25), scenN[25] / baseN[25], 1e-14);          // 2029q2
+        assertEquals(Math.pow(1.10, 0.50), scenN[26] / baseN[26], 1e-14);          // 2029q3
+        assertEquals(Math.pow(1.04, 0.75), scenP[27] / baseP[27], 1e-14);          // 2029q4
+        assertEquals(1.10, scenN[28] / baseN[28], 1e-14);                          // 2030q1
+        assertEquals(1.04, scenP[28] / baseP[28], 1e-14);
+        assertEquals(1.10, scenN[last] / baseN[last], 1e-14);                      // beyond the file: persists
+        assertEquals(1.04, scenP[last] / baseP[last], 1e-14);
+
+        // The initial solve runs on the scaled paths, not only the stored copies.
+        RamseyTrendModel trend = getField(scen, "ramseyTrend", RamseyTrendModel.class);
+        assertEquals(scenN[28], trend.getTrendAtQuarter(28).labor(), 0.0);
+        assertEquals(scenP[28], trend.getTrendAtQuarter(28).population(), 0.0);
+    }
+
+    @Test
+    void testConstantFactorsKeepTheFrozenDependencyRatioFrozen(@TempDir Path tempDir) throws Exception {
+        assumeRamseyInputsAvailable();
+        Files.writeString(tempDir.resolve("step.csv"), "year, N, P\n2029, 0, 0\n2030, 0.10, 0.04\n");
+        MacroModelManager base = newRamseyManager(MACRO_MODEL_PATH, null, null);
+        MacroModelManager scen = newRamseyManager(MACRO_MODEL_PATH, "step.csv", tempDir);
+        double[] baseN = getField(base, "ramseyProjN", double[].class);
+        double[] baseP = getField(base, "ramseyProjP", double[].class);
+        double[] scenN = getField(scen, "ramseyProjN", double[].class);
+        double[] scenP = getField(scen, "ramseyProjP", double[].class);
+
+        // Index 0 is the projection's first row (the handoff quarter), so its last row is rows - 1.
+        List<String> rows = Files.readAllLines(Paths.get(MACRO_MODEL_PATH, "population_projection_Poland.csv"))
+                .stream().skip(1).filter(line -> !line.isBlank()).toList();
+        assertTrue(rows.get(0).startsWith("2023q1"), "the projection starts at the handoff quarter");
+        int lastProjected = rows.size() - 1;
+        assertTrue(lastProjected + 2 < scenN.length, "the horizon must extend beyond the projection");
+
+        for (int j = lastProjected + 1; j < scenN.length; j++) {
+            assertEquals(1.04 / 1.10, (scenP[j] / scenN[j]) / (baseP[j] / baseN[j]), 1e-14,
+                    "dependency ratio, quarter " + j);
+            if (j + 1 < scenN.length) {
+                assertEquals(baseN[j + 1] / baseN[j], scenN[j + 1] / scenN[j], 1e-14,
+                        "growth of N, quarter " + j);
+            }
+        }
+    }
+
+    @Test
+    void testRamseyScenarioIsFoundInTheInputScenarioFolderFirst(@TempDir Path tempDir) throws Exception {
+        assumeRamseyInputsAvailable();
+        Path bundle = Files.createDirectory(tempDir.resolve("bundle"));
+        try (var files = Files.list(Paths.get(MACRO_MODEL_PATH))) {
+            for (Path f : (Iterable<Path>) files::iterator) {
+                if (Files.isRegularFile(f)) Files.copy(f, bundle.resolve(f.getFileName()));
+            }
+        }
+        Files.writeString(bundle.resolve("x.csv"), "year, N\n2030, 0.0\n");
+        Path scenarioDir = Files.createDirectory(tempDir.resolve("scenario"));
+        Files.writeString(scenarioDir.resolve("x.csv"), "year, N\n2030, 0.05\n");
+
+        double[] baseN = getField(newRamseyManager(bundle.toString(), null, null), "ramseyProjN", double[].class);
+        double[] scenN = getField(newRamseyManager(bundle.toString(), "x.csv", scenarioDir), "ramseyProjN", double[].class);
+        assertEquals(1.05, scenN[28] / baseN[28], 1e-14);
+
+        // Without an input scenario folder the bundle's file applies.
+        double[] bundleN = getField(newRamseyManager(bundle.toString(), "x.csv", null), "ramseyProjN", double[].class);
+        assertArrayEquals(baseN, bundleN, 0.0);
+    }
+
+    @Test
+    void testRamseyScenarioFoundInNeitherFolderNamesBoth(@TempDir Path tempDir) throws Exception {
+        assumeRamseyInputsAvailable();
+        Path scenarioDir = Files.createDirectory(tempDir.resolve("scenario"));
+        var e = assertThrows(java.io.FileNotFoundException.class,
+                () -> newRamseyManager(MACRO_MODEL_PATH, "absent.csv", scenarioDir));
+        assertTrue(e.getMessage().contains(scenarioDir.toString())
+                && e.getMessage().contains(Paths.get(MACRO_MODEL_PATH).toString()), e.getMessage());
+    }
+
+    @Test
+    void testNonZeroPathDeviationInTheStartYearIsRefused(@TempDir Path tempDir) throws Exception {
+        assumeRamseyInputsAvailable();
+        // The floor rule carries the 2020 row into the start year 2023.
+        Files.writeString(tempDir.resolve("early.csv"), "year, N\n2020, 0.01\n");
+        MacroModelManager m = new MacroModelManager();
+        setIntField(m, "simulationStartYear", 2023);
+        m.setRamseyScenario("early.csv");
+        m.setInputScenarioDir(tempDir.toString());
+        var e = assertThrows(IllegalStateException.class, () -> m.initializeRamseyTrend(MACRO_MODEL_PATH));
+        assertTrue(e.getMessage().contains("start year"), e.getMessage());
+
+        Files.writeString(tempDir.resolve("early_p.csv"), "year, P\n2023, -0.02\n2030, 0.01\n");
+        MacroModelManager mp = new MacroModelManager();
+        setIntField(mp, "simulationStartYear", 2023);
+        mp.setRamseyScenario("early_p.csv");
+        mp.setInputScenarioDir(tempDir.toString());
+        var ep = assertThrows(IllegalStateException.class, () -> mp.initializeRamseyTrend(MACRO_MODEL_PATH));
+        assertTrue(ep.getMessage().contains("start year"), ep.getMessage());
+    }
+
+    /**
+     * The latch year 2024 takes in 2025's factor through the within-year interpolation, so a
+     * deviation in 2025 is refused; 2026 is the first year a deviation may be non-zero.
+     */
+    @Test
+    void testFirstAllowedPathDeviationYearIsThreeYearsAfterTheStart(@TempDir Path tempDir) throws Exception {
+        assumeRamseyInputsAvailable();
+        Path refused = tempDir.resolve("from2025.csv");
+        Files.writeString(refused, "year, N, P\n2025, 0, 0.03\n2030, 0.05, 0.03\n");
+        MacroModelManager m = new MacroModelManager();
+        setIntField(m, "simulationStartYear", 2023);
+        m.setRamseyScenario("from2025.csv");
+        m.setInputScenarioDir(tempDir.toString());
+        var e = assertThrows(IllegalStateException.class, () -> m.initializeRamseyTrend(MACRO_MODEL_PATH));
+        String msg = e.getMessage();
+        assertTrue(msg.contains("start year"), msg);
+        assertTrue(msg.contains(refused.toString()), "names the resolved file: " + msg);
+        assertTrue(msg.contains("column P is 0.03 in 2025"), "names column, value and year: " + msg);
+        assertTrue(msg.contains("first year a deviation may be non-zero is 2026"), msg);
+
+        Files.writeString(tempDir.resolve("from2026.csv"), "year, N, P\n2026, 0.05, 0.03\n");
+        MacroModelManager base = newRamseyManager(MACRO_MODEL_PATH, null, null);
+        MacroModelManager ok = newRamseyManager(MACRO_MODEL_PATH, "from2026.csv", tempDir);
+        double[] baseN = getField(base, "ramseyProjN", double[].class);
+        double[] okN = getField(ok, "ramseyProjN", double[].class);
+        for (int j = 0; j <= 8; j++) {                  // 2023q1 .. 2025q1, latch year 2024 included
+            assertEquals(baseN[j], okN[j], 0.0, "quarter " + j);
+        }
+        assertEquals(1.05, okN[12] / baseN[12], 1e-14); // 2026q1
+    }
+
+    /**
+     * With a later reference year the zero rule moves with it: a deviation is refused through
+     * the year after the reference year, whose factor enters the reference year's quarters.
+     */
+    @Test
+    void testFirstAllowedPathDeviationYearFollowsTheReferenceYear(@TempDir Path tempDir) throws Exception {
+        assumeRamseyInputsAvailable();
+        Path refused = tempDir.resolve("from2029.csv");
+        Files.writeString(refused, "year, N, P\n2029, 0.05, 0.03\n");
+        MacroModelManager m = new MacroModelManager();
+        setIntField(m, "simulationStartYear", 2023);
+        m.setRamseyFeedbackReferenceYear(2028);
+        m.setRamseyScenario("from2029.csv");
+        m.setInputScenarioDir(tempDir.toString());
+        var e = assertThrows(IllegalStateException.class, () -> m.initializeRamseyTrend(MACRO_MODEL_PATH));
+        String msg = e.getMessage();
+        assertTrue(msg.contains("column N is 0.05 in 2029"), "names column, value and year: " + msg);
+        assertTrue(msg.contains("through 2029"), msg);
+        assertTrue(msg.contains("first year a deviation may be non-zero is 2030"), msg);
+        assertTrue(msg.contains("reference year 2028"), msg);
+
+        Files.writeString(tempDir.resolve("from2030.csv"), "year, N, P\n2030, 0.05, 0.03\n");
+        MacroModelManager ok = new MacroModelManager();
+        setIntField(ok, "simulationStartYear", 2023);
+        ok.setRamseyFeedbackReferenceYear(2028);
+        ok.setRamseyScenario("from2030.csv");
+        ok.setInputScenarioDir(tempDir.toString());
+        assertDoesNotThrow(() -> ok.initializeRamseyTrend(MACRO_MODEL_PATH));
+    }
+
+    /** The reference year is 0 (the year after the start year) or a year after the start year, before the end year. */
+    @Test
+    void testFeedbackReferenceYearMustLieInsideTheRun() throws Exception {
+        MacroModelManager m = new MacroModelManager();
+        m.setEnabled(true);
+        m.setUseDsge(false);
+        m.setUseRamseyTrend(true);
+        setIntField(m, "simulationStartYear", 2023);
+
+        m.setRamseyFeedbackReferenceYear(2023);
+        var e = assertThrows(IllegalStateException.class, m::validateRamseyFeedbackConfig);
+        assertTrue(e.getMessage().contains("mm_ramseyFeedbackReferenceYear"), e.getMessage());
+        assertTrue(e.getMessage().contains("2023"), e.getMessage());
+
+        m.setRamseyFeedbackReferenceYear(2024);
+        assertDoesNotThrow(m::validateRamseyFeedbackConfig);
+        m.setRamseyFeedbackReferenceYear(0);
+        assertDoesNotThrow(m::validateRamseyFeedbackConfig);
+
+        // With the end year known, the reference year must leave at least one year to measure a gap in.
+        assertDoesNotThrow(() -> MacroModelManager.requireFeedbackReferenceYearInsideRun(0, 2023, 2060));
+        assertDoesNotThrow(() -> MacroModelManager.requireFeedbackReferenceYearInsideRun(2059, 2023, 2060));
+        var late = assertThrows(IllegalStateException.class,
+                () -> MacroModelManager.requireFeedbackReferenceYearInsideRun(2060, 2023, 2060));
+        assertTrue(late.getMessage().contains("2060"), late.getMessage());
+    }
+
+    /** Without the Ramsey layer the reference year is never read, so no value of it is fatal. */
+    @Test
+    void testFeedbackReferenceYearIsInertWithoutRamseyTrend() throws Exception {
+        MacroModelManager m = new MacroModelManager();
+        m.setEnabled(true);
+        m.setUseDsge(true);
+        m.setUseRamseyTrend(false);
+        setIntField(m, "simulationStartYear", 2023);
+        m.setRamseyFeedbackReferenceYear(2000);
+        assertDoesNotThrow(m::validateRamseyFeedbackConfig);
+    }
+
     /** Copy the deployed PL macro bundle into a scratch directory. */
     private static Path copyMacroBundle() throws Exception {
         Path scratch = Files.createTempDirectory("macro-align-test");
@@ -396,6 +647,12 @@ class MacroModelManagerTest {
                 "Capital trend should be computed relative to the quarter-0 baseline");
         assertEquals((yearOne.labor() / baselineLabor - 1.0) * 100.0, currentTrends.get("n_ramsey"), 1e-12,
                 "Ramsey labour trend should be computed relative to the quarter-0 baseline");
+        assertEquals(yearOne.output(), currentTrends.get("y_ramsey_level"), 0.0);
+        assertEquals(yearOne.consumption(), currentTrends.get("c_ramsey_level"), 0.0);
+        assertEquals(yearOne.investment(), currentTrends.get("inv_ramsey_level"), 0.0);
+        assertEquals(yearOne.capitalStock(), currentTrends.get("k_ramsey_level"), 0.0);
+        assertEquals(yearOne.labor(), currentTrends.get("n_ramsey_level"), 0.0);
+        assertEquals(yearOne.population(), currentTrends.get("p_ramsey_level"), 0.0);
 
         double expectedGovernmentTrend = baselineGovernment != 0.0
                 ? (yearOne.government() / baselineGovernment - 1.0) * 100.0 : 0.0;
@@ -405,7 +662,9 @@ class MacroModelManagerTest {
                 "Government trend should use the same baseline-relative rule as the manager");
         assertEquals(expectedNetExportsTrend, currentTrends.get("nx"), 1e-12,
                 "Net exports trend should use the same baseline-relative rule as the manager");
-        assertEquals(java.util.Set.of("w", "y", "c", "inv", "k", "g", "nx", "n_ramsey", "p_ramsey"), currentTrends.keySet(),
+        assertEquals(java.util.Set.of("w", "y", "c", "inv", "k", "g", "nx", "n_ramsey", "p_ramsey",
+                "y_ramsey_level", "c_ramsey_level", "inv_ramsey_level", "k_ramsey_level",
+                "n_ramsey_level", "p_ramsey_level"), currentTrends.keySet(),
                 "The trend map carries exactly these keys, with no participation entry: the planner "
                 + "takes labour input as exogenous");
         assertFalse(Math.abs(wageTrend) < 1e-12,

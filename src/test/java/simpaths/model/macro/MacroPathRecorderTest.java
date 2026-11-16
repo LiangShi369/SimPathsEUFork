@@ -253,6 +253,9 @@ class MacroPathRecorderTest {
         assertTrue(header.contains("w_trend_revision"), "Header should carry the wage-revision diagnostic");
         assertTrue(header.contains("p_realized_gap"), "Header should carry the population-gap diagnostic");
         assertTrue(header.contains("p_ramsey"), "Header should carry the planner's population");
+        assertTrue(header.endsWith("p_ramsey,p_realized_gap,y_ramsey_level,c_ramsey_level,"
+                + "inv_ramsey_level,k_ramsey_level,n_ramsey_level,p_ramsey_level"),
+                "The six planner levels should close the header");
 
         Map<String, Integer> columns = headerIndex(header);
         String[] firstRow = lines.get(1).split(",");

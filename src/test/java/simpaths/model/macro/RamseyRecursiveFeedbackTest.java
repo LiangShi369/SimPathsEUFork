@@ -2,12 +2,14 @@ package simpaths.model.macro;
 
 import java.lang.reflect.Field;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashSet;
 import java.util.Set;
 
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 import simpaths.model.Person;
 import simpaths.model.enums.Labour;
@@ -573,6 +575,137 @@ public class RamseyRecursiveFeedbackTest {
         int calQ = 4 * (getField(m, "ramseyQuarterZeroYear", Integer.class) - START_YEAR);
         for (int i = 0; i < t.getSimQuarters(); i++) {
             assertEquals(1.02, t.pathPAt(i) / projP[calQ + i], 1e-12, "quarter " + i);
+        }
+    }
+
+    /**
+     * A Ramsey scenario's N and P start in 2026, after the latch year, so the level factors latch
+     * on the bundle's paths in 2024 and the later gaps measure SimPaths against the scaled paths.
+     * Here SimPaths stays on the bundle's paths in 2026 (the workers and population the scenario
+     * expects do not come), and the gaps show exactly that shortfall.
+     */
+    @Test
+    public void testFeedbackLatchesAgainstTheScenarioPaths(@TempDir Path tempDir) throws Exception {
+        Files.writeString(tempDir.resolve("np.csv"), "year, N, P\n2026, 0.05, 0.02\n");
+        MacroModelManager base = newFeedbackManager(1.0);
+        MacroModelManager m = new MacroModelManager();
+        m.setEnabled(true); m.setUseDsge(false); m.setUseRamseyTrend(true); m.setPathRecordingEnabled(false);
+        m.setRamseyFeedbackPersistence(1.0);
+        m.setRamseyScenario("np.csv");
+        m.setInputScenarioDir(tempDir.toString());
+        setField(m, "simulationStartYear", START_YEAR);
+        m.initializeRamseyTrend(PL_MODEL_PATH);
+        int gapYear = START_YEAR + 3;                   // 2026: factor 1.05 / 1.02 in all four quarters
+        MacroPathRecorder recorder = new MacroPathRecorder();
+        setField(m, "trendOnlyPathRecorder", recorder); // receives the gap diagnostics
+        recorder.recordRamseyOnlyYear(gapYear);
+
+        // Latch in 2024 on the unscaled paths.
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0, 30000.0);
+        double lambda = getField(m, "ramseyFeedbackLambda", Double.class);
+        double lambdaP = getField(m, "ramseyFeedbackLambdaP", Double.class);
+        assertEquals(assumedMeanN(base, START_YEAR + 1) / 1000.0, lambda, 1e-12);
+        assertEquals(assumedMeanP(base, START_YEAR + 1) / 30000.0, lambdaP, 1e-12);
+
+        // 2026: SimPaths on the bundle's paths, the planner on the scenario's.
+        double realizedL = 1000.0 * assumedMeanN(base, gapYear) / assumedMeanN(base, START_YEAR + 1);
+        double realizedP = 30000.0 * assumedMeanP(base, gapYear) / assumedMeanP(base, START_YEAR + 1);
+        m.applyRamseyFeedbackWithRealized(gapYear, realizedL, 40.0, realizedP);
+
+        double delta = lambda * realizedL / assumedMeanN(m, gapYear);     // mean of the scaled N in 2026
+        double deltaP = lambdaP * realizedP / assumedMeanP(m, gapYear);
+        assertEquals(1.0 / 1.05, delta, 1e-12, "the gap is measured against the scaled N");
+        assertEquals(1.0 / 1.02, deltaP, 1e-12, "the gap is measured against the scaled P");
+        // At rho = 1 the re-solve applies the gap to every remaining quarter of the scaled paths.
+        RamseyTrendModel t = getField(m, "ramseyTrend", RamseyTrendModel.class);
+        double[] projN = getField(m, "ramseyProjN", double[].class);
+        double[] projP = getField(m, "ramseyProjP", double[].class);
+        int calQ = 4 * (gapYear - START_YEAR);
+        for (int i = 0; i < t.getSimQuarters(); i++) {
+            assertEquals(delta, t.pathNAt(i) / projN[calQ + i], 1e-12, "N, quarter " + i);
+            assertEquals(deltaP, t.pathPAt(i) / projP[calQ + i], 1e-12, "P, quarter " + i);
+        }
+        // The recorded diagnostics are the same gaps in percent; MacroPaths.csv prints 10 significant digits.
+        recorder.exportToCSV(tempDir.toString(), "MacroPaths.csv");
+        var lines = Files.readAllLines(tempDir.resolve("MacroPaths.csv"));
+        var header = java.util.Arrays.asList(lines.get(0).split(","));
+        String[] row = lines.get(1).split(",");
+        assertEquals(String.valueOf(gapYear), row[header.indexOf("year")]);
+        assertEquals((delta - 1.0) * 100.0,
+                Double.parseDouble(row[header.indexOf(MacroModelManager.TREND_KEY_REALIZED_GAP)]), 1e-8);
+        assertEquals((deltaP - 1.0) * 100.0,
+                Double.parseDouble(row[header.indexOf(MacroModelManager.TREND_KEY_REALIZED_POP_GAP)]), 1e-8);
+    }
+
+    // ========== The reference year ==========
+
+    private MacroModelManager newFeedbackManagerWithReferenceYear(int referenceYear) throws Exception {
+        assumeRamseyInputsAvailable();
+        MacroModelManager m = new MacroModelManager();
+        m.setEnabled(true);
+        m.setUseDsge(false);
+        m.setUseRamseyTrend(true);
+        m.setPathRecordingEnabled(false);
+        m.setRamseyFeedbackPersistence(1.0);
+        m.setRamseyFeedbackReferenceYear(referenceYear);
+        setField(m, "simulationStartYear", START_YEAR);
+        m.initializeRamseyTrend(PL_MODEL_PATH);
+        return m;
+    }
+
+    /**
+     * Before the reference year the feedback does nothing, whatever SimPaths delivers: no level
+     * factor, no hours base, no re-solve, and the planner's path stays as first solved.
+     */
+    @Test
+    public void testYearsBeforeTheReferenceYearLeaveThePlannerOnItsProjection() throws Exception {
+        MacroModelManager m = newFeedbackManagerWithReferenceYear(START_YEAR + 3);
+        double w2026Before = meanWageAtQuarter(m, 12);
+
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0, 30000.0);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 2, 1100.0, 38.0, 31000.0);
+
+        assertTrue(Double.isNaN((Double) getField(m, "ramseyFeedbackLambda", Double.class)), "lambda");
+        assertTrue(Double.isNaN((Double) getField(m, "ramseyFeedbackLambdaP", Double.class)), "lambda_P");
+        assertTrue(Double.isNaN((Double) getField(m, "ramseyFeedbackHoursBase", Double.class)), "hours base");
+        assertEquals(START_YEAR, (int) getField(m, "ramseyQuarterZeroYear", Integer.class), "no re-solve");
+        assertEquals(w2026Before, meanWageAtQuarter(m, 12), 0.0, "the wage path is untouched");
+    }
+
+    /**
+     * The level factors and the hours base are taken in the reference year, and the following
+     * year's gap is measured against that year, not against the first labour-market year.
+     */
+    @Test
+    public void testReferenceYearLatchesAndLaterGapsAreMeasuredAgainstIt() throws Exception {
+        int referenceYear = START_YEAR + 3;
+        MacroModelManager m = newFeedbackManagerWithReferenceYear(referenceYear);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 900.0, 42.0, 29000.0);   // a first-year dip
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 2, 950.0, 41.0, 29500.0);
+
+        m.applyRamseyFeedbackWithRealized(referenceYear, 1000.0, 40.0, 30000.0);
+        assertEquals(assumedMeanN(m, referenceYear) / 1000.0,
+                (double) getField(m, "ramseyFeedbackLambda", Double.class), 1e-12);
+        assertEquals(assumedMeanP(m, referenceYear) / 30000.0,
+                (double) getField(m, "ramseyFeedbackLambdaP", Double.class), 1e-12);
+        assertEquals(40.0, (Double) getField(m, "ramseyFeedbackHoursBase", Double.class), 1e-12);
+        assertEquals(START_YEAR, (int) getField(m, "ramseyQuarterZeroYear", Integer.class),
+                "the reference year itself does not re-solve");
+
+        // The year after: 5% more workers than the planner's path implies from the reference year on.
+        int gapYear = referenceYear + 1;
+        double onPathL = 1000.0 * assumedMeanN(m, gapYear) / assumedMeanN(m, referenceYear);
+        double onPathP = 30000.0 * assumedMeanP(m, gapYear) / assumedMeanP(m, referenceYear);
+        m.applyRamseyFeedbackWithRealized(gapYear, 1.05 * onPathL, 40.0, onPathP);
+
+        assertEquals(gapYear, (int) getField(m, "ramseyQuarterZeroYear", Integer.class), "re-solved");
+        RamseyTrendModel t = getField(m, "ramseyTrend", RamseyTrendModel.class);
+        double[] projN = getField(m, "ramseyProjN", double[].class);
+        double[] projP = getField(m, "ramseyProjP", double[].class);
+        int calQ = 4 * (gapYear - START_YEAR);
+        for (int i = 0; i < t.getSimQuarters(); i++) {
+            assertEquals(1.05, t.pathNAt(i) / projN[calQ + i], 1e-12, "N, quarter " + i);
+            assertEquals(1.0, t.pathPAt(i) / projP[calQ + i], 1e-12, "P, quarter " + i);
         }
     }
 

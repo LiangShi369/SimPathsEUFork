@@ -399,6 +399,9 @@ public class SimPathsStart implements ExperimentBuilder {
 
 	private static void runGUIlessSetup(int option) throws FileNotFoundException {
 
+		// Setup reads the baseline workbooks; an input scenario left active by an earlier run must not redirect them.
+		Parameters.resetInputScenario();
+
 		// Auto-detect training mode only when -t/--training was NOT passed on the command line.
 		// If actual InitialPopulations/<country>/*.csv is empty, fall back to training data.
 		if (!trainingFlagExplicit) {
@@ -518,6 +521,9 @@ public class SimPathsStart implements ExperimentBuilder {
 	 *
 	 */
 	private static void runGUIdialog() {
+
+		// Setup reads the baseline workbooks; an input scenario left active by an earlier run must not redirect them.
+		Parameters.resetInputScenario();
 
 		int count;
 

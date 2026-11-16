@@ -41,6 +41,7 @@ and the LaTeX model documentation `SimPaths_Macro_Model_Documentation.tex` in th
 | v21 | Nov 7, 2026 | The wage SimPaths applies is the trend wage's level times the cycle's factor, $(1 + w^{trend}/100)\exp(w^{cycle}/100)$, instead of the sum of the two percentages, and the cycle is the DSGE's wage per hour $w - h$ instead of its wage per employee $w$ (contract 40). The `*_total` columns of `MacroPaths.csv` follow the same rule. |
 | v22 | Nov 8, 2026 | The planner's consumers are the resident population $P_t$: utility is weighted by $P_t$ and consumption is per head, $C_t = P_t c_t$, instead of employees and consumption per employee. Its workers $N_t$ are all persons in employment, employees and self-employed, with hours per person employed, in the data stage, the calibration, the DSGE observables `n` and `h` and the feedback (contract 16 closed). The data stage adds the resident population with census breaks spliced; in sample the planner's population is its HP trend, as employment is that of total employment, and after the sample end both grow with the SimPaths workbook; `demographic_P_{country}.csv` carries the trend and the workbook's growth, the bundle's population projection carries `time,N,P` and the reference CSV a column `P`, and beyond the projection the dependency ratio is frozen. SimPaths' population is fed back to the planner with its own level factor $\lambda_P$, latched with $\lambda$ (contracts 41-43; `p_ramsey`, `p_realized_gap` in `MacroPaths.csv`). |
 | v23 | Nov 9, 2026 | All five countries enable `terminal_growth` with a common long-run TFP growth of 0.5% and a common `rho_quarterly` of 0.966 (half-life 5 years); before, only Poland converged (half-life 11.5 years) and the others kept their in-sample rate for ever. Poland's in-sample TFP growth is 1.9% (was 1.5%) and its `K_override` the PWT capital-output ratio 2.21 (was 2.50); Germany's in-sample rate is 0.53% (was 0.5%) and it gains a `K_override` at its balanced-growth K/Y (3.19, instead of the perpetual-inventory 3.58). Both follow the rule $g_A = (1-\alpha)\,g_{Y/(Nh)}$ on total employment, which PR #40 had left at the employee-based values; Poland's output gap no longer drifts. All five countries re-estimated. |
+| v24 | Nov 10, 2026 | The year against which the planner measures SimPaths' workers, hours and population is a setting, `mm_ramseyFeedbackReferenceYear` (default: the first simulated year after the start year, as before); the feedback starts the year after it (contract 46). |
 
 ---
 
@@ -80,7 +81,9 @@ as well as in the trend wage would count them twice (`SimPaths_Coupling.md` §3.
 **The planner re-solves once a year.** After SimPaths' labour market and population alignment, the realized
 number of workers, their mean hours and SimPaths' population are compared with the planner's assumed paths, and
 the planner re-solves its remaining path from the predetermined capital stock (extended path, persistence
-`mm_ramseyFeedbackPersistence`). The wage of year $t$ comes from the path solved at the end of year $t-1$.
+`mm_ramseyFeedbackPersistence`). The comparison takes one year as its reference, the first simulated year after
+the start year unless `mm_ramseyFeedbackReferenceYear` names a later one, and starts the year after it.
+The wage of year $t$ comes from the path solved at the end of year $t-1$.
 The mechanism, the persistence semantics and the treatment of hours and population are in
 `SimPaths_Coupling.md` §8.1.
 

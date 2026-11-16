@@ -629,6 +629,11 @@ public class SimPathsMultiRun extends MultiRun {
 		StringBuilder label = new StringBuilder();
 		label.append(seed).append("_").append(runCounter);
 
+		String inputScenario = extractScenarioNameWithoutCsv("inputScenario");
+		if (inputScenario != null) {
+			label.append("_").append(inputScenario);
+		}
+
 		String dsgeShock = extractScenarioNameWithoutCsv("mm_dsgeShockScenario");
 		if (dsgeShock != null) {
 			label.append("_").append(dsgeShock);

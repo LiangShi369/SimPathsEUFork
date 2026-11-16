@@ -345,14 +345,20 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
     @GUIparameter(description = "CSV file name for exogenous DSGE shock scenario (relative to the bundle folder, empty = no scenario)")
     private String mm_dsgeShockScenario = "";
 
-    @GUIparameter(description = "CSV file name for Ramsey growth model scenario (relative to the bundle folder, empty = baseline)")
+    @GUIparameter(description = "CSV file name for Ramsey growth model scenario (in the input scenario folder if it holds it, else the bundle folder; empty = baseline)")
     private String mm_ramseyScenario = "";
 
-    @GUIparameter(description = "Macro bundle folder (empty = input/<country>/MacroModel); scenario CSVs are read from it too")
+    @GUIparameter(description = "Input scenario folder under input/<country>/scenarios/ (empty = none)")
+    private String inputScenario = "";
+
+    @GUIparameter(description = "Macro bundle folder (empty = input/<country>/MacroModel); scenario CSVs are read from it too, a Ramsey scenario only when the input scenario folder lacks it")
     private String mm_macroBundleDir = "";
 
     @GUIparameter(description = "Persistence of the realized employment and hours gaps in the planner's belief: 1 = permanent, 0 = current year only")
     private double mm_ramseyFeedbackPersistence = 1.0;
+
+    @GUIparameter(description = "Year against which the planner measures SimPaths' workers, hours and population (0 = the year after the start year); the feedback starts the year after it")
+    private int mm_ramseyFeedbackReferenceYear = 0;
 
     @GUIparameter(description = "Maximum DSGE state deviation before the stability check fires (log-deviation units)")
     private double mm_dsgeMaxStateDeviation = DEFAULT_DSGE_MAX_STATE_DEVIATION;
@@ -422,6 +428,10 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         macroManager.setMacroBundleDir(mm_macroBundleDir);
         macroManager.setMaxBounds(mm_dsgeMaxStateDeviation);
         macroManager.setRamseyFeedbackPersistence(mm_ramseyFeedbackPersistence);
+        if (mm_macroModel.usesRamseyTrend()) {
+            MacroModelManager.requireFeedbackReferenceYearInsideRun(mm_ramseyFeedbackReferenceYear, startYear, endYear);
+        }
+        macroManager.setRamseyFeedbackReferenceYear(mm_ramseyFeedbackReferenceYear);
 
         warnAboutInertMacroSwitches();
 
@@ -433,7 +443,9 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         educationInnov = new Random(SimulationEngine.getRnd().nextLong());
         popAlignInnov = new Random(SimulationEngine.getRnd().nextLong());
 
-        // load model parameters
+        // load model parameters; the scenario name is set on every run (also "" for a baseline run)
+        // because Parameters keeps the last value across the runs of one JVM
+        Parameters.setInputScenarioName(inputScenario);
         Parameters.loadParameters(country, maxAge, enableIntertemporalOptimisations, projectFormalChildcare,
                 projectSocialCare, donorPoolAveraging,
                 fixTimeTrend, fixTimeTrendR1a, fixTimeTrendR1b,  fixTimeTrendE1a, fixTimeTrendE1b, fixTimeTrendE2a,
@@ -441,6 +453,8 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                 timeTrendStopsIn, timeTrendStopsInR1a, timeTrendStopsInR1b, timeTrendStopsInE1a, timeTrendStopsInE1b, timeTrendStopsInE2a,
                 startYear, endYear, interestRateInnov, disposableIncomeFromLabourInnov, flagSuppressChildcareCosts,
                 flagSuppressSocialCareCosts, macroShockPopulation, macroShockProductivity, macroShockGreenPolicy, macroShocksOn);
+        macroManager.setInputScenarioDir(Parameters.getInputScenario().isActive()
+                ? Parameters.getInputScenario().folder().toString() : null);
         if (enableIntertemporalOptimisations) {
 
             alignEmployment = false;
@@ -805,11 +819,15 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
             pw.println(line);
             line = "mm_ramseyScenario: " + mm_ramseyScenario;
             pw.println(line);
+            line = "inputScenario: " + inputScenario;
+            pw.println(line);
             line = "mm_macroBundleDir: " + mm_macroBundleDir;
             pw.println(line);
             line = "mm_dsgeMaxStateDeviation: " + mm_dsgeMaxStateDeviation;
             pw.println(line);
             line = "mm_ramseyFeedbackPersistence: " + mm_ramseyFeedbackPersistence;
+            pw.println(line);
+            line = "mm_ramseyFeedbackReferenceYear: " + mm_ramseyFeedbackReferenceYear;
             pw.println(line);
         } catch (IOException ioe) {
             throw new RuntimeException(ioe);
@@ -3139,6 +3157,14 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         this.responsesToRegion = responsesToRegion;
     }
 
+    public String getInputScenario() {
+        return inputScenario;
+    }
+
+    public void setInputScenario(String inputScenario) {
+        this.inputScenario = inputScenario;
+    }
+
     public MacroScenarioPopulation getMacroShockPopulation() {
         return macroShockPopulation;
     }
@@ -3193,6 +3219,10 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         }
         if (mm_ramseyFeedbackPersistence != 1.0 && !mm_macroModel.usesRamseyTrend()) {
             log.warn("mm_ramseyFeedbackPersistence=" + mm_ramseyFeedbackPersistence + " is ignored: "
+                    + mode + " does not run the Ramsey trend layer.");
+        }
+        if (mm_ramseyFeedbackReferenceYear != 0 && !mm_macroModel.usesRamseyTrend()) {
+            log.warn("mm_ramseyFeedbackReferenceYear=" + mm_ramseyFeedbackReferenceYear + " is ignored: "
                     + mode + " does not run the Ramsey trend layer.");
         }
     }

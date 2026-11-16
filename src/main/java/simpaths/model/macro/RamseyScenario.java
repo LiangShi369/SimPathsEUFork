@@ -20,13 +20,13 @@ import org.apache.log4j.Logger;
  *
  * <h3>CSV Format</h3>
  * <pre>
- *   year, g_A, delta, alpha_K, beta, sigma, g_Y, nx_Y
- *   2025, 0.0025, 0, 0, 0, 0, 0, 0
- *   2026, 0.0025, 0, 0, 0, 0, 0.005, 0
+ *   year, g_A, delta, alpha_K, beta, sigma, g_Y, nx_Y, N, P
+ *   2025, 0.0025, 0, 0, 0, 0, 0, 0, 0, 0
+ *   2026, 0.0025, 0, 0, 0, 0, 0.005, 0, 0.012, 0.008
  *   ...
  * </pre>
  *
- * <p>All values are <b>absolute deviations from baseline</b> (additive), in the same
+ * <p>The parameter columns are <b>absolute deviations from baseline</b> (additive), in the same
  * units as the annual parameter from {@code growth_params_{COUNTRY}.json}:</p>
  * <ul>
  *   <li><b>g_A</b>: deviation in annual TFP growth rate (e.g., 0.0025 = +0.25 pp)</li>
@@ -37,6 +37,12 @@ import org.apache.log4j.Logger;
  *   <li><b>g_Y</b>: deviation in government spending share of GDP (e.g., 0.01 = +1 pp G/Y)</li>
  *   <li><b>nx_Y</b>: deviation in net exports share of GDP (e.g., -0.02 = -2 pp NX/Y)</li>
  * </ul>
+ *
+ * <p>{@code N} and {@code P} are <b>relative deviations</b> of the planner's workers and
+ * population from the bundle's paths ({@code 0.012} = 1.2% more). They follow the same
+ * lookup rules as the parameter columns and are applied by
+ * {@code MacroModelManager.initializeRamseyTrend}. Values must exceed -1. They do not
+ * count in {@link #hasAnyDeviations()}; {@link #hasPathDeviations()} answers for them.</p>
  *
  * <p>Any other column is an error: a file that names a parameter the model does not
  * have (for example {@code psi}, a labour-supply parameter the planner does not carry)
@@ -69,8 +75,14 @@ public class RamseyScenario {
     /** Recognized parameter names (case-insensitive matching against CSV headers) */
     static final String[] PARAM_NAMES = {"g_A", "delta", "alpha_K", "beta", "sigma", "g_Y", "nx_Y"};
 
+    /** Recognized path names: relative deviations of the planner's workers (N) and population (P) */
+    static final String[] PATH_NAMES = {"N", "P"};
+
     /** Map from year → parameter deviations (indexed by PARAM_NAMES order) */
     private final TreeMap<Integer, double[]> deviationsByYear = new TreeMap<>();
+
+    /** Map from year → path deviations (indexed by PATH_NAMES order) */
+    private final TreeMap<Integer, double[]> pathDeviationsByYear = new TreeMap<>();
 
     /** Name of the loaded scenario file (for logging) */
     private String scenarioName;
@@ -98,6 +110,7 @@ public class RamseyScenario {
 
         scenarioName = csvPath.getFileName().toString();
         deviationsByYear.clear();
+        pathDeviationsByYear.clear();
 
         List<String> allLines = Files.readAllLines(csvPath);
 
@@ -126,26 +139,34 @@ public class RamseyScenario {
         // Map CSV columns to parameter indices
         int[] columnToParamIndex = new int[headers.length];
         Arrays.fill(columnToParamIndex, -1);
+        int[] columnToPathIndex = new int[headers.length];
+        Arrays.fill(columnToPathIndex, -1);
         int mappedColumns = 0;
 
         for (int col = 0; col < headers.length; col++) {
             if (col == yearCol) continue;
             int paramIdx = findParamIndex(headers[col]);
+            int pathIdx = findPathIndex(headers[col]);
             if (paramIdx >= 0) {
                 columnToParamIndex[col] = paramIdx;
+                mappedColumns++;
+            } else if (pathIdx >= 0) {
+                columnToPathIndex[col] = pathIdx;
                 mappedColumns++;
             } else if (!headers[col].isEmpty()) {
                 throw new IllegalArgumentException(
                         "Ramsey scenario column '" + headers[col] + "' in " + csvPath
                                 + " is not a Ramsey parameter. Valid columns: year, "
-                                + String.join(", ", PARAM_NAMES));
+                                + String.join(", ", PARAM_NAMES) + ", "
+                                + String.join(", ", PATH_NAMES));
             }
         }
 
         if (mappedColumns == 0) {
             throw new IllegalArgumentException(
                     "No parameter columns matched. Expected some of: "
-                            + String.join(", ", PARAM_NAMES) + ". Found: "
+                            + String.join(", ", PARAM_NAMES) + ", "
+                            + String.join(", ", PATH_NAMES) + ". Found: "
                             + String.join(", ", headers));
         }
 
@@ -168,13 +189,23 @@ public class RamseyScenario {
             }
 
             double[] deviations = new double[PARAM_NAMES.length];
+            double[] pathDeviations = new double[PATH_NAMES.length];
             for (int col = 0; col < parts.length && col < columnToParamIndex.length; col++) {
                 int paramIdx = columnToParamIndex[col];
+                int pathIdx = columnToPathIndex[col];
+                String val = parts[col].trim();
+                if (val.isEmpty()) continue;
                 if (paramIdx >= 0) {
-                    String val = parts[col].trim();
-                    if (!val.isEmpty()) {
-                        deviations[paramIdx] = MacroCsv.requireFinite(val, row + 1, headers[col], csvPath);
+                    deviations[paramIdx] = MacroCsv.requireFinite(val, row + 1, headers[col], csvPath);
+                } else if (pathIdx >= 0) {
+                    double v = MacroCsv.requireFinite(val, row + 1, headers[col], csvPath);
+                    if (v <= -1.0) {
+                        throw new IllegalArgumentException(String.format(
+                                "Ramsey scenario column '%s' at row %d (year %d) in %s is %s; a relative "
+                                        + "deviation must exceed -1 (the path would be zero or negative)",
+                                headers[col], row + 1, year, csvPath, val));
                     }
+                    pathDeviations[pathIdx] = v;
                 }
             }
 
@@ -183,6 +214,7 @@ public class RamseyScenario {
                         "Duplicate entry for year %d in Ramsey scenario file %s", year, csvPath));
             }
             deviationsByYear.put(year, deviations);
+            pathDeviationsByYear.put(year, pathDeviations);
         }
 
         if (logEnabled) {
@@ -268,6 +300,39 @@ public class RamseyScenario {
     }
 
     /**
+     * Get the relative deviation of the planner's workers (N) or population (P) for a year.
+     * Lookup rules are those of {@link #getDeviation(int, String)}: 0 before the first row,
+     * the nearest earlier row between rows, the last row's value after the last row.
+     *
+     * @param year simulation year
+     * @param name "N" or "P" (case-insensitive)
+     * @return relative deviation (0.012 = 1.2% more); 0 for an unknown name
+     */
+    public double getPathDeviation(int year, String name) {
+        int idx = findPathIndex(name);
+        if (idx < 0 || pathDeviationsByYear.isEmpty()) return 0.0;
+        var entry = pathDeviationsByYear.floorEntry(year);
+        // floorEntry covers exact match, between rows and after the last row;
+        // null means the year precedes the first row.
+        return entry == null ? 0.0 : entry.getValue()[idx];
+    }
+
+    /**
+     * Check whether N or P has a non-zero deviation in any year. Parameter columns are
+     * not counted here; see {@link #hasAnyDeviations()}.
+     *
+     * @return true if any N or P deviation is non-zero
+     */
+    public boolean hasPathDeviations() {
+        for (double[] devs : pathDeviationsByYear.values()) {
+            for (double v : devs) {
+                if (v != 0.0) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Check whether scenario data has been loaded.
      *
      * @return true if a file has been loaded with at least one data row
@@ -277,9 +342,11 @@ public class RamseyScenario {
     }
 
     /**
-     * Check whether any parameter has a non-zero deviation in any year.
+     * Check whether any parameter column has a non-zero deviation in any year. The N and P
+     * path columns are not counted: this answers whether the planner needs the
+     * time-varying-parameter solve. Use {@link #hasPathDeviations()} for N and P.
      *
-     * @return true if any deviation is non-zero
+     * @return true if any parameter deviation is non-zero
      */
     public boolean hasAnyDeviations() {
         for (double[] devs : deviationsByYear.values()) {
@@ -325,6 +392,17 @@ public class RamseyScenario {
                 activeParams.add(String.format("%s(max|%.6f|)", PARAM_NAMES[i], maxAbs[i]));
             }
         }
+        double[] maxAbsPath = new double[PATH_NAMES.length];
+        for (double[] devs : pathDeviationsByYear.values()) {
+            for (int i = 0; i < PATH_NAMES.length; i++) {
+                maxAbsPath[i] = Math.max(maxAbsPath[i], Math.abs(devs[i]));
+            }
+        }
+        for (int i = 0; i < PATH_NAMES.length; i++) {
+            if (maxAbsPath[i] > 0) {
+                activeParams.add(String.format("%s(max|%.6f|)", PATH_NAMES[i], maxAbsPath[i]));
+            }
+        }
 
         return String.format("Ramsey scenario '%s': %d years (%d-%d), active: %s",
                 scenarioName, deviationsByYear.size(), minYear, maxYear,
@@ -351,6 +429,13 @@ public class RamseyScenario {
         return -1;
     }
 
+    private static int findPathIndex(String columnName) {
+        for (int i = 0; i < PATH_NAMES.length; i++) {
+            if (PATH_NAMES[i].equalsIgnoreCase(columnName)) return i;
+        }
+        return -1;
+    }
+
     private void logScenarioSummary() {
         if (!logEnabled || deviationsByYear.isEmpty()) return;
 
@@ -362,6 +447,12 @@ public class RamseyScenario {
             for (int i = 0; i < PARAM_NAMES.length; i++) {
                 if (devs[i] != 0.0) {
                     sb.append(String.format(" %s=%+.6f", PARAM_NAMES[i], devs[i]));
+                }
+            }
+            double[] pathDevs = pathDeviationsByYear.get(entry.getKey());
+            for (int i = 0; i < PATH_NAMES.length; i++) {
+                if (pathDevs[i] != 0.0) {
+                    sb.append(String.format(" %s=%+.6f", PATH_NAMES[i], pathDevs[i]));
                 }
             }
         }

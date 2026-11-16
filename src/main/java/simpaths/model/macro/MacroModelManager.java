@@ -1,6 +1,7 @@
 package simpaths.model.macro;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -135,8 +136,11 @@ public class MacroModelManager {
      */
     private boolean pathRecordingEnabled = true;
 
-    @GUIparameter(description = "CSV file name for Ramsey scenario (relative to the bundle folder, empty = baseline)")
+    @GUIparameter(description = "CSV file name for Ramsey scenario (in the input scenario folder if it holds it, else the bundle folder; empty = baseline)")
     private String ramseyScenario = "";
+
+    /** Input scenario folder, or null when no input scenario is active. */
+    private String inputScenarioDir;
 
     @GUIparameter(description = "Macro bundle folder; empty = input/<country>/MacroModel")
     private String macroBundleDir = "";
@@ -152,12 +156,22 @@ public class MacroModelManager {
      */
     private double ramseyFeedbackPersistence = 1.0;
     /**
+     * {@code mm_ramseyFeedbackReferenceYear}: the year in which the feedback takes its level
+     * factors and its hours base ({@link #feedbackReferenceYear()}); 0 stands for the year after
+     * the start year, the first year with a labour market. Every later year's gap is measured
+     * against this year, and the years before it leave the planner on its projection. A later
+     * year suits a run whose first simulated years carry a transient of SimPaths' own, such as
+     * a dip of labour supply in the first labour-market year: taken as the reference, that year
+     * would turn the recovery from it into a lasting surprise of workers.
+     */
+    private int ramseyFeedbackReferenceYear = 0;
+    /**
      * The last year whose end-of-year feedback ran ({@link #applyRamseyRecursiveFeedback}).
      * {@link #updateEquilibrium} refuses to advance the planner's trend into a year whose
      * previous feedback is missing.
      */
     private int lastFeedbackYear = Integer.MIN_VALUE;
-    /** SimPaths -> Ramsey level factor, latched in the first post-labour-market year. */
+    /** SimPaths -> Ramsey level factor, latched in the reference year ({@link #feedbackReferenceYear()}). */
     private double ramseyFeedbackLambda = Double.NaN;
     /** SimPaths -> Ramsey level factor for the population, latched in the same year as {@link #ramseyFeedbackLambda}. */
     private double ramseyFeedbackLambdaP = Double.NaN;
@@ -169,7 +183,11 @@ public class MacroModelManager {
     private double ramseyFeedbackHoursBase = Double.NaN;
     /** Calendar year of quarter 0 of the currently solved Ramsey path (startYear, then each re-solve year). */
     private int ramseyQuarterZeroYear;
-    /** Original projection slices passed to the startup solve; index 0 = startYear q1. */
+    /**
+     * Original projection slices passed to the startup solve; index 0 = startYear q1. The worker
+     * and population paths carry a Ramsey scenario's {@code N} and {@code P} factors
+     * ({@link #scaleByScenarioPath}).
+     */
     private double[] ramseyProjN;
     /** The planner's population path P on the same quarters as {@link #ramseyProjN}. */
     private double[] ramseyProjP;
@@ -739,7 +757,28 @@ public class MacroModelManager {
      * <p>Loads growth parameters, terminal state (K, A at end of estimation sample),
      * and reference CSV (for N/h trend extrapolation). Solves the Ramsey model once
      * for the full forward horizon (~80 years).</p>
-     * 
+     *
+     * <p>The Ramsey scenario {@code mm_ramseyScenario}, when set, is read from the input scenario
+     * folder if that folder holds it, otherwise from the bundle folder
+     * ({@link #resolveRamseyScenarioPath}). Its parameter columns go to {@link RamseyTrendModel}.
+     * Its {@code N} and {@code P} columns scale the planner's worker and population paths
+     * ({@link #scaleByScenarioPath}) after both are complete, that is after the population
+     * projection, the terminal closure of {@code N} and the frozen dependency ratio of {@code P}:
+     * quarter {@code j} is multiplied by {@code 1 + N} (or {@code 1 + P}) of its calendar year,
+     * interpolated geometrically between q1 of one year and q1 of the next, the file's last row
+     * persisting. The planner knows the scaled paths from the first solve on. The stored
+     * {@link #ramseyProjN} and {@link #ramseyProjP} are the scaled paths, so {@code lambda} and
+     * {@code lambda_P} latch against them and every feedback gap measures SimPaths' workers and
+     * population against them. Deviations must be zero from the start year through the year
+     * after the feedback's reference year, {@code startYear + 2} by default
+     * ({@link #requireNoPathDeviationBeforeFirstAllowedYear}): the start
+     * year's workers and population are the bundle's observed handoff, measured together with the
+     * capital stock {@code K0}, and the feedback latches its level factors on the quarters of
+     * the reference year, into which the factor of the following year enters through the
+     * interpolation. A deviation in those years would be absorbed into the latch, and the gaps
+     * could not show a mismatch between the scenario and SimPaths. A file whose {@code N} and
+     * {@code P} are zero throughout leaves every planner quantity bit-identical.</p>
+     *
      * <p>Called only when {@code mm_macroModel} selects a Ramsey mode, so missing artefacts
      * are fatal: continuing with a zero secular trend would run a different model from the
      * configured one while {@code saveRunParameters} still records the configured mode.</p>
@@ -787,14 +826,15 @@ public class MacroModelManager {
         
         // Load Ramsey scenario if configured
         if (ramseyScenario != null) ramseyScenario = ramseyScenario.trim();
+        Path scenarioPath = null;
         if (ramseyScenario != null && !ramseyScenario.isEmpty()) {
-            String scenarioPath = macroModelPath + File.separator + ramseyScenario;
+            scenarioPath = resolveRamseyScenarioPath(macroModelPath);
             ramseyScenarioObj = new RamseyScenario();
             ramseyScenarioObj.setLogEnabled(logMacroState);
-            ramseyScenarioObj.loadFromFile(java.nio.file.Path.of(scenarioPath));
+            ramseyScenarioObj.loadFromFile(scenarioPath);
             ramseyTrend.setScenario(ramseyScenarioObj, simulationStartYear);
+            log.info("Loaded Ramsey scenario from: " + scenarioPath);
             if (logMacroState) {
-                log.info("Loaded Ramsey scenario from: " + scenarioPath);
                 log.info(ramseyScenarioObj.getSummary());
             }
         } else {
@@ -943,7 +983,17 @@ public class MacroModelManager {
         double[] projH = loadProjectedHours(refPath, countryTag, refTerminalTime, projLen);
         double[] projGY = Arrays.copyOfRange(extGY, startIdx, totalExtended);
         double[] projNXY = Arrays.copyOfRange(extNXY, startIdx, totalExtended);
-        
+
+        // A Ramsey scenario's N and P columns scale the finished worker and population paths
+        // (after the terminal closure and the frozen dependency ratio). The initial solve, the
+        // stored slices below, and so every feedback latch, gap and re-solve, use the scaled paths.
+        if (ramseyScenarioObj != null && ramseyScenarioObj.hasPathDeviations()) {
+            requireNoPathDeviationBeforeFirstAllowedYear(ramseyScenarioObj, scenarioPath, simulationStartYear,
+                    feedbackReferenceYear());
+            projDemographic = scaleByScenarioPath(projDemographic, simulationStartYear, ramseyScenarioObj, "N");
+            projP = scaleByScenarioPath(projP, simulationStartYear, ramseyScenarioObj, "P");
+        }
+
         double K_terminal = ramseyTrend.getK();
         double A_terminal = ramseyTrend.getA();
         ramseyTrend.solveForPath(K_terminal, A_terminal, projDemographic, projH, projP, projGY, projNXY, projLen);
@@ -979,16 +1029,148 @@ public class MacroModelManager {
     }
 
     /**
-     * Rejects an out-of-range feedback persistence when the Ramsey layer runs; without it the
-     * feedback has no path to re-solve and the persistence is never read. Called both before
-     * {@link #initializeRamseyTrend(String)} (catches a bad value before loading any files) and
-     * after it.
+     * The Ramsey scenario file {@code ramseyScenario}: in the input scenario folder when one is
+     * active and holds it, otherwise in the bundle folder {@code macroModelPath}. With an active
+     * input scenario, a name found in neither fails here, naming both folders; without one, the
+     * bundle folder's path is returned and a missing file fails in
+     * {@link RamseyScenario#loadFromFile(Path)}, naming that path.
+     */
+    private Path resolveRamseyScenarioPath(String macroModelPath) throws FileNotFoundException {
+        Path bundleFile = Path.of(macroModelPath, ramseyScenario);
+        if (inputScenarioDir == null) {
+            return bundleFile;
+        }
+        Path scenarioFile = Path.of(inputScenarioDir, ramseyScenario);
+        if (Files.isRegularFile(scenarioFile)) {
+            return scenarioFile;
+        }
+        if (!Files.isRegularFile(bundleFile)) {
+            throw new FileNotFoundException(String.format(
+                    "Ramsey scenario %s found neither in the input scenario folder %s nor in the bundle folder %s",
+                    ramseyScenario, inputScenarioDir, Path.of(macroModelPath)));
+        }
+        return bundleFile;
+    }
+
+    /**
+     * The planner's worker path ({@code column} {@code "N"}) or population path ({@code "P"})
+     * scaled by a Ramsey scenario's relative deviations.
+     *
+     * <p>Quarter {@code j} of {@code path} lies in calendar year {@code y = startYear + j / 4},
+     * quarter {@code k = j % 4} (0 = q1). With {@code f(y) = 1 + scenario.getPathDeviation(y, column)}
+     * it is multiplied by {@code f(y)^(1 - k/4) * f(y+1)^(k/4)}: the annual factor holds at q1 and
+     * the quarters between are interpolated geometrically, which is the quarterly path
+     * {@code build_population_projection.m} builds from annual values. The scenario's last row
+     * persists, so beyond it the path is scaled by a constant and keeps its growth rates, and a
+     * frozen dependency ratio {@code P/N} stays frozen at the scaled ratio. A quarter whose two
+     * factors are both one is left untouched, bit for bit.</p>
+     *
+     * <p>{@link #initializeRamseyTrend} applies it to the finished paths and requires both
+     * deviations to be zero from the start year through the year after the feedback's reference
+     * year ({@link #requireNoPathDeviationBeforeFirstAllowedYear}), so the handoff quarter and the
+     * quarters the feedback latches on keep the bundle's values and the feedback gaps measure
+     * SimPaths against the scaled paths.</p>
+     *
+     * @return a new array; {@code path.clone()} when {@code scenario} is null
+     */
+    static double[] scaleByScenarioPath(double[] path, int startYear, RamseyScenario scenario, String column) {
+        double[] out = path.clone();
+        if (scenario == null) {
+            return out;
+        }
+        for (int j = 0; j < out.length; j++) {
+            int y = startYear + j / 4;
+            int k = j % 4;
+            double fYear = 1.0 + scenario.getPathDeviation(y, column);
+            double fNext = 1.0 + scenario.getPathDeviation(y + 1, column);
+            if (fYear == 1.0 && fNext == 1.0) {
+                continue;
+            }
+            out[j] = path[j] * Math.pow(fYear, 1.0 - k / 4.0) * Math.pow(fNext, k / 4.0);
+        }
+        return out;
+    }
+
+    /**
+     * Offset from the feedback's reference year of the first year in which a Ramsey scenario's
+     * {@code N} or {@code P} may be non-zero (see {@link #requireNoPathDeviationBeforeFirstAllowedYear}).
+     */
+    static final int FIRST_PATH_DEVIATION_YEAR_OFFSET = 2;
+
+    /**
+     * Refuse a non-zero {@code N} or {@code P} deviation from {@code startYear} through the year
+     * after the feedback's reference year ({@link #feedbackReferenceYear()}; {@code startYear + 2}
+     * with the default reference year). The start year's workers and population are the bundle's
+     * observed handoff, measured together with {@code K0}. The feedback latches {@code lambda} and
+     * {@code lambda_P} on the planner's paths in the reference year, whose quarters 2 to 4 take
+     * in the factor of the following year through the within-year interpolation of
+     * {@link #scaleByScenarioPath}; a deviation in any of these years would be absorbed into that
+     * calibration, and the feedback gaps could not show a mismatch between the scenario and
+     * SimPaths. The first year a deviation may be non-zero is the reference year plus
+     * {@value #FIRST_PATH_DEVIATION_YEAR_OFFSET}.
+     */
+    static void requireNoPathDeviationBeforeFirstAllowedYear(RamseyScenario scenario, Path scenarioPath,
+                                                             int startYear, int referenceYear) {
+        int firstAllowedYear = referenceYear + FIRST_PATH_DEVIATION_YEAR_OFFSET;
+        for (int year = startYear; year < firstAllowedYear; year++) {
+            for (String column : RamseyScenario.PATH_NAMES) {
+                double deviation = scenario.getPathDeviation(year, column);
+                if (deviation != 0.0) {
+                    throw new IllegalStateException(String.format(
+                            "Ramsey scenario %s: column %s is %s in %d, but N and P must be zero from the "
+                            + "start year %d through %d; the first year a deviation may be non-zero is %d. "
+                            + "The start year's workers and population are the bundle's observed handoff, and "
+                            + "the planner calibrates SimPaths' headcount against the scenario paths in the "
+                            + "feedback's reference year %d (mm_ramseyFeedbackReferenceYear; by default the year "
+                            + "after the start year), whose quarters also take in the factor of %d through "
+                            + "the within-year interpolation, so an earlier deviation would be absorbed into that "
+                            + "calibration and the feedback gaps could not show a mismatch.",
+                            scenarioPath, column, deviation, year, startYear, firstAllowedYear - 1,
+                            firstAllowedYear, referenceYear, referenceYear + 1));
+                }
+            }
+        }
+    }
+
+    /**
+     * Rejects an out-of-range feedback persistence or a reference year that does not lie after
+     * the start year when the Ramsey layer runs; without it the feedback has no path to re-solve
+     * and neither is read. Called both before {@link #initializeRamseyTrend(String)} (catches a
+     * bad value before loading any files) and after it.
      */
     void validateRamseyFeedbackConfig() {
         if (!useRamseyTrend) return;
         if (!(ramseyFeedbackPersistence >= 0.0 && ramseyFeedbackPersistence <= 1.0))
             throw new IllegalStateException(
                 "mm_ramseyFeedbackPersistence must be in [0,1], got " + ramseyFeedbackPersistence);
+        if (simulationStartYear > 0)
+            requireFeedbackReferenceYearInsideRun(ramseyFeedbackReferenceYear, simulationStartYear,
+                    Integer.MAX_VALUE);
+    }
+
+    /**
+     * The year in which the feedback takes its level factors and its hours base:
+     * {@code mm_ramseyFeedbackReferenceYear}, or the year after the start year when that is 0.
+     */
+    int feedbackReferenceYear() {
+        return ramseyFeedbackReferenceYear == 0 ? simulationStartYear + 1 : ramseyFeedbackReferenceYear;
+    }
+
+    /**
+     * {@code mm_ramseyFeedbackReferenceYear} is 0 (the year after the start year) or a year
+     * after the start year and before the end year. The labour market does not run in the
+     * start year, so that year has no workers to take a reference from; a reference in the
+     * end year or later would leave no year to measure a gap in, which is a run without
+     * feedback under another name.
+     */
+    public static void requireFeedbackReferenceYearInsideRun(int referenceYear, int startYear, int endYear) {
+        if (referenceYear == 0) return;
+        if (referenceYear <= startYear || referenceYear >= endYear) {
+            String upper = endYear == Integer.MAX_VALUE ? "" : " and before the end year " + endYear;
+            throw new IllegalStateException(String.format(
+                    "mm_ramseyFeedbackReferenceYear must be 0 (the year after the start year) or a year "
+                    + "after the start year %d%s, got %d", startYear, upper, referenceYear));
+        }
     }
 
     /**
@@ -1156,7 +1338,9 @@ public class MacroModelManager {
      * measured against the planner's projected N, which is legitimate because that projection
      * is overwritten at startup with the same population projection SimPaths aligns to, so
      * the realized headcount and the projected employment are comparable and delta_n isolates genuine
-     * labour-market surprises. No such reconciliation exists for hours: the planner's hours
+     * labour-market surprises. This holds unless an input scenario replaces SimPaths' population
+     * workbook: then the gap carries the scenario's departure from the bundle's path, or the
+     * unforeseen part when the Ramsey scenario's {@code N} describes it. No such reconciliation exists for hours: the planner's hours
      * path is a log-linear trend fitted to observed hours ({@code hours_trend_method} in the
      * growth params, about -0.2%/yr for PL) and SimPaths models no hours trend at all, so
      * measuring delta_h against the projection would convert that modelling disagreement into
@@ -1198,6 +1382,7 @@ public class MacroModelManager {
                                          double realizedPopulation) {
         if (ramseyTrend == null || !ramseyTrend.isSolved() || ramseyProjN == null) return;
         if (year <= simulationStartYear) return; // no labour market in the start year
+        if (year < feedbackReferenceYear()) return; // the planner stays on its projection until the reference year
 
         if (!Double.isFinite(realizedLaborForce) || realizedLaborForce <= 0.0) {
             log.warn(String.format(
@@ -1218,7 +1403,7 @@ public class MacroModelManager {
         boolean hoursUsable = Double.isFinite(realizedHours) && realizedHours > 0.0;
         boolean popUsable = Double.isFinite(realizedPopulation) && realizedPopulation > 0.0;
 
-        if (Double.isNaN(ramseyFeedbackLambda)) {       // first post-labour-market year
+        if (Double.isNaN(ramseyFeedbackLambda)) {       // the reference year
             ramseyFeedbackLambda = assumedMeanN / realizedLaborForce;
             if (hoursUsable) ramseyFeedbackHoursBase = realizedHours;
             if (popUsable) {
@@ -1358,7 +1543,8 @@ public class MacroModelManager {
      * trends (measuring change from quarter 0 to the end of the first stepped year).</p>
      * 
     * <p>Populates {@link #currentRamseyTrends} with keys: w, y, c, inv, k, g, nx,
-    * n_ramsey.</p>
+    * n_ramsey, p_ramsey and the levels y_ramsey_level, c_ramsey_level, inv_ramsey_level,
+    * k_ramsey_level, n_ramsey_level, p_ramsey_level.</p>
      */
     void advanceRamseyTrend() {
         var ts = ramseyTrend.stepYear();
@@ -1383,6 +1569,14 @@ public class MacroModelManager {
                 ? (ts.labor() / ramseyBaseline.labor() - 1.0) * 100.0 : 0.0);
         currentRamseyTrends.put("p_ramsey", ramseyBaseline.population() > 0.0
                 ? (ts.population() / ramseyBaseline.population() - 1.0) * 100.0 : 0.0);
+        // Levels of the annual state, in the bundle's units: comparable across runs, unlike the
+        // trends above, which are indexed to each run's own quarter 0.
+        currentRamseyTrends.put("y_ramsey_level", ts.output());
+        currentRamseyTrends.put("c_ramsey_level", ts.consumption());
+        currentRamseyTrends.put("inv_ramsey_level", ts.investment());
+        currentRamseyTrends.put("k_ramsey_level", ts.capitalStock());
+        currentRamseyTrends.put("n_ramsey_level", ts.labor());
+        currentRamseyTrends.put("p_ramsey_level", ts.population());
 
         if (logMacroState) {
             System.out.println(String.format(
@@ -2449,6 +2643,11 @@ public class MacroModelManager {
         this.ramseyScenario = ramseyScenario;
     }
 
+    /** Input scenario folder (null or blank = none); a Ramsey scenario file is looked up there first. */
+    public void setInputScenarioDir(String dir) {
+        this.inputScenarioDir = (dir == null || dir.isBlank()) ? null : dir;
+    }
+
     public void setMacroBundleDir(String macroBundleDir) {
         this.macroBundleDir = macroBundleDir;
     }
@@ -2491,6 +2690,8 @@ public class MacroModelManager {
     }
 
     public void setRamseyFeedbackPersistence(double value) { this.ramseyFeedbackPersistence = value; }
+
+    public void setRamseyFeedbackReferenceYear(int value) { this.ramseyFeedbackReferenceYear = value; }
 
     /**
      * Get the Ramsey trend model (for testing/diagnostics).

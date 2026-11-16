@@ -57,8 +57,12 @@ names (§6.1):
   the resident population, both from SimPaths' own population workbook). The run fails if either projection
   is missing, rather than extrapolating historical growth, and if the population projection or the reference
   CSV lacks the `P` column (contract 42).
-- Scenarios: `_macroScenario_*.csv`, named by `mm_dsgeShockScenario` / `mm_ramseyScenario` relative to
-  this folder. They are maintained by hand; no exporter writes them.
+- Scenarios: `_macroScenario_*.csv`, named by `mm_dsgeShockScenario` / `mm_ramseyScenario`. They are
+  maintained by hand; no exporter writes them. `mm_dsgeShockScenario` is read from this folder. The
+  `mm_ramseyScenario` file is looked up first in the active input scenario folder (`inputScenario`,
+  `input/{CC}/scenarios/<name>/`), then in this folder; the log line `Loaded Ramsey scenario from:` names the
+  file used. With an active input scenario, a name found in neither folder fails, naming both; without one, the
+  file is read from this folder only, and a missing file fails, naming its path in this folder.
 
 In the bundle but not read at runtime: `steady_state.csv` (the exported model is log-linearised, so every
 steady state is zero; kept for inspection), `irfs_eps_*.csv` (read by `DSGEIrfParityTest` and
@@ -330,9 +334,9 @@ sequenceDiagram
         M->>C: overwrite the level columns of row t with the post-alignment population
         opt Ramsey modes
             M->>M: computeRawAggregates: L_sim(t), h(t), P_sim(t)
-            alt t = startYear+1
+            alt t = reference year (startYear+1 by default)
                 M->>M: latch lambda = N_assumed(t)/L_sim(t), lambda_P = P_assumed(t)/P_sim(t) and the hours base
-            else from startYear+2
+            else after the reference year
                 M->>R: delta = lambda L_sim(t)/N_assumed(t), delta_h, delta_P = lambda_P P_sim(t)/P_assumed(t), rebuild the remaining paths from the original projection, re-solve from K(t), A(t), stepYear
                 R-->>M: revised path, cursor at t+1
                 M->>C: n_realized_gap, h_realized_gap, p_realized_gap, w_trend_revision on row t
@@ -354,7 +358,7 @@ sequenceDiagram
 | `DSGEMacroUpdate` | macro to micro | every person's potential wage times `1 + w_total/100`, the trend's level times the cycle's factor (§3.2) | `Person.updateFullTimeHourlyEarnings` (§3.3) | labour-supply choice, earnings, tax-benefit match | `startYear` |
 | End of `LabourMarketAndIncomeUpdate` | micro to macro | the `l_level`/`h_level` start anchors, latched once (`latchStartYearAnchorsPostLabourMarket`) | the post-labour-market population | the `l_level`/`h_level` indices and the gate of `participation_rate`, `workers_over_atRiskPool` (§7.2) | `startYear+1`, once |
 | `MacroEndYearCapture` | micro to macro | post-alignment level indices (`l_level`, `h_level`, `wap_level`, `cat_*`, `wage_realized`) | `computeRawAggregates` after mortality and population alignment | `MacroPaths.csv` only | `startYear` (`l_level`, `h_level` from `startYear+1`, §7.2) |
-| `MacroEndYearCapture` | micro to macro | `L_sim(t)`, `h(t)`, `P_sim(t)`; the `lambda`/`lambda_P` latch, then `delta_t`, `delta_h`, `delta_P` and the Ramsey re-solve | the same post-alignment snapshot, one `computeRawAggregates` call (contract 43) | the Ramsey path from `t+1` on, hence next year's `w_trend` | `lambda`, `lambda_P` in `startYear+1`; re-solves from `startYear+2` |
+| `MacroEndYearCapture` | micro to macro | `L_sim(t)`, `h(t)`, `P_sim(t)`; the `lambda`/`lambda_P` latch, then `delta_t`, `delta_h`, `delta_P` and the Ramsey re-solve | the same post-alignment snapshot, one `computeRawAggregates` call (contract 43) | the Ramsey path from `t+1` on, hence next year's `w_trend` | `lambda`, `lambda_P` in the reference year (`startYear+1` by default, §8.1); re-solves from the year after it |
 | `UpdateYear` of `endYear` | | `MacroPaths.csv` export, diagnostics summary | | | `endYear` |
 
 ### 4.4 The first years of a run
@@ -365,6 +369,10 @@ sequenceDiagram
 | `startYear+1` | yes | `w_total` | stepped on the scenario's shocks | `lambda`, `lambda_P` and the hours base latched at year end, no re-solve |
 | `startYear+2` | yes | `w_total` | stepped on the scenario's shocks | first gap and first re-solve at year end, effective from `startYear+3` |
 | later | yes | `w_total` | the same step | yearly |
+
+The last column holds for the default reference year, `startYear+1`. With `mm_ramseyFeedbackReferenceYear: R` the
+feedback does nothing before `R`, latches at the end of `R` and has its first gap and re-solve at the end of
+`R+1` (§8.1).
 
 `w_cycle` is zero in every year without scenario shocks.
 
@@ -397,6 +405,7 @@ sequenceDiagram
   at the year end; no macro quantity is computed from them.
 - **The first feedback moves the wage in `startYear+3`** (§4.4): `startYear+1` latches `lambda`, `lambda_P`
   and the hours base, `startYear+2` has the first re-solve, which the wage of `startYear+3` is the first to use.
+  With a reference year `R` (`mm_ramseyFeedbackReferenceYear`) the three years are `R`, `R+1` and `R+2`.
 - **A missing feedback stops the run.** If the end-of-year feedback of `t-1` did not run (`t-1 > startYear`),
   `updateEquilibrium` throws before advancing the planner's trend into `t`, naming `MacroEndYearCapture`.
 - **`n_ramsey` and `p_ramsey` change meaning under feedback**: after the first re-solve they track the fed-back
@@ -438,9 +447,18 @@ All under `model_args`:
   trend layer it deviates around SimPaths' own wage trend instead)
 - `mm_useMacroPathRecorder` (boolean, default `true`; records path regardless of `mm_macroModel`)
 - `mm_dsgeShockScenario` (string; ignored unless `mm_macroModel` runs the DSGE)
-- `mm_ramseyScenario` (string; ignored unless `mm_macroModel` runs the Ramsey layer)
+- `mm_ramseyScenario` (string; ignored unless `mm_macroModel` runs the Ramsey layer; looked up in the input
+  scenario folder first, then the bundle folder, §2.2). The file's parameter columns (`g_A`, `delta`, `alpha_K`,
+  `beta`, `sigma`, `g_Y`, `nx_Y`) are absolute deviations of the planner's parameters; its `N` and `P` columns
+  are relative deviations of the planner's workers and population from the bundle's paths (`0.012` = 1.2% more),
+  which scale the paths the planner solves on (§8.1). `N` and `P` must be zero from the start year through the
+  year after the feedback's reference year (`startYear + 2` by default), the years whose factors enter the
+  bundle's handoff quarter or the quarters the feedback latches on; the first year a deviation may be non-zero is
+  two years after the reference year (`startYear + 3` by default), and an earlier one fails at startup (§8.1).
+  The planner knows the file from the start year; a run without it is the surprise case
 - `mm_macroBundleDir` (string, default empty = `input/{CC}/MacroModel`; the bundle folder, against which
-  the two scenario names resolve too. A second bundle, such as one handed off at an earlier quarter for a
+  the two scenario names resolve too, the Ramsey scenario only when the input scenario folder does not hold
+  it. A second bundle, such as one handed off at an earlier quarter for a
   backtest, lives in its own folder because `BundleProvenanceTest` hashes only `input/{CC}/MacroModel`.
   A folder that does not exist fails a macro-on run; recorder-only runs read only `model_info.json` from it)
 - `mm_dsgeMaxStateDeviation` (double, default `10.0`; DSGE stability bound in log-deviation units)
@@ -448,6 +466,10 @@ All under `model_args`:
 - `mm_ramseyFeedbackPersistence` (double, default `1.0`, range `[0,1]`; the planner's belief about how
   persistent a realized employment, hours or population gap is — see §8.1. The feedback itself has no switch:
   it is always on with a Ramsey layer. Ignored without one)
+- `mm_ramseyFeedbackReferenceYear` (int, default `0` = the year after the start year; the year against which
+  the planner measures SimPaths' workers, hours and population — see §8.1. A year after the start year and
+  before the end year; any other value fails at startup. The feedback does nothing before it. Ignored without
+  a Ramsey layer)
 
 Unquoted `off` is a YAML 1.1 boolean, so SnakeYAML delivers `Boolean.FALSE`; the enum parser
 maps it to the disabled constant, which is why `mm_macroModel: off` works without quotes.
@@ -545,11 +567,19 @@ switch for it.
 **Yearly mechanism.** At `MacroEndYearCapture` — after mortality and population alignment, the
 only point in the year where employment is final — the realized workers `L_sim,t`, their mean hours and
 SimPaths' population `P_sim,t` (all ages, weighted) are aggregated by one call of
-`LaborSupplyAggregator.computeRawAggregates` (contract 43). In the first year with a
-post-labour-market observation (`startYear + 1`; the labour market does not run in `startYear`), two
+`LaborSupplyAggregator.computeRawAggregates` (contract 43). In the **reference year**, two
 level factors are latched once, `lambda = meanN_assumed / L_sim` and `lambda_P = meanP_assumed / P_sim`,
-together with the hours base, and no re-solve happens that year (`delta ≡ 1` by construction) — this
-mirrors the `startL` latch timing described in §7.2. In every later year,
+together with the hours base, and no re-solve happens that year (`delta ≡ 1` by construction). The reference
+year is the first year with a post-labour-market observation, `startYear + 1` (the labour market does not run
+in `startYear`), which mirrors the `startL` latch timing described in §7.2, unless
+`mm_ramseyFeedbackReferenceYear` names a later year `R`. Then the feedback does nothing in the years before
+`R`: the planner stays on the path of its first solve, and the gap columns of those years are `0`. A later
+reference year is for a run whose first simulated years carry a transient of SimPaths' own. The level factors
+turn the reference year's ratio of SimPaths' workers to the planner's path into the yardstick for every later
+year, so a dip of labour supply in the first labour-market year, as in a start in the last year with alignment
+targets, makes the recovery from it a lasting surprise of workers (measured for Poland on 2026-11-10, start
+2023, retirement alignment off, one seed: `n_realized_gap` +6.7 in 2030 and +9.4 in 2060 with the reference
+year 2024). In every later year,
 `delta_t = lambda * L_sim,t / meanN_assumed(t)` and `delta_P,t = lambda_P * P_sim,t / meanP_assumed(t)`,
 where `meanN_assumed(t)` and `meanP_assumed(t)` are always read from the *original* projection retained at
 startup, never from a path revised in an earlier year — this is what prevents re-solve errors from
@@ -561,6 +591,47 @@ the same scenario and TFP convergence phase so the terminal balanced-growth-path
 converging instead of restarting. Beyond the rebuilt population path the dependency ratio stays frozen at its
 last value (`Technical_Documentation_Macromodel.md` §2.3). One `stepYear()` then consumes the realized year,
 leaving the solved path positioned at `t + 1`.
+
+**A Ramsey scenario's `N` and `P`.** When `mm_ramseyScenario` has `N` or `P` columns (§6.1), the projection
+retained at startup, `ramseyProjN` and `ramseyProjP`, is the bundle's paths times the scenario's factors
+(`MacroModelManager.scaleByScenarioPath`), and the initial solve already runs on it. Quarter `k = 0..3` of
+calendar year `y` is multiplied by `f(y)^(1 - k/4) * f(y+1)^(k/4)`, with `f(y) = 1 + N(y)` (or `1 + P(y)`): the
+annual factor holds at q1, the quarters between are interpolated geometrically, and the file's last row persists
+to the end of the horizon. The factors are applied to the finished paths, after the tapered tail of `N` and the
+frozen dependency ratio of `P`. Provided the file's last row is no later than the year after the projection's last
+quarter, the factors are constant beyond the population projection, so there `N` keeps its growth rates and `P/N`
+stays frozen at the scaled ratio; a file that runs further changes both up to its last row. Both must be zero from
+the start year through the year after the reference year (`startYear + 2` by default, 2025 for a 2023 start; 2029
+with `mm_ramseyFeedbackReferenceYear: 2028`); a non-zero value there fails at startup with a
+message naming the file, the column, the year, the reference year and the first allowed year, two years after the
+reference year (`MacroModelManager.requireNoPathDeviationBeforeFirstAllowedYear`). The reason: the start year's
+workers and population are the bundle's observed handoff, measured together with `K0`, and `lambda` and `lambda_P`
+latch on the planner's paths in the reference year, whose quarters 2 to 4 take in the factor of the following year
+through the interpolation, so a deviation in any of these years would be absorbed into the latch and the gaps could
+not show a mismatch between the scenario and SimPaths. The level factors therefore latch on the bundle's paths. The
+scaled paths leave the bundle's at the earliest in quarter 2 of the year after the reference year, whose quarters 2
+to 4 take in part of the factor of the year after that; in general, quarters 2 to 4 of the year before a
+deviation's first non-zero year already carry part of it. `meanN_assumed` and `meanP_assumed` are read from the scaled paths, so every gap measures
+SimPaths' workers and population against the scenario paths, and `n_realized_gap` and `p_realized_gap` carry what
+the scenario did not foresee, for example migrants who work less than its workers path assumes, or a file that
+expects more arrivals than SimPaths' population workbook delivers
+(`RamseyRecursiveFeedbackTest.testFeedbackLatchesAgainstTheScenarioPaths`). They also carry an offset of the
+interpolation: `meanN_assumed(t)` and `meanP_assumed(t)` average the four quarters of `t`, which lie between the
+factors of `t` and `t + 1`, while SimPaths' year `t` corresponds to the factor of `t` (its population follows the
+workbook's value for `t`). A growing deviation therefore lowers each gap by about 3/8 of the deviation's annual
+growth, from the year before its first non-zero value on; for `input/PL/scenarios/migration_200k` that is -0.2 to
+-0.3 pp in the population gap and -0.3 to -0.5 pp in the workers gap from 2029 on, computed from its
+`ramsey_migration.csv`. That file's `N` is the deviation of the population aged 15-64, which is known without a
+SimPaths run; arrivals who work more often than the average person aged 15-64 then stay in the workers gap. The
+folder's `ramsey_migration_workers.csv` has the deviation of SimPaths' own workers as `N`, read off two runs with
+the macro layer off, one on the baseline inputs and one with the input scenario
+(`input_processing/scenarios/build_ramsey_workers_path.do`); a foresight run names this file.
+`n_ramsey` and `p_ramsey` show the scaled paths. A file whose `N` and `P` are zero
+throughout leaves every planner quantity bit-identical (contract 44).
+
+The latch takes in SimPaths' side in the same way: with an input scenario (`inputScenario`) whose workbooks already
+differ from the baseline in the reference year, a run without the Ramsey scenario file (the surprise case) also absorbs
+that difference into `lambda` and `lambda_P`, so its gaps show departures from the latch-year ratio only.
 
 **One-period-stale wages.** The wage SimPaths used for year `t` was set by `advanceRamseyTrend()`
 *before* this feedback step runs — it reflects the path as solved at the end of year `t-1`, not
@@ -600,7 +671,9 @@ projected employment are then comparable and `delta_n` isolates genuine labour-m
 `delta_P` is measured against the planner's projected `P` for the same reason: the bundle's population path
 and SimPaths' population alignment come from the one workbook. Under the default `alignPopulation = true` the
 population gap is therefore sampling noise; with the alignment off, or under a scenario that moves SimPaths'
-demography rather than the workbook, it can be large. SimPaths' population reaches the planner every year, and
+demography rather than the workbook, it can be large. All of this holds unless an input scenario replaces
+SimPaths' population workbook (see "A Ramsey scenario's `N` and `P`" above): then the gaps carry the scenario's
+departure from the bundle's path, or the unforeseen part when the Ramsey scenario's `N` and `P` describe it. SimPaths' population reaches the planner every year, and
 `p_realized_gap` records the gap, but under the default `rho = 1` the gap scales the whole remaining population
 path, which is a pure scale, and leaves the trend wage unchanged whatever its size; the dependency-ratio effect on
 the wage then comes from the bundle's population path alone. Under `rho < 1` the gap decays over the remaining
@@ -658,15 +731,17 @@ against the planner's assumed employment path;
 `p_realized_gap` — `(delta_P,t - 1) * 100`, the gap in percent of SimPaths' population (all ages, weighted,
 after alignment) against the planner's assumed population path; and
 `w_trend_revision` — the percent change in the year-`t+1` trend wage caused by the re-solve. All three
-default to `0` for any year with no re-solve: the latch year (the two gaps are legitimately `0`
-there, since `delta ≡ 1`; `w_trend_revision` is `0` because no re-solve happens to produce a
-revision) and every year of a run without a Ramsey layer.
+default to `0` for any year with no re-solve: the years before the reference year, the reference year itself
+(the two gaps are legitimately `0` there, since `delta ≡ 1`; `w_trend_revision` is `0` because no re-solve
+happens to produce a revision) and every year of a run without a Ramsey layer.
 
 **`n_ramsey` and `p_ramsey` change meaning under feedback.** `advanceRamseyTrend` derives the `n_ramsey` and
 `p_ramsey` columns (§7.2) from the *currently solved* trend's `ts.labor()` and `ts.population()`, so once a
 re-solve has happened they track the fed-back, revised paths — not the population-projection-based paths they
 represent before the first re-solve. The measures of how far a run departed from the assumed paths are
-`n_realized_gap` and `p_realized_gap`, not `n_ramsey` and `p_ramsey`.
+`n_realized_gap` and `p_realized_gap`, not `n_ramsey` and `p_ramsey`. `c_trend` and `inv_trend` are indexed to
+each run's own quarter-0 consumption and investment, which differ between runs whose planner knows different
+futures; compare runs through `c_ramsey_level` and `inv_ramsey_level` (§9.1).
 
 **What `lambda` and `lambda_P` hold fixed.** The planner's `N` and SimPaths' workers are the same concept, all
 persons in employment: SimPaths' labour-supply model includes the self-employed (`Les_c4.EmployedOrSelfEmployed`)
@@ -733,7 +808,13 @@ The plain columns that follow are the level indices and the feedback diagnostics
 `n_ramsey`, `participation_rate`, `workers_over_atRiskPool`, `total_population`, `wap_level`, `atrisk_level`, the
 `cat_*` shares and mean hours, `wage_realized`, `n_realized_gap`, `h_realized_gap`, `w_trend_revision`, then
 `p_ramsey` (the planner's population against the handoff quarter, like `n_ramsey`) and `p_realized_gap` (§7.2,
-§8.1).
+§8.1). The last six columns are the planner's levels: `y_ramsey_level`, `c_ramsey_level` (aggregate consumption
+`C = P c`), `inv_ramsey_level`, `k_ramsey_level`, `n_ramsey_level` (persons in employment) and `p_ramsey_level`
+(resident population), taken from the annual state of the currently solved trend. They carry the bundle's units, as
+in `growth_model_reference_<country>.csv`: output, consumption and investment are quarterly flows averaged over the
+year, and the same annual value stands in all four quarterly rows. Unlike the `_trend` columns, they do not depend on
+the run's own quarter 0, so they are what compares consumption and investment across runs. They are zero in runs
+without a Ramsey layer.
 
 ### 9.2 Logging
 

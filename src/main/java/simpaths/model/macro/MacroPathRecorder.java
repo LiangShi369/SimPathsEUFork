@@ -106,6 +106,15 @@ public class MacroPathRecorder {
      * capital per worker whatever the population does. See
      * {@code MacroModelManager.applyRamseyFeedbackWithRealized}. Zero in runs without a
      * Ramsey layer and until the feedback has latched its lambda.
+     * y_ramsey_level / c_ramsey_level / inv_ramsey_level / k_ramsey_level / n_ramsey_level /
+     * p_ramsey_level: the planner's output, aggregate consumption (C = P c), investment, capital
+     * stock, persons in employment and resident population, as levels of the annual state in the
+     * bundle's units (as {@code growth_model_reference_<country>.csv}); output, consumption and
+     * investment are quarterly flows averaged over the year, and the same annual value stands in
+     * all four quarterly rows. {@code c_trend} and {@code inv_trend} are indexed to the run's own
+     * quarter 0 ({@code ramseyBaseline}), which differs between runs whose planner knows
+     * different futures, so consumption and investment are compared across runs through these
+     * levels. Zero in runs without a Ramsey layer.
      */
     private static final String[] EXTRA_COLUMN_VARS = {
         "l_level", "h_level", "n_ramsey", "participation_rate", "workers_over_atRiskPool",
@@ -113,7 +122,9 @@ public class MacroPathRecorder {
         "cat_0_share", "cat_1_share", "cat_2_share", "cat_3_share",
         "cat_0_meanHours", "cat_1_meanHours", "cat_2_meanHours", "cat_3_meanHours",
         "wage_realized", "n_realized_gap", "h_realized_gap", "w_trend_revision",
-        "p_ramsey", "p_realized_gap"
+        "p_ramsey", "p_realized_gap",
+        "y_ramsey_level", "c_ramsey_level", "inv_ramsey_level", "k_ramsey_level",
+        "n_ramsey_level", "p_ramsey_level"
     };
 
     // ========== Inner Class for Quarter Data ==========

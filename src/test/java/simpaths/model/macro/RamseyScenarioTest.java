@@ -573,5 +573,48 @@ public class RamseyScenarioTest {
         assertEquals("g_Y", RamseyScenario.PARAM_NAMES[5]);
         assertEquals("nx_Y", RamseyScenario.PARAM_NAMES[6]);
     }
+
+    // ========== N and P path columns ==========
+
+    private void load(String content) throws IOException {
+        Path csv = tempDir.resolve("paths.csv");
+        Files.writeString(csv, content);
+        scenario.loadFromFile(csv);
+    }
+
+    @Test
+    public void testPathColumnsOnly() throws IOException {
+        load("year, N, P\n2030, 0.01, 0.008\n2031, 0.02, 0.016\n");
+        assertEquals(0.0, scenario.getPathDeviation(2029, "N"), 0.0);
+        assertEquals(0.01, scenario.getPathDeviation(2030, "N"), 0.0);
+        assertEquals(0.016, scenario.getPathDeviation(2031, "P"), 0.0);
+        assertEquals(0.02, scenario.getPathDeviation(2060, "N"), 0.0);   // last row persists
+        assertEquals(0.0, scenario.getPathDeviation(2031, "unknown"), 0.0);
+        assertTrue(scenario.hasPathDeviations());
+        assertFalse(scenario.hasAnyDeviations());                       // no parameter deviations
+        assertArrayEquals(new double[7], scenario.getDeviations(2031), 0.0);
+        String summary = scenario.getSummary();
+        assertTrue(summary.contains("N(") && summary.contains("P("), summary);
+    }
+
+    @Test
+    public void testPathAndParameterColumnsTogether() throws IOException {
+        load("year, g_A, N\n2030, 0.005, 0.01\n");
+        assertEquals(0.005, scenario.getDeviation(2030, "g_A"), 0.0);
+        assertEquals(0.01, scenario.getPathDeviation(2030, "N"), 0.0);
+        assertEquals(0.0, scenario.getPathDeviation(2030, "P"), 0.0);
+    }
+
+    @Test
+    public void testAllZeroPathColumnsHaveNoDeviations() throws IOException {
+        load("year, N, P\n2011, 0, 0\n2060, 0, 0\n");
+        assertFalse(scenario.hasPathDeviations());
+    }
+
+    @Test
+    public void testPathDeviationAtOrBelowMinusOneIsRejected() {
+        var e = assertThrows(IllegalArgumentException.class, () -> load("year, N\n2030, -1.0\n"));
+        assertTrue(e.getMessage().contains("N") && e.getMessage().contains("2030"), e.getMessage());
+    }
 }
 
