@@ -564,7 +564,7 @@ public class RamseyTrendModelTest {
     @Test
     public void testRisingDependencyRatioRaisesTheTransitionWage() {
         // spec §5.4: the planner pre-funds a rising P/N; wage above and r below the constant-ratio path.
-        // Measured 2026-11-08 on the Poland fixture: wage +1.573% at 2060 (q147) against the
+        // Measured 2026-11-09 on the Poland fixture: wage +1.600% at 2060 (q147) against the
         // constant-ratio path.
         var in = fixtureInputs();
         double r0 = in.population()[0] / in.labor()[0];

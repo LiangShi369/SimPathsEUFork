@@ -1,6 +1,6 @@
 // =========================================================================
 // FROZEN MODEL - AUTO-GENERATED
-// Generated: 2026-11-08 18:00:03
+// Generated: 2026-11-09 14:03:09
 // Source: Macromodel_Poland (estimation results)
 // DO NOT EDIT MANUALLY - regenerate with generate_frozen_model.m
 // =========================================================================
@@ -212,7 +212,7 @@ lambda_w = 0.65;    // baseline: shorter average wage duration than Germany
 // Hours adjustment margin weaker than in Germany
 rho_h    = 0.80;    // hours persistence (calibrated; shorter than Germany due to
                     // less institutional hours adjustment)
-omega_h  = 0.311459;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point)
+omega_h  = 0.311343;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point)
 
 // ----- DIRECT LABOR FORCE → WAGE EFFECT (CALIBRATED) -----
 // Polish labor market shows stronger wage response to supply shifts
@@ -233,7 +233,7 @@ delta_k  = 0.025;   // quarterly depreciation ≈ 9.6% annual
                     // delta_k governs the cyclical capital law of motion only.
 rho_inv  = 0.85;    // investment persistence (same starting point)
 phi_inv_y = 0.3;    // investment sensitivity to output gap (structural floor)
-phi_inv_r = 0.179149;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
+phi_inv_r = 0.221129;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
 
 // =========================================================================
 // STEADY STATE LABOR MARKET (Poland, 2018-2023 averages)
@@ -409,14 +409,14 @@ end;
 //
 // These are STARTING values; Bayesian estimation will update them.
 shocks;
-    var eps_a;      stderr 1.0683;  // ESTIMATED    // technology: higher for catch-up economy
-    var eps_d;      stderr 0.4994;  // ESTIMATED    // demand: higher volatility (trade/FDI cycles)
-    var eps_r;      stderr 0.7475;  // ESTIMATED    // monetary: NBP rate changes more volatile than ECB
-    var eps_L;      stderr 0.6466;  // ESTIMATED    // labor force: EU migration creates larger L shocks
+    var eps_a;      stderr 0.9887;  // ESTIMATED    // technology: higher for catch-up economy
+    var eps_d;      stderr 0.4448;  // ESTIMATED    // demand: higher volatility (trade/FDI cycles)
+    var eps_r;      stderr 0.7583;  // ESTIMATED    // monetary: NBP rate changes more volatile than ECB
+    var eps_L;      stderr 0.6687;  // ESTIMATED    // labor force: EU migration creates larger L shocks
     var eps_sep;    stderr 0.10;    // separation: more flexible labor market
-    var eps_h;      stderr 0.4078;  // ESTIMATED    // hours shock (less institutional adjustment than Germany)
-    var eps_p;      stderr 2.2384;  // ESTIMATED    // cost-push: higher due to energy import dependence + PLN
-    var eps_inv;    stderr 2.8807;  // ESTIMATED    // investment: more volatile (EU funds, FDI cycles)
+    var eps_h;      stderr 0.4076;  // ESTIMATED    // hours shock (less institutional adjustment than Germany)
+    var eps_p;      stderr 2.0633;  // ESTIMATED    // cost-push: higher due to energy import dependence + PLN
+    var eps_inv;    stderr 2.8330;  // ESTIMATED    // investment: more volatile (EU funds, FDI cycles)
 end;
 
 // =========================================================================

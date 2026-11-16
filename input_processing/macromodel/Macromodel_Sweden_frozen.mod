@@ -1,6 +1,6 @@
 // =========================================================================
 // FROZEN MODEL - AUTO-GENERATED
-// Generated: 2026-11-08 15:36:11
+// Generated: 2026-11-09 14:20:31
 // Source: Macromodel_Sweden (estimation results)
 // DO NOT EDIT MANUALLY - regenerate with generate_frozen_model.m
 // =========================================================================
@@ -229,7 +229,7 @@ lambda_w = 0.75;
 // used heavily in 2020, and working-time accounts are common in the industrial
 // agreements.
 rho_h    = 0.85;    // hours persistence (as Germany, above Poland/Spain's 0.80)
-omega_h  = 0.326464;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point; ESTIMATED)
+omega_h  = 0.326496;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point; ESTIMATED)
 
 // ----- DIRECT LABOR FORCE -> WAGE EFFECT (CALIBRATED) -----
 psi_wL   = -0.05;   // direct L->w elasticity (negative: more L -> lower w)
@@ -253,7 +253,7 @@ delta_k  = 0.025;   // quarterly depreciation ~9.6% annual
                     // delta_k governs the cyclical capital law of motion only.
 rho_inv  = 0.85;    // investment persistence (same starting point)
 phi_inv_y = 0.3;    // investment sensitivity to output gap (structural floor)
-phi_inv_r = 0.138878;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
+phi_inv_r = 0.147211;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
 
 // =========================================================================
 // STEADY STATE LABOR MARKET (Sweden, 2001q1-2025q1 sample)
@@ -437,14 +437,14 @@ end;
 //
 // These are STARTING values; Bayesian estimation will update them.
 shocks;
-    var eps_a;      stderr 1.2431;  // ESTIMATED    // technology
-    var eps_d;      stderr 0.3468;  // ESTIMATED    // demand
+    var eps_a;      stderr 1.2420;  // ESTIMATED    // technology
+    var eps_d;      stderr 0.3474;  // ESTIMATED    // demand
     var eps_r;      stderr 0.4808;  // ESTIMATED    // monetary: active, independent Riksbank
     var eps_L;      stderr 0.3007;  // ESTIMATED    // labor force: migration-driven swings
     var eps_sep;    stderr 0.10;    // separation: moderate turnover
     var eps_h;      stderr 0.4912;  // ESTIMATED    // hours: a real margin here (korttidsarbete)
-    var eps_p;      stderr 1.5153;  // ESTIMATED    // cost-push: floating SEK pass-through
-    var eps_inv;    stderr 2.8229;  // ESTIMATED    // investment: ICT/R&D-heavy, volatile
+    var eps_p;      stderr 1.5092;  // ESTIMATED    // cost-push: floating SEK pass-through
+    var eps_inv;    stderr 2.8273;  // ESTIMATED    // investment: ICT/R&D-heavy, volatile
 end;
 
 // =========================================================================

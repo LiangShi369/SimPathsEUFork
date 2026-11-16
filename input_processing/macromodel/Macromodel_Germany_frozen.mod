@@ -1,6 +1,6 @@
 // =========================================================================
 // FROZEN MODEL - AUTO-GENERATED
-// Generated: 2026-11-08 15:28:22
+// Generated: 2026-11-09 14:11:54
 // Source: Macromodel_Germany (estimation results)
 // DO NOT EDIT MANUALLY - regenerate with generate_frozen_model.m
 // =========================================================================
@@ -217,7 +217,7 @@ lambda_w = 0.75;    // baseline: 1-year average wage duration
 rho_h    = 0.85;    // hours persistence - CALIBRATED to resolve collinearity
                     // (rho_h and SE_eps_h are collinear when both are estimated)
                     // Kurzarbeit contracts average ~6 months (quarterly ρ ≈ 0.85)
-omega_h  = 0.418875;  // ESTIMATED (posterior mode)    // hours weight in production: total labor = n + omega_h * h
+omega_h  = 0.418474;  // ESTIMATED (posterior mode)    // hours weight in production: total labor = n + omega_h * h
                     // < 1.0 because headcount matters more than marginal hours
                     // Matches production function literature (Chetty et al. 2012)
 // h is a pure AR(1): no output-gap or wage term moves hours. The DSGE has no
@@ -258,7 +258,7 @@ phi_inv_y = 0.3;    // small positive value as a structural floor.
                     // negative demand shock → R↓ → inv↑ (investment rises in recessions).
                     // 0.3 ensures weak demand co-movement without dominating unconditional VD.
                     // cosn(rho_inv, phi_inv_y) = 0.9989 → keep calibrated, do NOT estimate.
-phi_inv_r = 0.309402;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate (cost of capital)
+phi_inv_r = 0.296918;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate (cost of capital)
                     // Grid search: determinacy boundary at ~0.5 for phi_inv_y=2.0
 
 // =========================================================================
@@ -429,15 +429,15 @@ end;
 // the value set here.
 //
 shocks;
-    var eps_a;      stderr 1.1132;  // ESTIMATED    // technology
-    var eps_d;      stderr 0.3821;  // ESTIMATED    // demand: main driver for y-pi
-    var eps_r;      stderr 0.4585;  // ESTIMATED    // monetary
-    var eps_L;      stderr 0.1408;  // ESTIMATED    // labor force
+    var eps_a;      stderr 1.0995;  // ESTIMATED    // technology
+    var eps_d;      stderr 0.3513;  // ESTIMATED    // demand: main driver for y-pi
+    var eps_r;      stderr 0.4549;  // ESTIMATED    // monetary
+    var eps_L;      stderr 0.1409;  // ESTIMATED    // labor force
     var eps_sep;    stderr 0.08;    // separation (not estimated)
-    var eps_h;      stderr 0.3839;  // ESTIMATED    // hours shock (Kurzarbeit): calibrated to σ(h) ≈ 0.8%
+    var eps_h;      stderr 0.3840;  // ESTIMATED    // hours shock (Kurzarbeit): calibrated to σ(h) ≈ 0.8%
                                     // German data: σ(h) = 0.81%, σ(h)/σ(n) = 1.22
-    var eps_p;      stderr 1.4992;  // ESTIMATED    // cost-push / price markup shock
-    var eps_inv;    stderr 1.8594;  // ESTIMATED    // investment shock [CAPITAL EXTENSION]
+    var eps_p;      stderr 1.4648;  // ESTIMATED    // cost-push / price markup shock
+    var eps_inv;    stderr 1.8677;  // ESTIMATED    // investment shock [CAPITAL EXTENSION]
 end;
 
 // =========================================================================

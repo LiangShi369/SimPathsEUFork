@@ -78,13 +78,14 @@ For TFP growth, `growth_params_*.json` carries `tfp_growth_annual` and an option
 	converge quarter by quarter toward `terminal_growth.g_A_terminal_annual` at the rate
 	`terminal_growth.rho_quarterly` (0.99 when the key is absent).
 
-Example:
+Every country's template carries the same block, a common long-run rate reached with a half-life of 5 years
+(`Technical_Documentation_Macromodel.md` §2.3):
 
 ```json
 "terminal_growth": {
 	"enabled": true,
-	"g_A_terminal_annual": 0.008,
-	"rho_quarterly": 0.99
+	"g_A_terminal_annual": 0.005,
+	"rho_quarterly": 0.966
 }
 ```
 
@@ -637,8 +638,8 @@ the whole gap as permanent (a random-walk belief in the surprise), `rho=0` repla
 leaves every future quarter at the originally assumed path. **`rho=0` is not a milder version of the
 feedback**: with only the current year replaced, the planner still expects labour to revert next period, so a
 persistent labour-supply shift never produces the capital-dilution wage response the channel exists to deliver.
-On the Poland bundle (measured 2026-11-08), a +2% employment surprise with the population on its projection
-revises the next year's trend wage by about **-0.56%** under `rho=1` (capital dilution, of the order
+On the Poland bundle (measured 2026-11-09), a +2% employment surprise with the population on its projection
+revises the next year's trend wage by about **-0.55%** under `rho=1` (capital dilution, of the order
 `alpha * 2%`) and by about **+0.13%** under `rho=0`: the one-year surprise raises output per head for that year
 only, and the planner saves part of it, so next year's capital and wage are slightly higher.
 `RamseyRecursiveFeedbackTest` checks the bands (below -0.10% and above -1.20% under `rho=1`, within ±0.25% under
@@ -675,7 +676,7 @@ retirement, does not reach the planner through the feedback. The level of `P` is
 constant leaves capital, output, aggregate consumption and the wage unchanged. Under `rho=1` a population gap
 scales the whole remaining path, so it leaves the trend wage unchanged whatever its size
 (`RamseyRecursiveFeedbackTest.testUniformPopulationSurpriseIsNeutral`). Workers move the wage through capital per
-worker whatever the population does: under `rho=1` a +2% worker gap revises the wage by the same -0.56% whether
+worker whatever the population does: under `rho=1` a +2% worker gap revises the wage by the same -0.55% whether
 the population is 2% above its path or on it (`testWorkerAndPopulationSurpriseTogetherStillDiluteCapital`). A
 population gap moves the wage only by changing the time shape of the population path, as it does under `rho < 1`,
 where it decays over the remaining horizon.

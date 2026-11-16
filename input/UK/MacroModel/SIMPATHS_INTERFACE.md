@@ -1,6 +1,6 @@
 # DSGE Policy Function Export for SimPaths
 
-**Generated:** 08-Nov-2026 18:05:35
+**Generated:** 09-Nov-2026 14:07:35
 **Model:** Macromodel_UK_frozen
 
 ## 1. State-Space Representation
@@ -117,11 +117,11 @@ the population follows employment at the last projected ratio.
 | 0 | `eps_a` | technology | 0.950 | 0.5701 |
 | 1 | `eps_r` | monetary policy | 0.850 | 0.5076 |
 | 2 | `eps_d` | demand/preference | 0.800 | 0.4135 |
-| 3 | `eps_p` | price-setting / cost-push | 0.000 | 1.4869 |
+| 3 | `eps_p` | price-setting / cost-push | 0.000 | 1.4866 |
 | 4 | `eps_L` | labor force | 0.950 | 0.2517 |
 | 5 | `eps_sep` | separation | 0.800 | 0.1000 |
 | 6 | `eps_h` | hours worked | 0.800 | 0.3894 |
-| 7 | `eps_inv` | investment-specific | 0.850 | 2.3969 |
+| 7 | `eps_inv` | investment-specific | 0.850 | 2.3953 |
 
 ## 4. Java Sketch
 

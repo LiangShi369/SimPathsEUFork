@@ -2,7 +2,7 @@
   "model_version": "2.0",
   "model_type": "ramsey",
   "country": "UK",
-  "calibration_date": "2026-10-21",
+  "calibration_date": "2026-11-09",
   "calibration_source": "ONS (QNA chained volumes and current prices, D1/D11, CPI D7BT), OECD (LFS, QNA employment and hours, STES 3-month rate), Eurostat (fixed 2015 EUR/GBP rate), PWT 10.01 via FRED (RKNANPGBA666NRUG, RGDPNAGBA666NRUG, LABSHPGBA156NRUG), Bank of England",
   "parameters": {
     "alpha_K": 0.33,
@@ -14,9 +14,9 @@
     "x_comments": {
       "alpha_K": "Capital share set to 0.33 for cross-country comparability with Germany, Poland, Spain and Sweden, all of which use 0.33 in the Ramsey layer. PWT 10.01 labsh for the UK is 0.60 (2000: 0.598, 2019: 0.608), implying alpha nearer 0.40, the same gap Spain has; holding alpha_K fixed keeps the Ramsey trends comparable across countries.",
       "delta_annual": "5% annual depreciation for total-economy capital, as for Germany and Spain, the other mature economies whose measured capital stock is dominated by slowly depreciating dwellings and structures. The growth model matches total GFCF (ONS NPQT, P51G), structures included, so it needs the composite rate, not the DSGE's equipment-like delta_k. There is no sharper UK-specific pin in this repository.",
-      "beta_annual": "Discount factor: 0.96 annual, as for the other four countries. It pins the terminal modified-golden-rule BGP real rate jointly with sigma and tfp_growth_annual; the resulting r* is written to output/documentation_data/ramsey/ramsey_summary_UK.json (structural.r_star_annual) by calibrate_growth_model rather than quoted here, because it is derived and would go stale.",
+      "beta_annual": "Discount factor: 0.96 annual, as for the other four countries. It pins the terminal modified-golden-rule BGP real rate jointly with sigma and terminal_growth.g_A_terminal_annual; the resulting r* is written to output/documentation_data/ramsey/ramsey_summary_UK.json (structural.r_star_annual) by calibrate_growth_model rather than quoted here, because it is derived and would go stale.",
       "sigma": "Inverse IES (CRRA coefficient). sigma=1.5 is mid-range consensus (1=log, 2=high risk aversion), same as the other four.",
-      "tfp_growth_annual": "0.51% annual labour-augmenting TFP growth, set by the rule g_A = g_(Y/(N h)) * (1 - alpha_K), with g_(Y/(N h)) the growth of GDP per hour worked: on a BGP where K grows with Y, output per hour grows at g_A / (1 - alpha_K). On the current levels data (2000q1-2025q1, all persons in employment and hours per person employed) GDP per hour worked grows 0.80% p.a. (first against last four quarters), so the rule gives 0.80% * 0.67 = 0.54%. The calibrated value is re-tuned only when the trend's sanity check fails or the consumption fit clearly worsens, not on every data refresh. It sits between Spain (0.4%) and Sweden (0.65%), next to Germany's 0.5%. It averages across the UK productivity slowdown: GDP per hour worked grows 1.78% p.a. over 2000-2007 and 0.46% p.a. over 2008q1-2025q1, so the full-sample rate is a compromise neither half of the sample shows. Revisit if the sample is extended.",
+      "tfp_growth_annual": "0.51% annual labour-augmenting TFP growth, set by the rule g_A = g_(Y/(N h)) * (1 - alpha_K), with g_(Y/(N h)) the growth of GDP per hour worked: on a BGP where K grows with Y, output per hour grows at g_A / (1 - alpha_K). On the current levels data (2000q1-2025q1, all persons in employment and hours per person employed) GDP per hour worked grows 0.80% p.a. (first against last four quarters), so the rule gives 0.80% * 0.67 = 0.54%. The rule value is not used because it lowers corr(y_ramsey, y_hp) from 0.82 to 0.80 (measured 2026-11-09). It sits between Spain (0.4%) and Sweden (0.65%), next to Germany's 0.53%. It averages across the UK productivity slowdown: GDP per hour worked grows 1.78% p.a. over 2000-2007 and 0.46% p.a. over 2008q1-2025q1, so the full-sample rate is a compromise neither half of the sample shows. Revisit if the sample is extended. The forward path converges to the common terminal_growth rate (see that block).",
       "K_override": "Override initial capital stock K_0 (million EUR, chain-linked 2015) at the base year, set to the balanced-growth K/Y these structural parameters imply (3.19 x the 2000 GDP). The two measured anchors bracket it: the perpetual-inventory stock gives K/Y = 2.54, too low because UK investment was weak around 2000, and PWT 10.01 (RKNANPGBA666NRUG / RGDPNAGBA666NRUG, 2017 national prices) gives 4.44, its dwellings stock valued with PWT's low structures depreciation. Starting from the PIM stock forces a capital-deepening transition the data do not show: corr(y_ramsey, y_hp) falls from 0.79 to 0.36 and corr(c_ramsey, c_hp) from 0.63 to 0.11, and the first Ramsey pass fails InvShareVsData. Set to 0 to disable the override and use PIM."
     }
   },
@@ -59,6 +59,12 @@
     "line_search": "armijo_backtracking",
     "x_comment": "Stacked-time Newton (LBJ) perfect-foresight solver with terminal K/Y closure. The solve runs over the observed sample plus a terminal tail of 400 quarters (~100 years); Newton convergence requires ||F||_inf <= 1.0e-10 within 200 iterations."
   },
+  "terminal_growth": {
+    "enabled": true,
+    "g_A_terminal_annual": 0.005,
+    "rho_quarterly": 0.966,
+    "x_comment": "Forward TFP growth starts at tfp_growth_annual and converges quarter by quarter to g_A_terminal_annual, g_t = g_term + rho_quarterly * (g_(t-1) - g_term). All five countries share g_A_terminal_annual = 0.5% and rho_quarterly = 0.966, a half-life of 5 years. The in-sample rate is measured per country; the long run is a common assumption, because TFP growth decades ahead is unknown and convergence to a common rate is the neutral one. 0.5% is the conservative value: it implies long-run growth of output per hour of 0.75% a year (g_A / (1 - alpha_K)). The half-life keeps a catch-up rate from carrying far into the projection: it puts Poland's forward trend wage growth (2023q1-2059q4) at about 1.6% a year (measured 2026-11-09), close to the trend in vanilla SimPaths' wage equation (about 1.5% a year). The in-sample solve holds tfp_growth_annual through the last data quarter; the forward solve converges from the handoff quarter."
+  },
   "expenditure_shares": {
     "CY_base": 0.59737108483461221,
     "IY_base": 0.1673925836002858,
@@ -68,9 +74,9 @@
   "derived": {
     "beta_quarterly": 0.989846400767953,
     "delta_quarterly": 0.012741455098566168,
-    "tfp_growth_annual_terminal": 0.0051,
-    "KY_bgp_quarterly": 12.751734200033855,
-    "r_star_bgp_annual": 0.053594155196647009,
+    "tfp_growth_annual_terminal": 0.005,
+    "KY_bgp_quarterly": 12.779577951567607,
+    "r_star_bgp_annual": 0.053359632608890095,
     "Y_quarterly_base": 517038.78675022919
   }
 }

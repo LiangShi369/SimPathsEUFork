@@ -1,6 +1,6 @@
 # DSGE Policy Function Export for SimPaths
 
-**Generated:** 08-Nov-2026 18:00:05
+**Generated:** 09-Nov-2026 14:03:12
 **Model:** Macromodel_Poland_frozen
 
 ## 1. State-Space Representation
@@ -114,14 +114,14 @@ the population follows employment at the last projected ratio.
 
 | Index | Shock | Description | ρ | σ |
 |-------|-------|-------------|---|---|
-| 0 | `eps_a` | technology | 0.950 | 1.0683 |
-| 1 | `eps_r` | monetary policy | 0.800 | 0.7475 |
-| 2 | `eps_d` | demand/preference | 0.800 | 0.4994 |
-| 3 | `eps_p` | price-setting / cost-push | 0.000 | 2.2384 |
-| 4 | `eps_L` | labor force | 0.950 | 0.6466 |
+| 0 | `eps_a` | technology | 0.950 | 0.9887 |
+| 1 | `eps_r` | monetary policy | 0.800 | 0.7583 |
+| 2 | `eps_d` | demand/preference | 0.800 | 0.4448 |
+| 3 | `eps_p` | price-setting / cost-push | 0.000 | 2.0633 |
+| 4 | `eps_L` | labor force | 0.950 | 0.6687 |
 | 5 | `eps_sep` | separation | 0.800 | 0.1000 |
-| 6 | `eps_h` | hours worked | 0.800 | 0.4078 |
-| 7 | `eps_inv` | investment-specific | 0.850 | 2.8807 |
+| 6 | `eps_h` | hours worked | 0.800 | 0.4076 |
+| 7 | `eps_inv` | investment-specific | 0.850 | 2.8330 |
 
 ## 4. Java Sketch
 

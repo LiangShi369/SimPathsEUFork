@@ -170,7 +170,7 @@ public class RamseyRecursiveFeedbackTest {
         m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutral2025 * 1.02);
         double w2026After = meanWageAtQuarter(m, 4);
         double revisionPct = (w2026After / w2026Before - 1.0) * 100.0;
-        // Measured 2026-11-08 on the population-weighted planner: -0.558%.
+        // Measured 2026-11-09 on the population-weighted planner: -0.553%.
         // Capital dilution: +2% permanent labor -> wage dips by roughly alpha*2% (~0.5-0.7%),
         // partially offset within the year by investment. Generous band, strict sign.
         assertTrue(revisionPct < -0.10, "expected a wage dip, got " + revisionPct + "%");
@@ -189,10 +189,10 @@ public class RamseyRecursiveFeedbackTest {
         double revisionPct = (w2026After / w2026Before - 1.0) * 100.0;
         // With a transitory belief the future labor path is unchanged; only the (small)
         // extra investment out of one year's windfall moves next year's wage.
-        // The revision is +0.126%, measured 2026-11-08 on the population-weighted planner: a
+        // The revision is +0.132%, measured 2026-11-09 on the population-weighted planner: a
         // one-year worker surprise with the population on its projection changes output per
         // head for that year, which the planner partly saves. The persistent surprise of
-        // testPersistentPositiveSurpriseLowersNextYearWage revises the wage by -0.558%.
+        // testPersistentPositiveSurpriseLowersNextYearWage revises the wage by -0.553%.
         assertTrue(Math.abs(revisionPct) < 0.25,
                 "transitory belief should give near-zero wage revision, got " + revisionPct + "%");
     }
@@ -392,7 +392,7 @@ public class RamseyRecursiveFeedbackTest {
         m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN, 40.0 * 1.02);
 
         double revisionPct = (meanWageAtQuarter(m, 4) / w2026Before - 1.0) * 100.0;
-        // Measured 2026-11-08 on the population-weighted planner: -0.558%.
+        // Measured 2026-11-09 on the population-weighted planner: -0.553%.
         assertTrue(revisionPct < -0.10, "expected a wage dip, got " + revisionPct + "%");
         assertTrue(revisionPct > -1.20, "implausibly large dip: " + revisionPct + "%");
     }
@@ -495,7 +495,7 @@ public class RamseyRecursiveFeedbackTest {
         double before = meanWageAtQuarter(m, 12);
         m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN, 40.0, neutralP * 1.02);
         double after = meanWageAtQuarter(m, 4);
-        // Measured 2026-11-08: residual 5.2e-14.
+        // Measured 2026-11-09: residual 5.1e-12.
         assertTrue(Math.abs(after / before - 1.0) < 1e-6, "uniform population surprise moved the wage by " + (after / before - 1.0));
     }
 
@@ -508,7 +508,7 @@ public class RamseyRecursiveFeedbackTest {
         double before = meanWageAtQuarter(m, 12);
         m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN * 1.02, 40.0, neutralP);
         double revisionPct = (meanWageAtQuarter(m, 4) / before - 1.0) * 100.0;
-        // Measured 2026-11-08: -0.558%.
+        // Measured 2026-11-09: -0.553%.
         assertTrue(revisionPct < -0.10 && revisionPct > -1.20, "expected the dilution band, got " + revisionPct + "%");
     }
 
@@ -522,7 +522,7 @@ public class RamseyRecursiveFeedbackTest {
         double before = meanWageAtQuarter(m, 12);
         m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN * 1.02, 40.0, neutralP * 1.02);
         double revisionPct = (meanWageAtQuarter(m, 4) / before - 1.0) * 100.0;
-        // Measured 2026-11-08: -0.558%, the same as with the population on its projection.
+        // Measured 2026-11-09: -0.553%, the same as with the population on its projection.
         assertTrue(revisionPct < -0.10 && revisionPct > -1.20, "expected the dilution band, got " + revisionPct + "%");
     }
 

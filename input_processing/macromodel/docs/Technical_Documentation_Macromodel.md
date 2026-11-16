@@ -40,6 +40,7 @@ and the LaTeX model documentation `SimPaths_Macro_Model_Documentation.tex` in th
 | v20 | Nov 7, 2026 | Rewritten as a current-state reference; estimates, moments and IRFs are read from their sources (frozen model files, bundle, post-estimation output) instead of being copied here. |
 | v21 | Nov 7, 2026 | The wage SimPaths applies is the trend wage's level times the cycle's factor, $(1 + w^{trend}/100)\exp(w^{cycle}/100)$, instead of the sum of the two percentages, and the cycle is the DSGE's wage per hour $w - h$ instead of its wage per employee $w$ (contract 40). The `*_total` columns of `MacroPaths.csv` follow the same rule. |
 | v22 | Nov 8, 2026 | The planner's consumers are the resident population $P_t$: utility is weighted by $P_t$ and consumption is per head, $C_t = P_t c_t$, instead of employees and consumption per employee. Its workers $N_t$ are all persons in employment, employees and self-employed, with hours per person employed, in the data stage, the calibration, the DSGE observables `n` and `h` and the feedback (contract 16 closed). The data stage adds the resident population with census breaks spliced; in sample the planner's population is its HP trend, as employment is that of total employment, and after the sample end both grow with the SimPaths workbook; `demographic_P_{country}.csv` carries the trend and the workbook's growth, the bundle's population projection carries `time,N,P` and the reference CSV a column `P`, and beyond the projection the dependency ratio is frozen. SimPaths' population is fed back to the planner with its own level factor $\lambda_P$, latched with $\lambda$ (contracts 41-43; `p_ramsey`, `p_realized_gap` in `MacroPaths.csv`). |
+| v23 | Nov 9, 2026 | All five countries enable `terminal_growth` with a common long-run TFP growth of 0.5% and a common `rho_quarterly` of 0.966 (half-life 5 years); before, only Poland converged (half-life 11.5 years) and the others kept their in-sample rate for ever. Poland's in-sample TFP growth is 1.9% (was 1.5%) and its `K_override` the PWT capital-output ratio 2.21 (was 2.50); Germany's in-sample rate is 0.53% (was 0.5%) and it gains a `K_override` at its balanced-growth K/Y (3.19, instead of the perpetual-inventory 3.58). Both follow the rule $g_A = (1-\alpha)\,g_{Y/(Nh)}$ on total employment, which PR #40 had left at the employee-based values; Poland's output gap no longer drifts. All five countries re-estimated. |
 
 ---
 
@@ -216,6 +217,13 @@ depreciation) are set separately, in their own files.
 (0.99 when absent) and quarterly growth $(1+g_t)^{1/4}-1$. In the in-sample solve the convergence starts after
 the last data quarter; in the forward solve SimPaths uses (section 2.7) it starts at the handoff quarter, and a
 re-solve continues the same convergence phase. The balanced-growth target uses $g^{term}$.
+
+All five countries enable it with the same $g^{term}$ = 0.5% and $\rho_q$ = 0.966, a half-life of 5 years: the
+in-sample rate `tfp_growth_annual` is measured per country, by the rule $g_A = (1-\alpha)\,g_{Y/(Nh)}$ with
+$g_{Y/(Nh)}$ the growth of GDP per hour worked, unless the template's comment says why the rule value fits worse,
+while the long-run rate and the speed of convergence are a common assumption. The rule holds only for a trend
+that starts on its balanced path; where the perpetual-inventory capital stock is far from it, `K_override` sets
+$K_0$ near the balanced-growth $K/Y$ at the in-sample rate (Germany, Poland, UK).
 
 **Beyond the sample.** $N$ follows the growth of $L^{demo}$, chained at the last data quarter, for as long as
 the population projection runs; without a projection it continues at its trailing 20-quarter growth. After the

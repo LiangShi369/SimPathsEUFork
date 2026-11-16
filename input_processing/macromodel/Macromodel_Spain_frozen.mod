@@ -1,6 +1,6 @@
 // =========================================================================
 // FROZEN MODEL - AUTO-GENERATED
-// Generated: 2026-11-08 18:15:28
+// Generated: 2026-11-09 14:16:06
 // Source: Macromodel_Spain (estimation results)
 // DO NOT EDIT MANUALLY - regenerate with generate_frozen_model.m
 // =========================================================================
@@ -220,7 +220,7 @@ lambda_w = 0.70;
 // was absorbed almost entirely through job destruction rather than hours cuts.
 // So the hours channel is weaker and less persistent than in Germany.
 rho_h    = 0.80;    // hours persistence (as Poland, below Germany's 0.85)
-omega_h  = 0.393749;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point; ESTIMATED)
+omega_h  = 0.393810;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point; ESTIMATED)
 
 // ----- DIRECT LABOR FORCE -> WAGE EFFECT (CALIBRATED) -----
 psi_wL   = -0.05;   // direct L->w elasticity (negative: more L -> lower w)
@@ -244,7 +244,7 @@ delta_k  = 0.025;   // quarterly depreciation ~9.6% annual
                     // delta_k governs the cyclical capital law of motion only.
 rho_inv  = 0.85;    // investment persistence (same starting point)
 phi_inv_y = 0.3;    // investment sensitivity to output gap (structural floor)
-phi_inv_r = 0.107633;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
+phi_inv_r = 0.108322;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
 
 // =========================================================================
 // STEADY STATE LABOR MARKET (Spain, 2000q1-2025q1 sample)
@@ -426,16 +426,16 @@ end;
 //
 // These are STARTING values; Bayesian estimation will update them.
 shocks;
-    var eps_a;      stderr 0.6542;  // ESTIMATED    // technology
-    var eps_d;      stderr 0.4412;  // ESTIMATED    // demand: large boom-bust swings
+    var eps_a;      stderr 0.6544;  // ESTIMATED    // technology
+    var eps_d;      stderr 0.4409;  // ESTIMATED    // demand: large boom-bust swings
     var eps_r;      stderr 0.5352;  // ESTIMATED    // monetary: ECB, so as Germany (not Poland's 0.80)
     var eps_L;      stderr 0.5217;  // ESTIMATED    // labor force: huge migration swings both ways
                                     // (net inflows to 2008, net outflows 2011-2015)
     var eps_sep;    stderr 0.12;    // separation: dual labour market, high churn
     var eps_h;      stderr 0.4088;  // ESTIMATED    // hours: WEAKER than Germany - Spain adjusts on
                                     // the extensive margin, so less hours action
-    var eps_p;      stderr 1.4592;  // ESTIMATED    // cost-push: euro member, no FX pass-through
-    var eps_inv;    stderr 2.3908;  // ESTIMATED    // investment: the most volatile series in the
+    var eps_p;      stderr 1.4617;  // ESTIMATED    // cost-push: euro member, no FX pass-through
+    var eps_inv;    stderr 2.4190;  // ESTIMATED    // investment: the most volatile series in the
                                     // sample (construction collapse)
 end;
 

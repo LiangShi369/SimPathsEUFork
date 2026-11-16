@@ -1,6 +1,6 @@
 // =========================================================================
 // FROZEN MODEL - AUTO-GENERATED
-// Generated: 2026-11-08 18:05:33
+// Generated: 2026-11-09 14:07:33
 // Source: Macromodel_UK (estimation results)
 // DO NOT EDIT MANUALLY - regenerate with generate_frozen_model.m
 // =========================================================================
@@ -235,7 +235,7 @@ lambda_w = 0.60;
 // scheme. The 2020-21 Coronavirus Job Retention Scheme (furlough) was a one-off,
 // and its quarters are censored in the estimation data.
 rho_h    = 0.80;    // hours persistence (as Poland and Spain, below Germany/Sweden's 0.85)
-omega_h  = 0.326091;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point; ESTIMATED)
+omega_h  = 0.326054;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point; ESTIMATED)
 
 // ----- DIRECT LABOR FORCE -> WAGE EFFECT (CALIBRATED) -----
 psi_wL   = -0.05;   // direct L->w elasticity (negative: more L -> lower w)
@@ -260,7 +260,7 @@ delta_k  = 0.025;   // quarterly depreciation ~9.6% annual
                     // delta_k governs the cyclical capital law of motion only.
 rho_inv  = 0.85;    // investment persistence (same starting point)
 phi_inv_y = 0.3;    // investment sensitivity to output gap (structural floor)
-phi_inv_r = 0.054081;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
+phi_inv_r = 0.054197;  // ESTIMATED (posterior mode)    // investment sensitivity to interest rate
 
 // =========================================================================
 // STEADY STATE LABOR MARKET (UK, 2000q1-2025q1 sample)
@@ -450,8 +450,8 @@ shocks;
     var eps_L;      stderr 0.2517;  // ESTIMATED    // labor force: migration-driven swings
     var eps_sep;    stderr 0.10;    // separation: high turnover, flexible market
     var eps_h;      stderr 0.3894;  // ESTIMATED    // hours shock (no standing short-time work scheme)
-    var eps_p;      stderr 1.4869;  // ESTIMATED    // cost-push: floating GBP pass-through, energy
-    var eps_inv;    stderr 2.3969;  // ESTIMATED    // investment: volatile business investment
+    var eps_p;      stderr 1.4866;  // ESTIMATED    // cost-push: floating GBP pass-through, energy
+    var eps_inv;    stderr 2.3953;  // ESTIMATED    // investment: volatile business investment
 end;
 
 // =========================================================================

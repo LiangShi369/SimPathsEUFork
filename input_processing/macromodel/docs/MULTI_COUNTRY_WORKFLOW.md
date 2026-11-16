@@ -293,7 +293,11 @@ country_params/{Country}_growth_params.json
 
 Copy `Poland_growth_params.json` and set the structural inputs: `alpha_K`, `sigma`,
 `delta_annual`, `beta_annual`, `base_year`, `tfp_growth_annual`, the
-`terminal_growth` block, and the inflation target. `base_year` **must** equal the
+`terminal_growth` block, and the inflation target. Copy the `terminal_growth` block
+unchanged: every country converges to the same long-run TFP growth at the same speed.
+Set `tfp_growth_annual` by the rule in the templates' comments, and check where the
+perpetual-inventory capital stock starts against the balanced-growth $K/Y$ (`K_override`).
+`base_year` **must** equal the
 year of the first row of the levels CSV — `ramsey_trend.m` asserts this.
 
 ### Step 3: Create the DSGE country files
@@ -364,7 +368,7 @@ For all countries, verify the impact (t=0) responses in the exported bundle
 - h↑ → π↓ (marginal cost falls: the marginal product rises at once, the
   staggered wage only partly)
 
-All four patterns hold in the committed Poland and UK bundles (checked 2026-11-08 on
+All four patterns hold in the committed Poland and UK bundles (checked 2026-11-09 on
 period 0 of `irfs_eps_L.csv` and `irfs_eps_h.csv`).
 
 Remember that the exported matrices hold **raw `ghu`** entries: a one-standard-deviation
