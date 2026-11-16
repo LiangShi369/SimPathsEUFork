@@ -213,7 +213,7 @@ StataMP-64.exe /e do make_datasets.do UK
 | Country | Code | Estimated | Bundle shipped | Why not |
 |---|---|---|---|---|
 | Poland | PL | yes | yes | |
-| Germany | DE | yes | no | not exported into this repository; the last export predates the units contract (`simpaths_input_scale`), so re-export before any DE run |
+| Germany | DE | yes | no | not exported into this repository; the last export predates the units contract (`deviation_scale`), so re-export before any DE run |
 | Spain | ES | yes | no | SimPathsEU runs Spain with the macro layer off, but no bundle is exported. The tracked data and frozen model predate `input/ES/align_popProjections.xlsx` and extrapolate employment mechanically; the next `run_full_workflow('Spain')` reads the workbook and changes them |
 | Sweden | SE | yes | no | no `input/SE/align_popProjections.xlsx`, so employment is extrapolated mechanically and the bundle is refused; SimPathsEU has no Sweden inputs |
 | UK | UK | yes | yes | shipped, but SimPathsEU cannot run the UK yet (`Country` has no UK), so no simulation reads the bundle; `CommittedBundlesTest` and `BundleProvenanceTest` check it like Poland's. Data from the ONS and the OECD, as Eurostat has none after Brexit (`docs/MULTI_COUNTRY_WORKFLOW.md`) |

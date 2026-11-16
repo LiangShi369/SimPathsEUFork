@@ -94,7 +94,7 @@
   "eps_h":6,
   "eps_inv":7
 },
-  "simpaths_input_scale":100,
+  "deviation_scale":100,
   "state_idx_in_s":{
   "c":0,
   "R":1,

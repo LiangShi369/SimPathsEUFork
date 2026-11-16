@@ -23,19 +23,19 @@ import org.apache.log4j.Logger;
  *   <li>Inflation (π) is a STATE since V15 (iota_p indexation puts pi(-1) in the NKPC); DSGEState resolves the side from model_info.json (piIsState)</li>
  * </ul>
  *
- * <h3>Shock Input Conventions</h3>
- * <p>Different shocks use different input conventions:</p>
- * <ul>
- *   <li><b>SimPaths level inputs (eps_L, eps_h)</b>: PERCENT log-deviations from baseline
- *       (100 &times; ln ratio — the model's units, since it is estimated on 100&times;log-dev data).
- *       The DSGE model equations define L = eps_L and h = eps_h (with rho_L = rho_h = 0),
- *       so a 5% labor force increase is passed as eps_L &asymp; 4.879 (= 100 &times; ln 1.05).
- *       No further scaling is applied inside this class.</li>
- *   <li><b>Other shocks (eps_a, eps_r, eps_d, eps_p, eps_sep, eps_inv)</b>: Standard deviation units.
- *       A value of 1.0 represents a one-standard-deviation shock. These inputs are converted
- *       to raw Dynare innovations by multiplying by the estimated shock standard deviation
- *       before applying the policy matrices.</li>
- * </ul>
+ * <h3>Inputs</h3>
+ * <p>The DSGE takes no input from SimPaths. Its annual step
+ * ({@link #stepAnnual(DSGEShockScenario, int)}) receives the scenario's shocks only, all zero
+ * without a scenario, and hands SimPaths the cycle wage and inflation deviations.</p>
+ *
+ * <h3>Shock Input Convention</h3>
+ * <p>One rule for every shock, eps_L and eps_h included: an innovation in standard-deviation
+ * units, so 1.0 is a one-standard-deviation shock. Inputs are converted to raw Dynare
+ * innovations by multiplying by the shock's standard deviation before the policy matrices
+ * are applied. The labour force and hours follow their own AR(1) at the bundle's calibrated
+ * persistence, like every other exogenous process. The bundle declares its deviation units
+ * ({@code deviation_scale} = 100 in {@code model_info.json}), so the wage deviation is a
+ * percent.</p>
  *
  * <p>The model runs at quarterly frequency internally and provides methods for
  * annual aggregation when interfacing with SimPaths.</p>
@@ -46,6 +46,12 @@ import org.apache.log4j.Logger;
 public class DSGEModel {
 
     private static final Logger log = Logger.getLogger(DSGEModel.class);
+
+    /**
+     * The bundle's deviation units: the exported model is estimated on 100&times;log-deviation
+     * data, so its deviations, the cycle wage among them, are percent.
+     */
+    static final double PERCENT_PER_LOG_DEV = 100.0;
 
     /** Whether DSGE logging is enabled */
     private boolean logEnabled = false;
@@ -60,14 +66,6 @@ public class DSGEModel {
 
     /** Number of exogenous shocks */
     private int nExo;
-
-    // ========== Shock Indices (loaded from model_info.json) ==========
-
-    /** Labor force shock index (PRIMARY INTERFACE WITH SIMPATHS) */
-    private int idxEpsL;
-
-    /** Hours shock index */
-    private int idxEpsH;
 
     // ========== Variable Index Mapping ==========
 
@@ -217,7 +215,6 @@ public class DSGEModel {
             log.info("  Matrix Bs: " + nState + "×" + nExo);
             log.info("  Matrix C: " + nJump + "×" + nState);
             log.info("  Matrix D: " + nJump + "×" + nExo);
-            log.info("  eps_L index: " + idxEpsL + ", eps_h index: " + idxEpsH);
         }
     }
 
@@ -254,43 +251,36 @@ public class DSGEModel {
 
         // Extract shock indices. There is deliberately no default: the historical
         // fallbacks (eps_L=3, eps_h=6) belong to a superseded schema in which 3 was
-        // eps_L. In the current export 3 is eps_p, so defaulting would route SimPaths'
-        // labour-supply signal into the cost-push slot and scale it by sigma_p, with
-        // nothing in the logs to show for it. A bundle that cannot state its own shock
-        // layout must not load.
+        // eps_L. In the current export 3 is eps_p, so defaulting would route a scenario's
+        // shock into the wrong slot and scale it by the wrong sigma, with nothing in the
+        // logs to show for it. A bundle that cannot state its own shock layout must not load.
         Map<String, Integer> shockIdx = extractJsonIntMap(content, "shock_indices_java");
         if (shockIdx.isEmpty()) {
             throw new IllegalStateException(String.format(
                     "%s has no usable shock_indices_java map. The DSGE shock layout cannot "
                     + "be inferred; re-export the macro files.", jsonPath.getFileName()));
         }
-        for (String required : new String[] {"eps_L", "eps_h"}) {
-            if (!shockIdx.containsKey(required)) {
-                throw new IllegalStateException(String.format(
-                        "%s: shock_indices_java is missing '%s', which the SimPaths coupling "
-                        + "writes directly. Re-export the macro files.",
-                        jsonPath.getFileName(), required));
-            }
-        }
-        idxEpsL = shockIdx.get("eps_L");
-        idxEpsH = shockIdx.get("eps_h");
 
-        // The eps_L/eps_h channel is in PERCENT log-deviations only because the model
-        // is estimated on 100x-log-dev data. That fact lived in prose on both sides
-        // and was silently violated by ~100x once (pre-2026-08 attenuation bug). The
-        // bundle declares it since 2026-08-19; refuse one that does not, or that
-        // declares a scale different from what LaborSupplyAggregator applies.
-        double declaredScale = MacroJson.number(content, "simpaths_input_scale", 0.0);
-        if (declaredScale != LaborSupplyAggregator.PERCENT_PER_LOG_DEV) {
+        // The model is estimated on 100x-log-dev data, which is what makes its deviations,
+        // the cycle wage among them, percent. That fact lived in prose on both sides and was
+        // silently violated by ~100x once (pre-2026-08 attenuation bug). The bundle declares
+        // it as deviation_scale since 2026-11 (as simpaths_input_scale before, when the export
+        // gave the labour-force and hours shocks zero persistence and percent units); refuse
+        // a bundle that does not declare it, or that declares another scale.
+        double declaredScale = MacroJson.number(content, "deviation_scale", 0.0);
+        if (declaredScale != PERCENT_PER_LOG_DEV) {
             throw new IllegalStateException(String.format(
-                    "%s declares simpaths_input_scale=%s but this build converts labour "
-                    + "supply at x%.0f (LaborSupplyAggregator.PERCENT_PER_LOG_DEV). The "
-                    + "unit conventions have separated%s; re-export the macro files — "
-                    + "never rescale downstream.",
+                    "%s declares deviation_scale=%s but this build reads the model in "
+                    + "x%.0f log-deviation units (DSGEModel.PERCENT_PER_LOG_DEV). %s; "
+                    + "re-export the macro files — never rescale downstream.",
                     jsonPath.getFileName(),
                     declaredScale == 0.0 ? "nothing" : String.valueOf(declaredScale),
-                    LaborSupplyAggregator.PERCENT_PER_LOG_DEV,
-                    declaredScale == 0.0 ? " (field missing: bundle predates the units contract)" : ""));
+                    PERCENT_PER_LOG_DEV,
+                    declaredScale == 0.0
+                            ? "A missing deviation_scale means the bundle was exported before the "
+                              + "labour-force and hours shocks became ordinary shocks (2026-11), with "
+                              + "zero persistence and percent units for them"
+                            : "The unit conventions have separated"));
         }
 
         // Shock column order for validating policy_Bs / policy_D headers
@@ -452,21 +442,6 @@ public class DSGEModel {
             shockStdDev[i - 1] = parseField(csvPath, i, 1, parts[1]);
             shockRho[i - 1] = parseField(csvPath, i, 2, parts[2]);
         }
-
-        // SimPaths writes eps_L/eps_h as LEVEL deviations every quarter, so the
-        // frozen export must carry rho_L = rho_h = 0 (@#define for_simpaths_export).
-        // A bundle exported without that define accumulates the level inputs through
-        // an AR(1) — a compounding corruption of the SimPaths->DSGE channel with
-        // nothing in the logs. The rho column exists here so this side can refuse it.
-        for (int idx : new int[] {idxEpsL, idxEpsH}) {
-            if (shockRho[idx] != 0.0) {
-                throw new IllegalArgumentException(String.format(
-                        "%s declares rho=%.4f for %s, but SimPaths level inputs require rho=0. "
-                        + "The frozen model was exported without @#define for_simpaths_export = "
-                        + "true. Re-run generate_frozen_model + export_dynamic_for_simpaths.",
-                        csvPath.getFileName(), shockRho[idx], shockNames[idx]));
-            }
-        }
     }
 
     private double parseField(Path csvPath, int row, int col, String raw) {
@@ -551,23 +526,15 @@ public class DSGEModel {
      *     s_t = A  × s_{t-1} + Bs × ε_t    (state transition)
      *     y_t = C  × s_{t-1} + D  × ε_t    (jump variables)
      *
-     * <h3>Shock Input Conventions</h3>
-     * <p>Two different conventions are used depending on the shock source:</p>
-     * <ul>
-     *   <li><b>SimPaths level inputs (eps_L, eps_h)</b>: PERCENT log-deviations from baseline
-     *       (100 &times; ln ratio). Example: eps_L &asymp; 4.879 means labor force is 5% above baseline.
-     *       These are passed directly to the policy matrices WITHOUT further scaling,
-     *       because the DSGE model equations define L = eps_L (with rho_L = 0) and the
-     *       model's units are percent (it is estimated on 100&times;log-dev data).</li>
-    *   <li><b>Other shocks (eps_a, eps_r, eps_d, eps_p, eps_sep, eps_inv)</b>: Standard deviation units.
-    *       Example: eps_a = 1.0 means a 1-σ technology shock.
-    *       These are converted to raw innovations by multiplying by their std dev before
-    *       applying to the policy matrices.</li>
-     * </ul>
+     * <h3>Shock Input Convention</h3>
+     * <p>Every shock, eps_L and eps_h included, is an innovation in standard-deviation units:
+     * eps_a = 1.0 is a one-σ technology shock, eps_L = 1.0 a one-σ labour-force shock. Each is
+     * converted to a raw innovation by multiplying by its std dev before the policy matrices
+     * are applied. Persistence lives in the state transition: the labour force and hours
+     * follow their AR(1) at the bundle's calibrated rho_L and rho_h like every other
+     * exogenous process.</p>
      *
-     * @param shocks Array of shock values (length must match nExo).
-     *               eps_L, eps_h: percent log-deviations (e.g., 5.0 ≈ 5%)
-     *               Others: σ-units (e.g., 1.0 = 1 std dev)
+     * @param shocks Array of shock values (length must match nExo), in σ-units (1.0 = 1 std dev)
      * @return DSGEState containing all endogenous variables
      * @throws IllegalStateException If model not loaded
      * @throws RuntimeException If state becomes numerically unstable
@@ -586,24 +553,17 @@ public class DSGEModel {
         // Prepare shocks for policy function application.
         // The policy matrices (Bs, D) contain Dynare's RAW ghu derivatives mapping
         // unit-variance innovations to variable responses. To apply a shock specified
-        // in σ-units, we must convert to raw innovations by MULTIPLYING by σ.
-        // SimPaths-level inputs (eps_L, eps_h) arrive already in the model's PERCENT
-        // units (100×ln ratio, converted in LaborSupplyAggregator) — no scaling here.
+        // in σ-units, we must convert to raw innovations by MULTIPLYING by σ. One rule
+        // for every shock.
         //
         // Cross-validation: ghu(π, eps_d) × σ_d = 0.2704 × 0.3641 = 0.0984 = Dynare IRF(π, eps_d, t=0)
         double[] processedShocks = new double[nExo];
         for (int j = 0; j < nExo; j++) {
-            if (j == idxEpsL || j == idxEpsH) {
-                // SimPaths level inputs: pass percent log-deviation directly
-                processedShocks[j] = shocks[j];
+            double std = shockStdDev[j];
+            if (std > 0.0) {
+                processedShocks[j] = shocks[j] * std;
             } else {
-                // Other shocks: convert from σ-units to raw innovations (multiply by σ)
-                double std = shockStdDev[j];
-                if (std > 0.0) {
-                    processedShocks[j] = shocks[j] * std;
-                } else {
-                    processedShocks[j] = shocks[j];
-                }
+                processedShocks[j] = shocks[j];
             }
         }
 
@@ -646,94 +606,64 @@ public class DSGEModel {
     }
 
     /**
-     * Run 4 quarterly steps and return annual average deviations.
+     * Run four quarterly steps on the given shock vectors and return the annual average state.
+     * Records the quarterly paths if path recording is enabled.
      *
-     * <p>The shock represents a LEVEL deviation from baseline (not an innovation).
-     * SimPaths computes eps_L = 100 × ln(L_current / L_baseline) — the percent
-     * log-deviation of the labor force from baseline at this point in time.</p>
+     * <p>Row {@code q - 1} is the shock vector of quarter {@code q}; each shock enters in the
+     * quarter whose row sets it, and nothing is held across quarters, so a one-off innovation
+     * propagates through the state dynamics alone. The DSGE receives no input from SimPaths:
+     * these rows come from a {@link DSGEShockScenario} (see
+     * {@link #stepAnnual(DSGEShockScenario, int)}) or are zero.</p>
      *
-     * @param laborForceShock Labor force shock (eps_L) value — a level deviation
+     * @param shocksByQuarter four rows of length {@link #getNumShocks()}, in the units of
+     *                        {@link #stepQuarterly(double[])}; {@code null} means all zero
      * @return DSGEState with annual average deviations
+     * @throws IllegalArgumentException if the array is not 4 &times; {@code getNumShocks()}
      */
-    public DSGEState stepAnnual(double laborForceShock) {
-        return stepAnnual(laborForceShock, new double[nExo]);
-    }
-
-    /**
-     * Run 4 quarterly steps with full shock vector.
-     * Records quarterly paths if path recording is enabled.
-     *
-     * <p><b>IMPORTANT:</b> SimPaths shocks (eps_L, eps_h) represent LEVEL deviations from baseline,
-     * so they are applied to all 4 quarters to maintain the level throughout the year.
-    * Other shocks (for example eps_a, eps_r, eps_d, eps_p, eps_sep, eps_inv) are treated
-    * as innovations that enter only in Q1 and propagate via state dynamics in Q2-Q4.</p>
-     *
-     * @param laborForceShock Primary labor force shock (level deviation)
-     * @param otherShocks Additional shocks including eps_h (can be null or empty for zeros)
-     * @return DSGEState with annual average deviations
-     */
-    public DSGEState stepAnnual(double laborForceShock, double[] otherShocks) {
+    public DSGEState stepAnnual(double[][] shocksByQuarter) {
         checkLoaded();
 
-        final double[] shocks = new double[nExo];
-        if (otherShocks != null) {
-            System.arraycopy(otherShocks, 0, shocks, 0, Math.min(otherShocks.length, nExo));
-        }
-        shocks[idxEpsL] = laborForceShock;
-
-        return runFourQuarters(q -> {
-            if (q == 1) {
-                // Q1: all shocks, innovations included.
-                return shocks;
+        final double[][] rows = new double[4][];
+        if (shocksByQuarter == null) {
+            for (int q = 0; q < 4; q++) {
+                rows[q] = new double[nExo];
             }
-            // Q2-Q4: hold the SimPaths level deviations; the innovations were
-            // one-off and now propagate through the state dynamics.
-            double[] quarterShocks = new double[nExo];
-            quarterShocks[idxEpsL] = shocks[idxEpsL];
-            quarterShocks[idxEpsH] = shocks[idxEpsH];
-            return quarterShocks;
-        });
-    }
-
-    /**
-     * Run 4 quarterly steps with per-quarter exogenous scenario shocks.
-     *
-     * <p>This method supports counterfactual simulations where exogenous DSGE shocks
-     * (e.g., cost-push, technology, monetary) are specified for each quarter via a
-     * {@link DSGEShockScenario}. The scenario shocks are <b>additive</b> to the
-     * SimPaths-generated labor supply shocks (eps_L, eps_h).</p>
-     *
-     * <p>For each quarter:</p>
-     * <ul>
-     *   <li>SimPaths level shocks (eps_L, eps_h) are applied every quarter (level deviations)</li>
-     *   <li>Scenario shocks for that specific quarter are added on top</li>
-     *   <li>With no scenario, this matches {@link #stepAnnual(double, double[])}
-     *       only when its {@code otherShocks} are zero: stepAnnual applies non-SimPaths
-     *       shocks in Q1 alone, whereas a scenario declares them per quarter</li>
-     * </ul>
-     *
-     * @param laborForceShock SimPaths labor force shock (level deviation, applied every quarter)
-     * @param hoursShock      SimPaths hours shock (level deviation, applied every quarter)
-     * @param scenario        optional shock scenario (null = no exogenous shocks)
-     * @param year            simulation year (for scenario lookup)
-     * @return DSGEState with annual average deviations
-     */
-    public DSGEState stepAnnualWithScenario(double laborForceShock, double hoursShock,
-                                             DSGEShockScenario scenario, int year) {
-        checkLoaded();
-
-        return runFourQuarters(q -> {
-            double[] quarterShocks = new double[nExo];
-            quarterShocks[idxEpsL] = laborForceShock;
-            quarterShocks[idxEpsH] = hoursShock;
-            if (scenario != null) {
-                double[] scenarioShocks = scenario.getShocks(year, q);
-                for (int j = 0; j < nExo; j++) {
-                    quarterShocks[j] += scenarioShocks[j];
+        } else {
+            if (shocksByQuarter.length != 4) {
+                throw new IllegalArgumentException(String.format(
+                        "stepAnnual needs 4 quarterly shock vectors, got %d", shocksByQuarter.length));
+            }
+            for (int q = 0; q < 4; q++) {
+                if (shocksByQuarter[q] == null || shocksByQuarter[q].length != nExo) {
+                    throw new IllegalArgumentException(String.format(
+                            "stepAnnual: the shock vector of quarter %d must have %d elements, got %s",
+                            q + 1, nExo,
+                            shocksByQuarter[q] == null ? "null" : String.valueOf(shocksByQuarter[q].length)));
                 }
+                rows[q] = shocksByQuarter[q].clone();
             }
-            return quarterShocks;
-        });
+        }
+
+        return runFourQuarters(q -> rows[q - 1]);
+    }
+
+    /**
+     * Run four quarterly steps on a scenario's shocks for {@code year}: the shock vector of
+     * quarter {@code q} is {@code scenario.getShocks(year, q)}, zero where the scenario sets
+     * nothing. Scenario shocks are the only shocks the DSGE receives.
+     *
+     * @param scenario shock scenario, or {@code null} for all-zero shocks
+     * @param year     simulation year (for the scenario lookup)
+     * @return DSGEState with annual average deviations
+     */
+    public DSGEState stepAnnual(DSGEShockScenario scenario, int year) {
+        checkLoaded();
+
+        double[][] rows = new double[4][];
+        for (int q = 1; q <= 4; q++) {
+            rows[q - 1] = scenario != null ? scenario.getShocks(year, q) : new double[nExo];
+        }
+        return stepAnnual(rows);
     }
 
     /** Supplies the shock vector for quarter {@code q} (1-based). */
@@ -745,14 +675,8 @@ public class DSGEModel {
     /**
      * Advance four quarters and return the annual average state.
      *
-     * <p>The loop, the path recording, the accumulation and the averaging are
-     * identical for every annual step; only the per-quarter shock vector differs.
-     * {@link #stepAnnual(double, double[])} and
-     * {@link #stepAnnualWithScenario(double, double, DSGEShockScenario, int)} held
-     * separate copies of all of it and had already begun to drift apart
-     * stylistically (one indexed q=0..3, the other q=1..4). A divergence here would
-     * change the annual aggregation on one path only, which is not something any
-     * single-path test would catch.</p>
+     * <p>The loop, the path recording, the accumulation and the averaging live here
+     * once; {@link #stepAnnual(double[][])} only supplies the per-quarter shock vector.</p>
      */
     private DSGEState runFourQuarters(QuarterShocks shocksForQuarter) {
         double[] sumState = new double[nState];
@@ -856,16 +780,6 @@ public class DSGEModel {
 
     public int getNumShocks() {
         return nExo;
-    }
-
-    /** Get the shock index for eps_L (labor force shock). */
-    public int getIdxEpsL() {
-        return idxEpsL;
-    }
-
-    /** Get the shock index for eps_h (hours shock). */
-    public int getIdxEpsH() {
-        return idxEpsH;
     }
 
     /** Get the variable indices used for DSGEState construction. */

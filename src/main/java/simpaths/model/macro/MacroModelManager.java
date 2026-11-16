@@ -25,7 +25,6 @@ import simpaths.data.Parameters;
 import simpaths.model.BenefitUnit;
 import simpaths.model.Person;
 import simpaths.model.enums.Labour;
-import simpaths.model.enums.MacroFeedbackMargins;
 import simpaths.model.enums.UpratingCase;
 
 /**
@@ -137,19 +136,20 @@ public class MacroModelManager {
     private String ramseyScenario = "";
 
     /**
-     * Which realized labour-supply margins enter the yearly extended-path re-solve. Both by
-     * default: the labour input is N*h, so single-margin feedback gets the capital-dilution
-     * response wrong, in sign as well as size, whenever SimPaths moves the two margins in
-     * opposite directions. The single-margin modes exist to decompose the channel.
+     * The planner's belief about how much of a realized labour-supply surprise is permanent,
+     * for the employment gap (SimPaths' workers with positive hours against the planner's
+     * employees path) and the hours gap alike: 1 = permanent, 0 = current year only. The
+     * feedback itself is always on with a Ramsey layer, for both margins: the labour input is
+     * N*h, so feeding one margin alone gets the capital-dilution response wrong whenever
+     * SimPaths moves the two in opposite directions.
      */
-    private MacroFeedbackMargins ramseyFeedbackMargins = MacroFeedbackMargins.EMPLOYMENT_AND_HOURS;
-    /** Belief persistence of the realized headcount gap (SimPaths' workers with positive hours
-     *  against the planner's employees path): 1 = permanent, 0 = current year only. */
     private double ramseyFeedbackPersistence = 1.0;
-    /** Belief persistence of the realized hours gap. Separate from the headcount belief because
-     *  hours deviations in SimPaths come from labour-category switching and are more plausibly
-     *  transitory than headcount deviations. */
-    private double ramseyFeedbackHoursPersistence = 1.0;
+    /**
+     * The last year whose end-of-year feedback ran ({@link #applyRamseyRecursiveFeedback}).
+     * {@link #updateEquilibrium} refuses to advance the planner's trend into a year whose
+     * previous feedback is missing.
+     */
+    private int lastFeedbackYear = Integer.MIN_VALUE;
     /** SimPaths -> Ramsey level factor, latched in the first post-labour-market year. */
     private double ramseyFeedbackLambda = Double.NaN;
     /**
@@ -253,10 +253,6 @@ public class MacroModelManager {
     // ========== Diagnostic Summary Tracking ==========
 
     private int diagnosticsCount = 0;
-    private double epsLMin = Double.POSITIVE_INFINITY;
-    private double epsLMax = Double.NEGATIVE_INFINITY;
-    private double epsHMin = Double.POSITIVE_INFINITY;
-    private double epsHMax = Double.NEGATIVE_INFINITY;
     private double wageDevMin = Double.POSITIVE_INFINITY;
     private double wageDevMax = Double.NEGATIVE_INFINITY;
     private double inflDevMin = Double.POSITIVE_INFINITY;
@@ -265,8 +261,6 @@ public class MacroModelManager {
     private double outputDevMax = Double.NEGATIVE_INFINITY;
     private double employmentDevMin = Double.POSITIVE_INFINITY;
     private double employmentDevMax = Double.NEGATIVE_INFINITY;
-    private double epsLSum = 0.0;
-    private double epsHSum = 0.0;
     private double wageDevSum = 0.0;
     private double inflDevSum = 0.0;
     private double outputDevSum = 0.0;
@@ -355,63 +349,39 @@ public class MacroModelManager {
         }
 
         // Initialize on first call (year 1 = startYear)
-        if (!initialized) {
+        boolean firstCall = !initialized;
+        if (firstCall) {
             this.simulationStartYear = startYear;
             initialize(countryCode, persons);
+        }
 
-            if (!useDsge) {
-                runRamseyOnlyPass(year, persons);
-                if (logMacroState) {
-                    log.info(String.format(
-                            "Macro year %d: DSGE disabled (mm_useDSGE=false), Ramsey-only trend applied.",
-                            year));
-                }
-                return;
-            }
-            
-            // CRITICAL: Do NOT run DSGE *cycle* feedback in the first simulation year.
-            // The baseline L (extensive margin = persons with hours > 0) must be
-            // set AFTER the first labor market update, not before. The initial
-            // population's hours come from the input database and may differ
-            // significantly from what SimPaths' labor supply model assigns.
-            // Baseline will be set at the start of year 2 from the post-labor-
-            // market population.
-            //
-            // However, the Ramsey trend is a deterministic forward-solved path
-            // that does NOT depend on SimPaths feedback. Advance it now so that
-            // wage trends (and scenario effects like higher g_A) are visible
-            // immediately in year 1.
-            runBaselinePendingPass(year, persons, "first year");
-            return;
+        // The planner advances its trend for `year` on a path revised by the end-of-year
+        // feedback of `year - 1`; without it the trend would silently ignore a year of
+        // SimPaths' labour supply. The feedback of the start year is a no-op (no labour market).
+        boolean plannerSolved = useRamseyTrend && ramseyTrend != null && ramseyTrend.isSolved();
+        if (plannerSolved && year - 1 > simulationStartYear && lastFeedbackYear != year - 1) {
+            throw new IllegalStateException(String.format(
+                    "Macro year %d: the planner's end-of-year feedback for %d did not run "
+                    + "(MacroEndYearCapture must follow DSGEMacroUpdate every year). "
+                    + "Refusing to advance the trend on a path that ignores %d.",
+                    year, year - 1, year - 1));
         }
 
         if (!useDsge) {
             runRamseyOnlyPass(year, persons);
+            if (firstCall && logMacroState) {
+                log.info(String.format(
+                        "Macro year %d: DSGE disabled (mm_useDSGE=false), Ramsey-only trend applied.",
+                        year));
+            }
             return;
         }
 
-        // Strict timing rule: baseline must be latched after labor market update.
-        // If it is still missing here, the DSGE cycle cannot run — but the Ramsey
-        // trend is a deterministic forward-solved path that does not depend on
-        // SimPaths feedback, so emit a Ramsey-only row (cycle = 0) for this year.
-        // Without this, MacroPaths.csv would silently miss the year and every
-        // cross-run levels comparison would be off by one year of trend growth.
-        if (!laborSupplyAggregator.isBaselineSet()) {
-            runBaselinePendingPass(year, persons, "baseline pending");
-            return;
-        }
-
-        // Reset counters for this year
+        // The DSGE takes no input from SimPaths, so it runs the same annual step on the
+        // scenario's shocks in every year, the start year included. The trend is the
+        // planner's path, which is deterministic within the year.
         resetCounters();
-        
-        // Advance Ramsey trend model (once per year, before DSGE computation)
-        if (useRamseyTrend && ramseyTrend != null && ramseyTrend.isSolved()) {
-            advanceRamseyTrend();
-        }
-
-        // Dynamic DSGE: single pass, state evolves forward.
-        // Labor market is not updated internally in dynamic-only mode.
-        runDynamicSinglePass(year, persons);
+        runDsgePass(year, persons);
     }
     
     /**
@@ -428,82 +398,42 @@ public class MacroModelManager {
     }
 
     /**
-     * Log labor supply diagnostics after the labor market update.
+     * Latch the start-year anchors of the level diagnostics from the post-labour-market
+     * population of the first year with a labour market.
      *
-     * <p>Includes total wage decomposition and aggregate labor supply
-     * relative to baseline to verify wage trend pass-through.</p>
-     */
-    public void logLaborSupplyDiagnostics(int year, Set<Person> persons, String phaseLabel) {
-        if ((!enabled && !recorderOnlyMode) || !logMacroState || laborSupplyAggregator == null) {
-            return;
-        }
-        
-        // Skip if baseline not yet set (year 1 — baseline deferred to after labor market)
-        if (!laborSupplyAggregator.isBaselineSet()) {
-            return;
-        }
-
-        // Read-only. The shock state (rolling baseline, the snapshot roll after the
-        // startYear+1 latch, the last aggregates) belongs to the yearly macro update alone.
-        // Until 2026-10-20 this called aggregate(), which consumed the snapshot roll right
-        // after the latch and reopened the mixed-snapshot shock in startYear+2.
-        var aggregates = laborSupplyAggregator.computeRawAggregates(persons);
-        double baselineL = laborSupplyAggregator.getBaselineL();
-        double baselineH = laborSupplyAggregator.getBaselineH();
-        double currentL = aggregates.laborForce();
-        double currentH = aggregates.avgHoursPerWorker();
-
-        double lPct = (currentL / baselineL - 1.0) * 100.0;
-        double hPct = (currentH / baselineH - 1.0) * 100.0;
-        double rawLogDevL = laborSupplyAggregator.computeLogDeviation(currentL, baselineL);
-        double rawLogDevH = laborSupplyAggregator.computeLogDeviation(currentH, baselineH);
-
-        double wageCycle = wageDeviation - capitalDeepeningWageAdjustment;
-
-        log.info(String.format(
-            "DSGE %s (year %d): L=%.0f (%+.3f%% vs base), h=%.2f (%+.3f%% vs base), "
-                + "raw log-dev L=%+.4f, h=%+.4f (not the shock: no projection term, no snapshot roll), "
-                + "wage_total=%+.3f%% (cycle=%+.3f%% + trend=%+.3f%%)",
-            phaseLabel, year, currentL, lPct, currentH, hPct,
-            rawLogDevL, rawLogDevH, wageDeviation, wageCycle, capitalDeepeningWageAdjustment
-        ));
-    }
-
-    /**
-     * Latch labor-supply baseline from the current post-labor-market population state.
-     *
-     * <p>This is intended to be called from SimPathsModel immediately after the
-     * first labor market update in the first simulation year, so baseline L/h is
-     * anchored on model-assigned hours rather than database-initialized hours.</p>
+     * <p>Called from SimPathsModel right after every labour-market update; only the first
+     * call latches, so L/h are anchored on model-assigned hours rather than the input
+     * database's. The latch also opens the gate of {@code participation_rate},
+     * {@code workers_over_atRiskPool} and the category diagnostics.</p>
      *
      * @param year Current simulation year (for logging only)
      * @param persons Current person set after labor market update
-     * @return true if baseline was latched by this call, false otherwise
+     * @return true if the anchors were latched by this call, false otherwise
      */
-    public boolean latchBaselineFromPostLaborMarket(int year, Set<Person> persons) {
+    public boolean latchStartYearAnchorsPostLabourMarket(int year, Set<Person> persons) {
         if ((!enabled && !recorderOnlyMode) || !initialized || laborSupplyAggregator == null) {
             return false;
         }
-        if (laborSupplyAggregator.isBaselineSet()) {
+        if (laborSupplyAggregator.isStartYearLatched()) {
             return false;
         }
 
-        laborSupplyAggregator.computeAndSetBaseline(persons);
+        laborSupplyAggregator.latchStartYearAnchors(persons);
         if (logMacroState) {
             log.info(String.format(
-                "DSGE baseline latched post-labor-market (year %d): L=%.0f workers with positive hours, h=%.1f hours/week",
-                year, laborSupplyAggregator.getBaselineL(),
-                laborSupplyAggregator.getBaselineH()));
+                "Start-year anchors latched post-labour-market (year %d): L=%.0f workers with positive hours, h=%.1f hours/week",
+                year, laborSupplyAggregator.getStartYearL(),
+                laborSupplyAggregator.getStartYearH()));
         }
         return true;
     }
 
     /**
-     * Expose whether labor-supply baseline has been latched.
+     * Whether the start-year anchors have been latched post-labour-market.
      * Intended for diagnostics and integration tests.
      */
-    public boolean isLaborSupplyBaselineSet() {
-        return laborSupplyAggregator != null && laborSupplyAggregator.isBaselineSet();
+    public boolean isStartYearLatched() {
+        return laborSupplyAggregator != null && laborSupplyAggregator.isStartYearLatched();
     }
 
     /**
@@ -521,12 +451,9 @@ public class MacroModelManager {
      * the same population the alignment contract aligns to the external
      * projection.</p>
      *
-     * <p>Read-only with respect to the rolling baseline ({@code lastL},
-     * {@code lastH}, {@code baselineL}, {@code baselineH}): uses
-     * {@link LaborSupplyAggregator#computeRawAggregates} so {@code eps_L},
-     * {@code eps_h}, {@code advanceBaseline}, the DSGE state, and the Ramsey
-     * trend columns are unaffected. Only the SimPaths-aggregated level columns
-     * are overwritten.</p>
+     * <p>Read-only: uses {@link LaborSupplyAggregator#computeRawAggregates}, so
+     * the DSGE state and the Ramsey trend columns are unaffected. Only the
+     * SimPaths-aggregated level columns are overwritten.</p>
      *
      * <p>To keep the row internally consistent, all SimPaths-aggregated
      * columns that depend on the population snapshot are re-emitted together:
@@ -603,7 +530,7 @@ public class MacroModelManager {
         // anchor. Per-person wages do not move between the DSGE step and
         // alignment; only the pool composition changes, so a mid-run re-anchor
         // is impossible by construction here (startYearAtRiskWage was latched
-        // at the first call from runDynamicSinglePass / runRecorderOnlyPass).
+        // at the first call from runDsgePass / runRamseyOnlyPass / runRecorderOnlyPass).
         Double wageRealized = computeWageRealizedPostAlignment(persons);
         if (wageRealized != null) {
             m.put("wage_realized", wageRealized);
@@ -674,9 +601,9 @@ public class MacroModelManager {
             laborSupplyAggregator.setLogEnabled(logMacroState);
             // Eagerly latch labour-market-invariant demographic anchors (TotalPop,
             // WAP, AtRisk) from the year-1 population so the demographic indices
-            // are emitted from the first simulated year. The L/h baseline stays
-            // post-labour-market (latchBaselineFromPostLaborMarket) for eps_L /
-            // capital-deepening correctness.
+            // are emitted from the first simulated year. The L/h anchors stay
+            // post-labour-market (latchStartYearAnchorsPostLabourMarket), because
+            // the input database's hours differ from model-assigned hours.
             laborSupplyAggregator.latchDemographicAnchors(persons);
 
             if (!useDsge) {
@@ -717,12 +644,6 @@ public class MacroModelManager {
                 log.info("Dynamic DSGE model loaded from: " + macroModelPath);
             }
 
-            // NOTE: Baseline is NOT set here. It is deferred to the second call
-            // to updateEquilibrium() (year 2), after the labor market has run once.
-            // This avoids measuring L from database-loaded hours, which differ from
-            // what SimPaths' labor supply model assigns.
-            laborSupplyAggregator.setLogEnabled(logMacroState);
-            
             // Load exogenous shock scenario if configured
             if (dsgeShockScenario != null) dsgeShockScenario = dsgeShockScenario.trim();
             if (dsgeShockScenario != null && !dsgeShockScenario.isEmpty()) {
@@ -748,9 +669,8 @@ public class MacroModelManager {
                 validateRamseyFeedbackConfig();
                 requireRamseyTrendSolved();
             } else {
-                // No trend layer, but the labour shock is still measured against the
-                // projection (projectedLaborGrowthPct); the bundle carries it, so load it.
-                loadProjectionForLaborShock(macroModelPath);
+                // No planner, but the start year must still be the bundle's handoff quarter.
+                validateHandoffForDsgeOnly(macroModelPath);
             }
 
             wageDeviation = 0.0;
@@ -759,14 +679,6 @@ public class MacroModelManager {
             initialized = true;
             trendOnlyPathRecorder = null;
 
-            if (logMacroState) {
-                logNormalizedResponseComparison();
-                // Clear any path data recorded during diagnostic comparison (year-0 artifacts)
-                if (dynamicDsgeModel != null && dynamicDsgeModel.getPathRecorder() != null) {
-                    dynamicDsgeModel.getPathRecorder().clear();
-                }
-            }
-            
         } catch (IOException e) {
             String msg = String.format(
                 "Failed to read DSGE model files from %s: %s",
@@ -1037,34 +949,16 @@ public class MacroModelManager {
     }
 
     /**
-     * Warns about the feedback combined with a DSGE mode (DSGE's eps_L channel and the Ramsey N
-     * revision overlap only while the cycle decays back to the trend), warns that the feedback is
-     * inert without the Ramsey layer, and rejects out-of-range persistence values. Called both
-     * before {@link #initializeRamseyTrend(String)} (catches bad persistence values before loading
-     * any files) and after it.
+     * Rejects an out-of-range feedback persistence when the Ramsey layer runs; without it the
+     * feedback has no path to re-solve and the persistence is never read. Called both before
+     * {@link #initializeRamseyTrend(String)} (catches a bad value before loading any files) and
+     * after it.
      */
     void validateRamseyFeedbackConfig() {
-        if (!ramseyFeedbackMargins.isOn()) return;
-        String margins = "mm_ramseyFeedbackMargins=" + ramseyFeedbackMargins.name().toLowerCase();
-        if (useDsge) log.warn(
-                margins + " with a DSGE mode: the eps_L channel responds to the"
-                + " year-over-year change in labour supply, the Ramsey re-solve to the cumulative level"
-                + " gap against the projection, so the two overlap only while the cycle decays back to"
-                + " the trend. Consider mm_ramseyFeedbackPersistence < 1 so that labour movements the"
-                + " DSGE already treats as cyclical are not extrapolated as permanent shifts.");
-        if (!useRamseyTrend) {
-            // Inert rather than fatal: the margins default to on, so a deliberate
-            // `mm_macroModel: dsge` run must not be required to switch them off by hand.
-            log.warn(margins + " is inert: mm_macroModel does not run the Ramsey trend layer,"
-                    + " so there is no trend path to re-solve.");
-            return;
-        }
+        if (!useRamseyTrend) return;
         if (!(ramseyFeedbackPersistence >= 0.0 && ramseyFeedbackPersistence <= 1.0))
             throw new IllegalStateException(
                 "mm_ramseyFeedbackPersistence must be in [0,1], got " + ramseyFeedbackPersistence);
-        if (!(ramseyFeedbackHoursPersistence >= 0.0 && ramseyFeedbackHoursPersistence <= 1.0))
-            throw new IllegalStateException(
-                "mm_ramseyFeedbackHoursPersistence must be in [0,1], got " + ramseyFeedbackHoursPersistence);
     }
 
     /**
@@ -1224,15 +1118,10 @@ public class MacroModelManager {
 
     /**
      * As {@link #applyRamseyFeedbackWithRealized(int, double)}, additionally feeding realized
-     * hours per worker into the planner's hours path when {@link #ramseyFeedbackMargins}
-     * selects it. The Ramsey labor input is N*h, so an x% hours gap dilutes capital exactly as
-     * an x% headcount gap does. Pass a non-finite or non-positive {@code realizedHours} to
-     * leave hours inert.
-     *
-     * <p>Both gaps are measured in every mode; the mode decides which of them is applied to the
-     * path handed to the re-solve. Measuring the unapplied gap costs nothing and keeps
-     * {@code n_realized_gap} and {@code h_realized_gap} populated as diagnostics whichever
-     * margin is being fed back.</p>
+     * hours per worker into the planner's hours path, with the same persistence
+     * {@link #ramseyFeedbackPersistence} as the headcount gap. The Ramsey labor input is N*h, so
+     * an x% hours gap dilutes capital exactly as an x% headcount gap does. Pass a non-finite or
+     * non-positive {@code realizedHours} to leave hours inert.
      *
      * <p><b>The two gaps use different references, deliberately.</b> The headcount gap is
      * measured against the planner's projected N, which is legitimate because that projection
@@ -1253,7 +1142,6 @@ public class MacroModelManager {
      * the population projection is the reference for employment.</p>
      */
     void applyRamseyFeedbackWithRealized(int year, double realizedLaborForce, double realizedHours) {
-        if (!ramseyFeedbackMargins.isOn()) return;
         if (ramseyTrend == null || !ramseyTrend.isSolved() || ramseyProjN == null) return;
         if (year <= simulationStartYear) return; // no labour market in the start year
 
@@ -1290,21 +1178,17 @@ public class MacroModelManager {
             return;                                     // delta == 1 by construction
         }
 
-        // Measured in every mode; applied only where the mode says so.
         boolean hoursMeasurable = hoursUsable && !Double.isNaN(ramseyFeedbackHoursBase)
                 && ramseyFeedbackHoursBase > 0.0;
         double delta = ramseyFeedbackLambda * realizedLaborForce / assumedMeanN;
         double deltaH = hoursMeasurable ? realizedHours / ramseyFeedbackHoursBase : 1.0;
-        boolean applyEmployment = ramseyFeedbackMargins.feedsEmployment();
-        boolean applyHours = ramseyFeedbackMargins.feedsHours() && hoursMeasurable;
         int qYearCur = 4 * (year - ramseyQuarterZeroYear);  // offset of `year` in the CURRENT solved model
         double wOldNext = meanWageAtQuarterOrNaN(qYearCur + 4);
 
-        double[] nSlice = applyEmployment
-                ? buildRevisedLaborSlice(ramseyProjN, calQ, delta, ramseyFeedbackPersistence)
-                : Arrays.copyOfRange(ramseyProjN, calQ, ramseyProjLen);
-        double[] hSlice = applyHours
-                ? buildRevisedLaborSlice(ramseyProjH, calQ, deltaH, ramseyFeedbackHoursPersistence)
+        // Both margins, one persistence.
+        double[] nSlice = buildRevisedLaborSlice(ramseyProjN, calQ, delta, ramseyFeedbackPersistence);
+        double[] hSlice = hoursMeasurable
+                ? buildRevisedLaborSlice(ramseyProjH, calQ, deltaH, ramseyFeedbackPersistence)
                 : Arrays.copyOfRange(ramseyProjH, calQ, ramseyProjLen);
         double[] gYSlice = Arrays.copyOfRange(ramseyProjGY, calQ, ramseyProjLen);
         double[] nxSlice = Arrays.copyOfRange(ramseyProjNXY, calQ, ramseyProjLen);
@@ -1327,8 +1211,8 @@ public class MacroModelManager {
                 hoursMeasurable ? (deltaH - 1.0) * 100.0 : Double.NaN, revisionPct);
         if (logMacroState) {
             log.info(String.format(
-                    "Ramsey feedback %d (%s): delta=%.4f%%, delta_h=%.4f%%, next-year trend wage revised by %.4f%%.",
-                    year, ramseyFeedbackMargins.name().toLowerCase(),
+                    "Ramsey feedback %d (rho=%.3f): delta=%.4f%%, delta_h=%.4f%%, next-year trend wage revised by %.4f%%.",
+                    year, ramseyFeedbackPersistence,
                     (delta - 1.0) * 100.0, (deltaH - 1.0) * 100.0, revisionPct));
         }
     }
@@ -1349,96 +1233,30 @@ public class MacroModelManager {
     }
 
     /**
-     * {@code mm_macroModel: dsge}: no Ramsey trend is solved, but the labour shock still needs
-     * the population projection ({@link #projectedLaborGrowthPct}). Finds the bundle's files
-     * exactly as {@link #initializeRamseyTrend} does (country tag from {@code growth_params_*.json},
-     * handoff quarter from {@code growth_terminal_state.json}, projection located by DATE), and
-     * retains the projection from the handoff quarter on as {@code ramseyProjN}. Fails loudly
-     * when any of them is missing: the bundle carries the projection, nothing is re-derived here.
+     * {@code mm_macroModel: dsge}: no planner is loaded, but the simulation start year must
+     * still be the bundle's handoff quarter, which {@code growth_terminal_state.json} declares.
+     * Fails when that file is missing or declares another quarter.
      */
-    private void loadProjectionForLaborShock(String macroModelPath) {
-        File macroDir = new File(macroModelPath);
-        File[] growthParamFiles = macroDir.listFiles(
-                (dir, name) -> name.startsWith("growth_params_") && name.endsWith(".json"));
-        if (growthParamFiles == null || growthParamFiles.length == 0) {
-            throw new IllegalStateException("DSGE labour shock: no growth_params_*.json found in " + macroModelPath
-                    + "; it names the country whose population projection the shock is measured against.");
-        }
-        Arrays.sort(growthParamFiles, Comparator.comparing(File::getName));
-        String fileName = growthParamFiles[0].getName();
-        String countryTag = fileName.substring("growth_params_".length(), fileName.length() - ".json".length());
-        Path paramsPath = growthParamFiles[0].toPath();
-        Path terminalPath = paramsPath.resolveSibling("growth_terminal_state.json");
-        Path popProjPath = paramsPath.resolveSibling("population_projection_" + countryTag + ".csv");
-        if (!terminalPath.toFile().exists()) {
-            throw new IllegalStateException("DSGE labour shock: growth_terminal_state.json not found in " + macroModelPath
-                    + "; it declares the handoff quarter the projection is aligned on.");
-        }
-        if (!popProjPath.toFile().exists()) {
+    private void validateHandoffForDsgeOnly(String macroModelPath) throws IOException {
+        Path terminalPath = Path.of(macroModelPath, "growth_terminal_state.json");
+        if (!Files.exists(terminalPath)) {
             throw new IllegalStateException(String.format(
-                    "DSGE labour shock for %s requires %s, which is missing from %s. The shock is measured "
-                    + "against the projected labour input; re-export the macro files.",
-                    countryTag, popProjPath.getFileName(), popProjPath.getParent()));
+                    "DSGE-only mode: %s not found in %s; it declares the handoff quarter the simulation "
+                    + "start year must match. Re-export the macro files.",
+                    terminalPath.getFileName(), macroModelPath));
         }
-        PopulationProjectionData popProjection;
-        try {
-            validateRamseyHandoffTime(terminalPath);
-            popProjection = loadPopulationProjection(popProjPath);
-        } catch (IOException e) {
-            throw new IllegalStateException(String.format(
-                    "DSGE labour shock for %s could not read the projection: %s", countryTag, e.getMessage()), e);
-        }
-        int startIdx = indexOfHandoffQuarter(popProjection.times(), popProjPath, null);
-        ramseyProjN = Arrays.copyOfRange(popProjection.n(), startIdx, popProjection.n().length);
-        ramseyProjLen = ramseyProjN.length;
-        if (logMacroState) {
-            log.info(String.format(
-                    "Population projection loaded for the DSGE labour shock: %d quarters of %s from the handoff.",
-                    ramseyProjLen, popProjPath.getFileName()));
-        }
+        validateRamseyHandoffTime(terminalPath);
     }
 
     /**
-     * The projection's own growth of the labour input from {@code year - 1} to {@code year}, as
-     * a percent log change of the annual means: {@code 100 ln(meanN(year) / meanN(year - 1))}.
-     *
-     * <p>This is what the DSGE's labour-force shock is measured against
-     * ({@link LaborSupplyAggregator#aggregate(Set, double)}): the DSGE was estimated on the
-     * labour force net of its demographic trend, and the Ramsey layer already prices the
-     * projected decline, so only the deviation from the projection is a shock. The projection
-     * is the retained original one ({@code ramseyProjN}), never a fed-back revision, so the
-     * reference does not drift with the feedback.</p>
-     *
-     * @throws IllegalStateException if no projection is loaded or {@code year} lies outside it;
-     *                               the bundle carries the projection and a run without it must fail
+     * MacroEndYearCapture hook: the realized post-alignment workers and hours -> extended-path
+     * re-solve. Runs whenever the manager is enabled and the planner is solved, and records the
+     * year for the sequencing check in {@link #updateEquilibrium}.
      */
-    double projectedLaborGrowthPct(int year) {
-        if (ramseyProjN == null || ramseyProjLen == 0) {
-            throw new IllegalStateException(
-                    "The DSGE labour shock needs the population projection to measure against, but none is loaded. "
-                    + "population_projection_{COUNTRY}.csv must be in the MacroModel folder for every DSGE mode.");
-        }
-        int qPrev = 4 * (year - 1 - simulationStartYear);
-        int qCur = qPrev + 4;
-        if (qPrev < 0 || qCur + 4 > ramseyProjLen) {
-            throw new IllegalStateException(String.format(
-                    "The population projection does not cover %d and %d (quarters %d..%d of %d from the handoff); "
-                    + "the DSGE labour shock cannot be measured against it.",
-                    year - 1, year, qPrev, qCur + 3, ramseyProjLen));
-        }
-        double meanPrev = 0.0;
-        double meanCur = 0.0;
-        for (int j = 0; j < 4; j++) {
-            meanPrev += ramseyProjN[qPrev + j];
-            meanCur += ramseyProjN[qCur + j];
-        }
-        return 100.0 * Math.log(meanCur / meanPrev);
-    }
-
-    /** MacroEndYearCapture hook: realized post-alignment employment -> extended-path re-solve. */
     public void applyRamseyRecursiveFeedback(int year, Set<Person> persons) {
-        if (!ramseyFeedbackMargins.isOn() || !enabled) return;
-        if (laborSupplyAggregator == null) return;
+        if (!enabled || laborSupplyAggregator == null) return;
+        if (!(useRamseyTrend && ramseyTrend != null && ramseyTrend.isSolved())) return;
+        lastFeedbackYear = year;
         var aggregates = laborSupplyAggregator.computeRawAggregates(persons);
         applyRamseyFeedbackWithRealized(year, aggregates.laborForce(), aggregates.avgHoursPerWorker());
     }
@@ -1782,150 +1600,57 @@ public class MacroModelManager {
     }
     
     /**
-     * Run dynamic DSGE single-pass (state-space evolution).
-     * 
-     * <p>For dynamic integration:</p>
-     * <ol>
-     *   <li>Aggregate current labor supply into shocks (eps_L, eps_h)</li>
-     *   <li>Step the dynamic DSGE forward (4 quarterly steps, returns annual average)</li>
-     *   <li>State carries forward to next year</li>
-     * </ol>
-     * 
-     * <p>NO iteration within year - that would destroy the dynamic state information.</p>
+     * The DSGE pass of one year (modes {@code dsge} and {@code ramsey_dsge}), identical in every
+     * year from the start year on.
+     *
+     * <p>The DSGE takes no input from SimPaths: its annual step receives the scenario's shocks
+     * for {@code year} only (all zero without a scenario), so without a scenario the cycle wage is
+     * zero and a Ramsey+DSGE run has the Ramsey-only wage. SimPaths' labour supply reaches the
+     * macro side through the planner's end-of-year feedback alone
+     * ({@link #applyRamseyRecursiveFeedback}).</p>
+     *
+     * <p>In order: the trend (the planner's path advanced one year, or zero without a planner);
+     * the level diagnostics for MacroPaths.csv; the DSGE step; wage = cycle + trend; the wage
+     * update before the labour market; the realised-wage index; logging and diagnostics.</p>
      */
-    /**
-     * Run a year in which the SimPaths labour-supply baseline is not yet latched.
-     *
-     * <p>The baseline L/h must be latched AFTER the first labour-market update, so
-     * eps_L/eps_h cannot be measured in {@code startYear} (and in {@code startYear+1}
-     * until the latch happens). That is a limitation of the <em>feedback</em> channel
-     * only. The DSGE itself is a deterministic state-space system, and scenario
-     * shocks (energy, monetary, demand) are exogenous — they do not need the
-     * baseline. Setting eps_L = eps_h = 0 here is not a fudge: in the baseline year
-     * the labour deviation from baseline is zero by construction.</p>
-     *
-     * <p>Previously these years returned before the shock scenario was ever
-     * consulted, so a scenario declared from {@code startYear} silently lost its
-     * first eight quarters — an "energy shock from 2023" actually began in 2025 at
-     * its already-decayed magnitude, with nothing in the logs to say so.</p>
-     *
-     * <p>Stepping the DSGE with all-zero shocks from a zero state leaves it at zero,
-     * so baseline runs are numerically unchanged; what changes is that the year is
-     * recorded through the DSGE path (which also closes the year-gap that appeared
-     * when the Ramsey trend was disabled) and that scenario shocks land in the year
-     * they declare.</p>
-     *
-     * <p>The rolling baseline is deliberately NOT advanced here: it is latched from
-     * the post-labour-market state by the normal schedule.</p>
-     */
-    private void runBaselinePendingPass(int year, Set<Person> persons, String reason) {
-        boolean ramseyActive = useRamseyTrend && ramseyTrend != null && ramseyTrend.isSolved();
-        if (ramseyActive) {
+    private void runDsgePass(int year, Set<Person> persons) {
+        if (useRamseyTrend && ramseyTrend != null && ramseyTrend.isSolved()) {
             advanceRamseyTrend();
         } else {
             computeCapitalDeepeningTrend();
         }
 
+        // Level diagnostics for MacroPaths.csv only; nothing here enters the DSGE.
+        LaborSupplyAggregator.LaborSupplyAggregates aggregates =
+                laborSupplyAggregator.computeRawAggregates(persons);
+        populateDemographicIndices(aggregates);
+        populateLabourCategoryMetrics(aggregates);
+        logLabourCategoryDistribution(year, aggregates);
+
+        // Year and trends on the recorder before the step, so all four quarterly records carry them.
         dynamicDsgeModel.setCurrentYear(year);
         MacroPathRecorder recorder = dynamicDsgeModel.getPathRecorder();
         if (recorder != null) {
             recorder.setCurrentTrends(currentRamseyTrends);
         }
 
-        boolean scenarioApplied = shockScenario != null && shockScenario.hasShocksForYear(year);
-        DSGEState annualState;
-        if (scenarioApplied) {
-            // Zero feedback, full scenario: the shock happens in the year it declares.
-            annualState = dynamicDsgeModel.stepAnnualWithScenario(0.0, 0.0, shockScenario, year);
-        } else {
-            double[] otherShocks = new double[dynamicDsgeModel.getNumShocks()];
-            annualState = dynamicDsgeModel.stepAnnual(0.0, otherShocks);
-        }
+        DSGEState annualState = dynamicDsgeModel.stepAnnual(shockScenario, year);
 
         wageDeviation = annualState.getWageDeviation() + capitalDeepeningWageAdjustment;
         inflationDeviation = annualState.getInflationDeviation();
 
+        // Update individual wages with the new deviation before the labour market runs.
         updatePotentialHourlyEarnings(persons);
 
-        // labWageHrly now reflects this year's wages incl. any Ramsey overlay, so the
-        // start-year anchor latches on the correct sample.
+        // The realised-wage index on the post-overlay wages, amended onto the quarterly
+        // records just written (they were recorded before this year's index existed).
         double wageRealizedPct = populateRealizedWageIndex(persons);
         if (recorder != null && !Double.isNaN(wageRealizedPct)) {
             recorder.amendTrendForYear(year, "wage_realized", wageRealizedPct);
         }
 
-        if (logMacroState) {
-            log.info(String.format(
-                "DSGE year %d: %s — labour feedback suppressed (eps_L=eps_h=0), "
-                + "scenario %s, wage=%+.4f%% (cycle %+.4f%% + trend %+.4f%%).",
-                year, reason, scenarioApplied ? "APPLIED" : "none",
-                wageDeviation, annualState.getWageDeviation(),
-                capitalDeepeningWageAdjustment));
-        }
-    }
-
-    private void runDynamicSinglePass(int year, Set<Person> persons) {
-        // Aggregate labor supply into shocks, net of the projection's own labour growth
-        var shocks = laborSupplyAggregator.aggregate(persons, projectedLaborGrowthPct(year));
-        
-        // Compute capital-deepening trend BEFORE stepping the DSGE model,
-        // so the path recorder captures the trend for all 4 quarterly records
-        computeCapitalDeepeningTrend();
-        
-        // Add SimPaths labor supply level indices (% from start year) to trends map
-        populateDemographicIndices(shocks.aggregates());
-        populateLabourCategoryMetrics(shocks.aggregates());
-
-        logLabourCategoryDistribution(year, shocks.aggregates());
-        
-        // Set year for path recording
-        dynamicDsgeModel.setCurrentYear(year);
-        
-        // Set trend on path recorder so quarterly records include it
-        MacroPathRecorder recorder = dynamicDsgeModel.getPathRecorder();
-        if (recorder != null) {
-            recorder.setCurrentTrends(currentRamseyTrends);
-        }
-        
-        // Step dynamic model forward (4 quarters internally, returns annual average)
-        DSGEState annualState;
-        if (shockScenario != null && shockScenario.hasShocksForYear(year)) {
-            // Counterfactual: use scenario shocks additively on top of SimPaths shocks
-            annualState = dynamicDsgeModel.stepAnnualWithScenario(
-                    shocks.epsL(), shocks.epsH(), shockScenario, year);
-        } else {
-            // Baseline: only SimPaths-generated eps_L and eps_h
-            double[] otherShocks = new double[dynamicDsgeModel.getNumShocks()];
-            otherShocks[dynamicDsgeModel.getIdxEpsH()] = shocks.epsH();
-            annualState = dynamicDsgeModel.stepAnnual(shocks.epsL(), otherShocks);
-        }
-        
-        // Extract wage and inflation deviations (cycle component from DSGE)
-        wageDeviation = annualState.getWageDeviation();
-        inflationDeviation = annualState.getInflationDeviation();
-
-        // Add capital-deepening trend (secular component, computed outside DSGE)
-        wageDeviation += capitalDeepeningWageAdjustment;
-
-        // Update individual wages with the new deviation before labor market runs
-        updatePotentialHourlyEarnings(persons);
-
-        // Compute the realized-wage index on the post-overlay wages and amend
-        // the just-written quarterly records (recorder.setCurrentTrends was
-        // called before stepAnnual, so the records do not yet carry this year's
-        // wage index).
-        double wageRealizedPct = populateRealizedWageIndex(persons);
-        MacroPathRecorder pathRecorder = dynamicDsgeModel.getPathRecorder();
-        if (pathRecorder != null && !Double.isNaN(wageRealizedPct)) {
-            pathRecorder.amendTrendForYear(year, "wage_realized", wageRealizedPct);
-        }
-
-        // Log the results
-        logDynamicEquilibrium("Dynamic", year, annualState, shocks);
-        updateDiagnostics(shocks, annualState);
-        
-        // Advance rolling baseline: next year's shock measured relative to this year
-        laborSupplyAggregator.advanceBaseline();
+        logDynamicEquilibrium(year, annualState, aggregates);
+        updateDiagnostics(annualState);
     }
 
     /**
@@ -1945,7 +1670,7 @@ public class MacroModelManager {
      */
     private void logLabourCategoryDistribution(int year, LaborSupplyAggregator.LaborSupplyAggregates aggregates) {
         if (!logMacroState || !verboseMacroLogging || laborSupplyAggregator == null
-                || aggregates == null || !laborSupplyAggregator.isBaselineSet()) {
+                || aggregates == null || !laborSupplyAggregator.isStartYearLatched()) {
             return;
         }
         log.info(String.format("Macro Year %d — %s", year,
@@ -1960,17 +1685,14 @@ public class MacroModelManager {
         }
 
         if (laborSupplyAggregator != null) {
-            // Year 1 (L/h baseline not yet latched): use raw aggregates so the
-            // demographic indices still emit (against the eagerly-latched
-            // anchors). l_level/h_level remain self-gated on the post-labour-
-            // market L/h anchors inside populateDemographicIndices.
+            // The demographic indices emit from the start year against the eagerly
+            // latched anchors; l_level/h_level and the workers-derived columns stay
+            // gated on the post-labour-market latch inside populateDemographicIndices.
             LaborSupplyAggregator.LaborSupplyAggregates aggs =
-                    laborSupplyAggregator.isBaselineSet()
-                            ? laborSupplyAggregator.aggregate(persons).aggregates()
-                            : laborSupplyAggregator.computeRawAggregates(persons);
+                    laborSupplyAggregator.computeRawAggregates(persons);
             populateDemographicIndices(aggs);
-                populateLabourCategoryMetrics(aggs);
-                logLabourCategoryDistribution(year, aggs);
+            populateLabourCategoryMetrics(aggs);
+            logLabourCategoryDistribution(year, aggs);
         }
 
         wageDeviation = capitalDeepeningWageAdjustment;
@@ -2075,13 +1797,10 @@ public class MacroModelManager {
      * @param persons Current population
      */
     private void runRecorderOnlyPass(int year, Set<Person> persons) {
-        // Year 1 (L/h baseline not yet latched): use raw aggregates so the
-        // demographic indices still emit against the eagerly-latched anchors.
-        // Year >= 2: aggregate() also rolls lastL/lastH for advanceBaseline.
-        boolean baselineSet = laborSupplyAggregator.isBaselineSet();
-        LaborSupplyAggregator.LaborSupplyAggregates aggs = baselineSet
-                ? laborSupplyAggregator.aggregate(persons).aggregates()
-                : laborSupplyAggregator.computeRawAggregates(persons);
+        // The demographic indices emit from the start year against the eagerly
+        // latched anchors; the workers-derived columns wait for the post-market latch.
+        LaborSupplyAggregator.LaborSupplyAggregates aggs =
+                laborSupplyAggregator.computeRawAggregates(persons);
 
         // Populate the trends map with SimPaths labor supply diagnostics only
         currentRamseyTrends.clear();
@@ -2101,12 +1820,6 @@ public class MacroModelManager {
         if (trendOnlyPathRecorder != null) {
             trendOnlyPathRecorder.setCurrentTrends(currentRamseyTrends);
             trendOnlyPathRecorder.recordRamseyOnlyYear(year);
-        }
-
-        // Advance rolling baseline only once the L/h baseline exists (year >= 2);
-        // advanceBaseline is a no-op pre-baseline but gating avoids a warn log.
-        if (baselineSet) {
-            laborSupplyAggregator.advanceBaseline();
         }
 
         if (logMacroState) {
@@ -2147,7 +1860,7 @@ public class MacroModelManager {
      *
      * <p>participation_rate and workers_over_atRiskPool are workers/L-derived:
      * they are only meaningful once L comes from the SimPaths labour-supply model,
-     * i.e. post-labour-market (isBaselineSet() is true only then). Emitting them
+     * i.e. post-labour-market (isStartYearLatched() is true only then). Emitting them
      * in the eager year-1 pre-labour-market pass would expose input-DB hours and,
      * because compare_scenarios.do anchors pr0/ar0 on the first non-zero value,
      * corrupt its WAP/atRisk reconstruction. Only the labour-market-invariant
@@ -2169,7 +1882,7 @@ public class MacroModelManager {
         if (startH > 0.0) {
             m.put("h_level", (aggregates.avgHoursPerWorker() / startH - 1.0) * 100.0);
         }
-        if (laborSupplyAggregator.isBaselineSet()) {
+        if (laborSupplyAggregator.isStartYearLatched()) {
             m.put("participation_rate", aggregates.participationRate() * 100.0);
             m.put("workers_over_atRiskPool",
                     aggregates.atRiskPool() > 0
@@ -2317,22 +2030,21 @@ public class MacroModelManager {
      * Log dynamic DSGE state evolution (for dynamic integration mode).
      */
     private void logDynamicEquilibrium(
-            String mode,
             int year,
             DSGEState state,
-            LaborSupplyAggregator.LaborSupplyShocks shocks
+            LaborSupplyAggregator.LaborSupplyAggregates aggregates
     ) {
+        boolean scenarioApplied = shockScenario != null && shockScenario.hasShocksForYear(year);
         if (logMacroState) {
-            System.out.println("\n========== DSGE MACRO MODEL UPDATE (" + mode + ") ==========");
+            System.out.println("\n========== DSGE MACRO MODEL UPDATE ==========");
             System.out.println(String.format("Year: %d", year));
-            System.out.println("--- Labor Supply Aggregation ---");
-            System.out.println(String.format("  Participants         %.0f (extensive margin, hours > 0)", shocks.aggregates().laborForce()));
-            System.out.println(String.format("  At-risk pool:        %.0f (non-student/retired 15-64)", shocks.aggregates().atRiskPool()));
-            System.out.println(String.format("  Avg hours/week:      %.1f", shocks.aggregates().avgHoursPerWorker()));
-            System.out.println(String.format("  Participation rate:  %.1f%%", shocks.aggregates().participationRate() * 100));
+            System.out.println("--- Labor Supply Aggregation (diagnostic; not a DSGE input) ---");
+            System.out.println(String.format("  Participants         %.0f (extensive margin, hours > 0)", aggregates.laborForce()));
+            System.out.println(String.format("  At-risk pool:        %.0f (non-student/retired 15-64)", aggregates.atRiskPool()));
+            System.out.println(String.format("  Avg hours/week:      %.1f", aggregates.avgHoursPerWorker()));
+            System.out.println(String.format("  Participation rate:  %.1f%%", aggregates.participationRate() * 100));
             System.out.println("--- DSGE Shocks ---");
-            System.out.println(String.format("  eps_L (participation): %+.4f", shocks.epsL()));
-            System.out.println(String.format("  eps_h (hours):       %+.4f", shocks.epsH()));
+            System.out.println(String.format("  Scenario shocks:     %s", scenarioApplied ? "APPLIED" : "none"));
             System.out.println("--- DSGE State Evolution (Annual Average) ---");
             System.out.println(String.format("  Wage deviation:      %+.4f%%", state.getWageDeviation()));
             System.out.println(String.format("  Inflation deviation: %+.4f pp", state.getInflationDeviation()));
@@ -2352,9 +2064,9 @@ public class MacroModelManager {
         }
         
         if (logMacroState) {
-            log.info(String.format("DSGE Year %d (Dynamic): wage_dev=%.3f%% (cycle=%.3f%% + trend=%.3f%%), inflation_dev=%.3f%%, eps_L=%.4f, eps_h=%.4f",
+            log.info(String.format("DSGE Year %d: wage_dev=%.3f%% (cycle=%.3f%% + trend=%.3f%%), inflation_dev=%.3f%%, scenario %s",
                 year, wageDeviation, state.getWageDeviation(), capitalDeepeningWageAdjustment,
-                inflationDeviation, shocks.epsL(), shocks.epsH()));
+                inflationDeviation, scenarioApplied ? "APPLIED" : "none"));
         }
     }
     
@@ -2368,10 +2080,6 @@ public class MacroModelManager {
 
     private void resetDiagnostics() {
         diagnosticsCount = 0;
-        epsLMin = Double.POSITIVE_INFINITY;
-        epsLMax = Double.NEGATIVE_INFINITY;
-        epsHMin = Double.POSITIVE_INFINITY;
-        epsHMax = Double.NEGATIVE_INFINITY;
         wageDevMin = Double.POSITIVE_INFINITY;
         wageDevMax = Double.NEGATIVE_INFINITY;
         inflDevMin = Double.POSITIVE_INFINITY;
@@ -2380,30 +2088,22 @@ public class MacroModelManager {
         outputDevMax = Double.NEGATIVE_INFINITY;
         employmentDevMin = Double.POSITIVE_INFINITY;
         employmentDevMax = Double.NEGATIVE_INFINITY;
-        epsLSum = 0.0;
-        epsHSum = 0.0;
         wageDevSum = 0.0;
         inflDevSum = 0.0;
         outputDevSum = 0.0;
         employmentDevSum = 0.0;
     }
 
-    private void updateDiagnostics(LaborSupplyAggregator.LaborSupplyShocks shocks, DSGEState state) {
-        if (!logMacroState || shocks == null || state == null) {
+    private void updateDiagnostics(DSGEState state) {
+        if (!logMacroState || state == null) {
             return;
         }
-        updateDiagnosticsValues(shocks.epsL(), shocks.epsH(), state.getWageDeviation(),
-                state.getInflationDeviation(), state.getOutputDeviation(), state.getEmploymentDeviation());
+        updateDiagnosticsValues(state.getWageDeviation(), state.getInflationDeviation(),
+                state.getOutputDeviation(), state.getEmploymentDeviation());
     }
 
-    private void updateDiagnosticsValues(double epsL, double epsH, double wageDev,
-                                          double inflDev, double outputDev, double employmentDev) {
+    private void updateDiagnosticsValues(double wageDev, double inflDev, double outputDev, double employmentDev) {
         diagnosticsCount++;
-
-        epsLMin = Math.min(epsLMin, epsL);
-        epsLMax = Math.max(epsLMax, epsL);
-        epsHMin = Math.min(epsHMin, epsH);
-        epsHMax = Math.max(epsHMax, epsH);
 
         wageDevMin = Math.min(wageDevMin, wageDev);
         wageDevMax = Math.max(wageDevMax, wageDev);
@@ -2414,8 +2114,6 @@ public class MacroModelManager {
         employmentDevMin = Math.min(employmentDevMin, employmentDev);
         employmentDevMax = Math.max(employmentDevMax, employmentDev);
 
-        epsLSum += epsL;
-        epsHSum += epsH;
         wageDevSum += wageDev;
         inflDevSum += inflDev;
         outputDevSum += outputDev;
@@ -2428,47 +2126,13 @@ public class MacroModelManager {
         }
 
         log.info(String.format(
-                "DSGE Diagnostics Summary: n=%d | eps_L[min=%.4f,max=%.4f,mean=%.4f] " +
-                "eps_h[min=%.4f,max=%.4f,mean=%.4f] | wage[min=%.4f,max=%.4f,mean=%.4f] " +
+                "DSGE Diagnostics Summary: n=%d | wage[min=%.4f,max=%.4f,mean=%.4f] " +
                 "pi[min=%.4f,max=%.4f,mean=%.4f] | y[min=%.4f,max=%.4f,mean=%.4f] | n[min=%.4f,max=%.4f,mean=%.4f]",
                 diagnosticsCount,
-                epsLMin, epsLMax, epsLSum / diagnosticsCount,
-                epsHMin, epsHMax, epsHSum / diagnosticsCount,
                 wageDevMin, wageDevMax, wageDevSum / diagnosticsCount,
                 inflDevMin, inflDevMax, inflDevSum / diagnosticsCount,
                 outputDevMin, outputDevMax, outputDevSum / diagnosticsCount,
                 employmentDevMin, employmentDevMax, employmentDevSum / diagnosticsCount
-        ));
-    }
-
-    private void logNormalizedResponseComparison() {
-        if (!logMacroState || !verboseMacroLogging || dynamicDsgeModel == null || !dynamicDsgeModel.isLoaded()) {
-            return;
-        }
-
-        double[] shockStdDev = dynamicDsgeModel.getShockStdDev();
-        if (shockStdDev == null || shockStdDev.length <= dynamicDsgeModel.getIdxEpsH()) {
-            return;
-        }
-
-        double sigmaL = shockStdDev[dynamicDsgeModel.getIdxEpsL()];
-        double sigmaH = shockStdDev[dynamicDsgeModel.getIdxEpsH()];
-
-        // Dynamic: 1-sigma shocks (suppress path recording to avoid year-0 artifact in CSV)
-        boolean wasRecording = dynamicDsgeModel.isPathRecordingEnabled();
-        dynamicDsgeModel.setPathRecordingEnabled(false);
-        dynamicDsgeModel.resetToSteadyState();
-        double[] otherShocks = new double[dynamicDsgeModel.getNumShocks()];
-        otherShocks[dynamicDsgeModel.getIdxEpsH()] = sigmaH;
-        DSGEState dynamicResponse = dynamicDsgeModel.stepAnnual(sigmaL, otherShocks);
-        dynamicDsgeModel.resetToSteadyState();
-        dynamicDsgeModel.setPathRecordingEnabled(wasRecording);
-
-        log.info(String.format(
-                "DSGE 1σ Dynamic Response (eps_L=%.4f, eps_h=%.4f): w=%.4f, pi=%.4f, y=%.4f, n=%.4f",
-                sigmaL, sigmaH,
-                dynamicResponse.getWageDeviation(), dynamicResponse.getInflationDeviation(),
-                dynamicResponse.getOutputDeviation(), dynamicResponse.getEmploymentDeviation()
         ));
     }
 
@@ -2592,7 +2256,7 @@ public class MacroModelManager {
     /**
      * Whether recording infrastructure is active (either full macro model or standalone recorder).
      * Use this as the gate for operations that should work in both modes:
-     * baseline latching, labor supply diagnostics, path export.
+     * the start-year anchor latch, labor supply diagnostics, path export.
      */
     public boolean isRecorderActive() {
         return enabled || recorderOnlyMode;
@@ -2679,10 +2343,7 @@ public class MacroModelManager {
         this.useRamseyTrend = useRamseyTrend;
     }
 
-    public void setRamseyFeedbackMargins(MacroFeedbackMargins value) { this.ramseyFeedbackMargins = value; }
-    public MacroFeedbackMargins getRamseyFeedbackMargins() { return ramseyFeedbackMargins; }
     public void setRamseyFeedbackPersistence(double value) { this.ramseyFeedbackPersistence = value; }
-    public void setRamseyFeedbackHoursPersistence(double value) { this.ramseyFeedbackHoursPersistence = value; }
 
     /**
      * Get the Ramsey trend model (for testing/diagnostics).

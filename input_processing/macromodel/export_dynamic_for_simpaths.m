@@ -9,24 +9,16 @@
 %%   - Cost-push shock: eps_p added (8 shocks total, eps_match dropped V13)
 %%   - New parameters: sigma (inverse IES), s_inv (investment share)
 %%   - Capital extension: k (capital stock), inv (investment) added
-%%   - Hours is pure AR(1) with rho_h = 0 for SimPaths export (LEVEL input)
-%%   - L observed directly, rho_L = 0 for SimPaths export (LEVEL input)
+%%   - Hours and L are pure AR(1) at their calibrated persistence (rho_h, rho_L)
 %%   - 9 estimated params: sigma_a, sigma_d, sigma_r, sigma_p, sigma_h, sigma_L, sigma_inv, omega_h, phi_inv_r
 %%
-%% IMPORTANT: SimPaths Integration Requirement
-%% -------------------------------------------
-%% The frozen model MUST have @#define for_simpaths_export = true, which sets:
-%%   - rho_L = 0  (so L = eps_L directly, no AR(1) accumulation)
-%%   - rho_h = 0  (so h = eps_h directly, no AR(1) accumulation)
+%% The bundle is the estimated model for every shock. The DSGE takes no input from
+%% SimPaths: every shock, eps_L and eps_h included, is an innovation in
+%% standard-deviation units that a scenario may set, and SimPaths receives the
+%% wage and inflation deviations. The model is in 100 x log-deviation units
+%% (metadata.deviation_scale), which makes the cycle wage a percent.
 %%
-%% WHY: SimPaths sends LEVELS (deviation from baseline), not innovations.
-%% Units: eps_L/eps_h are PERCENT log-deviations (100*ln ratio) — the model's
-%% units, since it is estimated on 100x-log-deviation data. A +5% labour-force
-%% deviation is eps_L ~= 4.879, NOT 0.05.
-%% With rho=0.95, an input of eps_L=5 would accumulate to L=100 (i.e. +100%)!
-%% With rho=0, we get L = eps_L = 5 (5%) as intended.
-%%
-%% Run AFTER: dynare Macromodel_{COUNTRY}_frozen.mod (with for_simpaths_export=true)
+%% Run AFTER: dynare Macromodel_{COUNTRY}_frozen.mod
 %%
 %% State-Space Representation:
 %% ---------------------------
@@ -61,7 +53,7 @@
 %%   7. steady_state.csv    - Steady state values
 %%   8. shock_params.csv    - AR(1) coefficients and std devs
 %%   9. model_info.json     - Variable names, ordering, metadata
-%%  10. irfs_eps_L.csv      - IRFs for labor force shock (key for SimPaths)
+%%  10. irfs_eps_*.csv      - IRFs for each shock
 %%
 %% Usage in Java:
 %%   // Update states
@@ -100,38 +92,6 @@ if ~isfield(oo_, 'dr') || ~isfield(oo_.dr, 'ghx')
     error('Decision rules not computed. Run stoch_simul first.');
 end
 
-% Check that rho_L and rho_h are set to 0 for SimPaths export
-% (This happens when @#define for_simpaths_export = true in frozen model)
-param_names = M_.param_names;
-param_values = M_.params;
-
-rho_L_idx = find(strcmp(param_names, 'rho_L'));
-rho_h_idx = find(strcmp(param_names, 'rho_h'));
-
-if ~isempty(rho_L_idx)
-    rho_L_value = param_values(rho_L_idx);
-    if rho_L_value ~= 0
-        error(['rho_L = %.3f, but SimPaths sends LEVELS, not innovations: the export ' ...
-               'requires rho_L = 0 (@#define for_simpaths_export = true in the frozen ' ...
-               'model). Refusing to write a bundle that would accumulate eps_L through ' ...
-               'an AR(1).'], rho_L_value);
-    else
-        fprintf('>>> rho_L = 0 (correct for SimPaths level inputs)\n');
-    end
-end
-
-if ~isempty(rho_h_idx)
-    rho_h_value = param_values(rho_h_idx);
-    if rho_h_value ~= 0
-        error(['rho_h = %.3f, but SimPaths sends LEVELS, not innovations: the export ' ...
-               'requires rho_h = 0 (@#define for_simpaths_export = true in the frozen ' ...
-               'model). Refusing to write a bundle that would accumulate eps_h through ' ...
-               'an AR(1).'], rho_h_value);
-    else
-        fprintf('>>> rho_h = 0 (correct for SimPaths level inputs)\n');
-    end
-end
-
 % Infer country from Dynare model name (M_.fname = 'Macromodel_Germany_frozen')
 country_from_fname = regexp(M_.fname, 'Macromodel_(\w+?)(?:_frozen)?$', 'tokens', 'once');
 if isempty(country_from_fname)
@@ -141,16 +101,16 @@ if isempty(country_from_fname)
 end
 export_country = country_from_fname{1};
 
-% SimPaths sends eps_L/eps_h as PERCENT log-deviations (100*ln ratio) because the
-% model is estimated on 100x-log-deviation data (the detrending scale in
-% ramsey_trend.m). Declared in metadata.simpaths_input_scale (section 7) so the
-% Java side can refuse a bundle whose estimation units moved; this convention
-% lived only in prose until 2026-08 and was silently violated by ~100x once.
-% Checked here, before sections 4-6 write anything, so a trip is a clean
-% refusal rather than an abort that leaves a mixed-vintage bundle behind.
+% The model is estimated on 100x-log-deviation data (the detrending scale in
+% ramsey_trend.m), which is what makes its deviations, the cycle wage among them,
+% percent. Declared in metadata.deviation_scale (section 7) so the Java side can
+% refuse a bundle whose units moved; this convention lived only in prose until
+% 2026-08 and was silently violated by ~100x once. Checked here, before sections
+% 4-6 write anything, so a trip is a clean refusal rather than an abort that
+% leaves a mixed-vintage bundle behind.
 est_data_file = artifact_path('data', sprintf('data_for_dynare_%s.csv', export_country));
 if ~exist(est_data_file, 'file')
-    error('Estimation datafile %s not found; cannot verify simpaths_input_scale.', est_data_file);
+    error('Estimation datafile %s not found; cannot verify deviation_scale.', est_data_file);
 end
 est_data = readtable(est_data_file);
 for check_var = {'y', 'n'}
@@ -158,9 +118,10 @@ for check_var = {'y', 'n'}
     med_abs = median(abs(col_vals(~isnan(col_vals))));
     if ~(med_abs > 0.05 && med_abs < 50)
         error(['%s: median |%s| = %.4g lies outside [0.05, 50], so the datafile does ' ...
-               'not look like 100x-log-deviation units and simpaths_input_scale = 100 ' ...
-               'would be a lie the Java side trusts. The detrending scale and this ' ...
-               'declaration must move together.'], est_data_file, check_var{1}, med_abs);
+               'not look like 100x-log-deviation units and deviation_scale = 100 ' ...
+               'would be a lie the Java side trusts (it reads the cycle wage as a percent). ' ...
+               'The detrending scale and this declaration must move together.'], ...
+               est_data_file, check_var{1}, med_abs);
     end
 end
 
@@ -429,9 +390,8 @@ end
 
 % Build shock parameters table
 % Map shocks to their AR coefficients
-% v11b: eps_inv added for investment shock. In the ESTIMATION model eps_h has
-% AR(1) persistence at the country's calibrated rho_h; the for_simpaths_export
-% frozen model pins rho_h = 0, enforced in section 0.
+% v11b: eps_inv added for investment shock. eps_L and eps_h follow AR(1) at the
+% country's calibrated rho_L and rho_h, in the estimation and the frozen model alike.
 shock_rho_map = containers.Map(...
     {'eps_a', 'eps_d', 'eps_r', 'eps_L', 'eps_sep', 'eps_h', 'eps_inv'}, ...
     {'rho_a', 'rho_d', 'rho_r', 'rho_L', 'rho_sep', 'rho_h', 'rho_inv'});
@@ -560,11 +520,11 @@ for i = 1:M_.exo_nbr
 end
 metadata.shock_indices_java = shock_idx_java;
 
-% SimPaths sends eps_L/eps_h as PERCENT log-deviations (100*ln ratio) because the
-% model is estimated on 100x-log-deviation data (the detrending scale in
-% ramsey_trend.m); validated against the estimation datafile in section 0,
-% before anything was written.
-metadata.simpaths_input_scale = 100;
+% The model is in 100 x log-deviation units (the detrending scale in
+% ramsey_trend.m), so its deviations, the cycle wage among them, are percent;
+% validated against the estimation datafile in section 0, before anything was
+% written. The Java side refuses a bundle without this declaration.
+metadata.deviation_scale = 100;
 
 % State/jump indices within their respective vectors (0-based for Java)
 state_idx_in_s = struct();
@@ -628,8 +588,10 @@ fprintf(fid, '**Key insight for SimPaths:**\n');
 fprintf(fid, '- Wage `w` is a **state variable** → extract from `s_t` directly\n');
 fprintf(fid, '- Inflation `π` is **also a state variable** since V15 (inflation\n');
 fprintf(fid, '  indexation puts `pi(-1)` in the NKPC) → extract from `s_t`, NOT `y_t`\n');
-fprintf(fid, '- eps_L/eps_h inputs are **percent log-deviations** (100 × ln ratio);\n');
-fprintf(fid, '  a +5%% labour-force deviation is eps_L ≈ 4.879, not 0.05\n\n');
+fprintf(fid, '- Every shock, eps_L and eps_h included, is an innovation in **standard-deviation\n');
+fprintf(fid, '  units**: 1.0 is a one-σ shock, multiplied by its std dev before the policy matrices\n');
+fprintf(fid, '- The model is in 100 × log-deviation units (`deviation_scale`), so the wage\n');
+fprintf(fid, '  deviation is a percent\n\n');
 
 fprintf(fid, '## 2. Files Exported\n\n');
 fprintf(fid, '| File | Dimension | Description |\n');
@@ -713,8 +675,8 @@ fprintf(fid, '### Shocks (columns in B_s, D)\n\n');
 fprintf(fid, '| Index | Shock | Description | ρ | σ |\n');
 fprintf(fid, '|-------|-------|-------------|---|---|\n');
 shock_descriptions = {'technology', 'monetary policy', 'demand/preference', ...
-    'price-setting / cost-push', 'labor force (from microsim)', ...
-    'separation', 'hours worked (from microsim)', 'investment-specific'};
+    'price-setting / cost-push', 'labor force', ...
+    'separation', 'hours worked', 'investment-specific'};
 for i = 1:M_.exo_nbr
     fprintf(fid, '| %d | `%s` | %s | %.3f | %.4f |\n', ...
         i-1, exo_names{i}, shock_descriptions{min(i, length(shock_descriptions))}, ...
@@ -801,18 +763,18 @@ fprintf(fid, '    }\n');
 fprintf(fid, '}\n');
 fprintf(fid, '```\n\n');
 
-fprintf(fid, '## 5. Key IRF: Labor Force Shock (eps_L)\n\n');
-fprintf(fid, 'This is the primary interface with SimPaths:\n');
-fprintf(fid, '- SimPaths sends labor force change (ΔL)\n');
-fprintf(fid, '- DSGE returns wage response (Δw), employment (Δn), inflation (Δπ)\n\n');
-fprintf(fid, 'See `irfs_eps_L.csv` for the full impulse response.\n\n');
+fprintf(fid, '## 5. Interface with SimPaths\n\n');
+fprintf(fid, '- SimPaths sends nothing to the DSGE; its shocks come from a scenario only\n');
+fprintf(fid, '- SimPaths receives the wage deviation (Δw) and the inflation deviation (Δπ)\n');
+fprintf(fid, '- `irfs_eps_L.csv` and `irfs_eps_h.csv` hold the responses to one-σ labour-force\n');
+fprintf(fid, '  and hours innovations, which decay at the calibrated ρ of the table above\n\n');
 
 fprintf(fid, '## 6. Usage Notes\n\n');
 fprintf(fid, '1. **Units:** All variables are in %% deviations from steady state\n');
 fprintf(fid, '2. **Frequency:** Quarterly (DSGEModel.java runs 4 quarters and averages for annual)\n');
-fprintf(fid, '3. **Causality:** Two-way coupling:\n');
-fprintf(fid, '   - SimPaths → DSGE: Labor force change (ΔL) as shock\n');
-fprintf(fid, '   - DSGE → SimPaths: Wage (Δw) and inflation (Δπ) feedback\n');
+fprintf(fid, '3. **Causality:** One-way coupling:\n');
+fprintf(fid, '   - Scenario → DSGE: shocks in standard-deviation units (none from SimPaths)\n');
+fprintf(fid, '   - DSGE → SimPaths: Wage (Δw) and inflation (Δπ)\n');
 fprintf(fid, '4. **Steady state:** All zeros (log-linearized model)\n');
 fprintf(fid, '5. **Indexing:** JSON uses 1-based (MATLAB), Java code uses 0-based\n\n');
 

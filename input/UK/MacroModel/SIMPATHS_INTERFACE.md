@@ -1,6 +1,6 @@
 # DSGE Policy Function Export for SimPaths
 
-**Generated:** 23-Oct-2026 13:45:06
+**Generated:** 06-Nov-2026 17:04:41
 **Model:** Macromodel_UK_frozen
 
 ## 1. State-Space Representation
@@ -25,8 +25,10 @@ Where:
 - Wage `w` is a **state variable** → extract from `s_t` directly
 - Inflation `π` is **also a state variable** since V15 (inflation
   indexation puts `pi(-1)` in the NKPC) → extract from `s_t`, NOT `y_t`
-- eps_L/eps_h inputs are **percent log-deviations** (100 × ln ratio);
-  a +5% labour-force deviation is eps_L ≈ 4.879, not 0.05
+- Every shock, eps_L and eps_h included, is an innovation in **standard-deviation
+  units**: 1.0 is a one-σ shock, multiplied by its std dev before the policy matrices
+- The model is in 100 × log-deviation units (`deviation_scale`), so the wage
+  deviation is a percent
 
 ## 2. Files Exported
 
@@ -116,9 +118,9 @@ by convention and a downstream tripwire test.
 | 1 | `eps_r` | monetary policy | 0.850 | 0.5086 |
 | 2 | `eps_d` | demand/preference | 0.800 | 0.4057 |
 | 3 | `eps_p` | price-setting / cost-push | 0.000 | 1.4489 |
-| 4 | `eps_L` | labor force (from microsim) | 0.000 | 0.2477 |
+| 4 | `eps_L` | labor force | 0.950 | 0.2477 |
 | 5 | `eps_sep` | separation | 0.800 | 0.1000 |
-| 6 | `eps_h` | hours worked (from microsim) | 0.000 | 0.3925 |
+| 6 | `eps_h` | hours worked | 0.800 | 0.3925 |
 | 7 | `eps_inv` | investment-specific | 0.850 | 2.5426 |
 
 ## 4. Java Implementation
@@ -223,21 +225,20 @@ public class DSGEPolicyFunction {
 }
 ```
 
-## 5. Key IRF: Labor Force Shock (eps_L)
+## 5. Interface with SimPaths
 
-This is the primary interface with SimPaths:
-- SimPaths sends labor force change (ΔL)
-- DSGE returns wage response (Δw), employment (Δn), inflation (Δπ)
-
-See `irfs_eps_L.csv` for the full impulse response.
+- SimPaths sends nothing to the DSGE; its shocks come from a scenario only
+- SimPaths receives the wage deviation (Δw) and the inflation deviation (Δπ)
+- `irfs_eps_L.csv` and `irfs_eps_h.csv` hold the responses to one-σ labour-force
+  and hours innovations, which decay at the calibrated ρ of the table above
 
 ## 6. Usage Notes
 
 1. **Units:** All variables are in % deviations from steady state
 2. **Frequency:** Quarterly (DSGEModel.java runs 4 quarters and averages for annual)
-3. **Causality:** Two-way coupling:
-   - SimPaths → DSGE: Labor force change (ΔL) as shock
-   - DSGE → SimPaths: Wage (Δw) and inflation (Δπ) feedback
+3. **Causality:** One-way coupling:
+   - Scenario → DSGE: shocks in standard-deviation units (none from SimPaths)
+   - DSGE → SimPaths: Wage (Δw) and inflation (Δπ)
 4. **Steady state:** All zeros (log-linearized model)
 5. **Indexing:** JSON uses 1-based (MATLAB), Java code uses 0-based
 

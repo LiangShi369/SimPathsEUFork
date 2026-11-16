@@ -9,6 +9,12 @@
  *          Companion to
  *          docs/superpowers/plans/2026-08-17-ramsey-recursive-feedback-RESULTS.md
  *
+ * No longer reproducible: since 2026-11 the planner's feedback is always on with
+ * a Ramsey layer (mm_ramseyFeedbackMargins and the feedback-off configs are
+ * gone), so the two feedback-off arms can no longer be produced. Commit 673d677
+ * is the last that can produce them. The script stays as the record of that
+ * measurement.
+ *
  * Why several seeds and not one run: the per-seed difference-in-differences
  * flips sign across seeds (participation at 2060 runs from -0.72 to +0.92 pp),
  * so a single-run comparison shows RNG noise, not the channel. Only w_trend

@@ -24,6 +24,7 @@
 | **v16** | **Feb 26, 2026** | **Dual-layor macro architecture: Long-run trend component (Ramsey growth model) + business cycle component (DSGE)** ⭐ |
 | **v17** | **Mar 09, 2026** | **Ramsey Model: Endogenous labor supply implementation; `ramsey_labor_supply` switch (defaults to exogenous). Dynare files template-based structure (`Macromodel_[COUNTRY].mod`).** ⭐ |
 | **v18** | **Oct 20, 2026** | **Ramsey Model: endogenous labour supply removed (JuergenWiemers/SimPathsEU#28). The Ramsey layer solves exogenous labour only; SimPaths' realized labour reaches the planner through the yearly re-solve (`mm_ramseyFeedbackMargins`, `SimPaths_Coupling.md` §8.1).** |
+| **v19** | **Nov 6, 2026** | **The DSGE is one-way: it takes no input from SimPaths and runs on scenario shocks only (contract 38). SimPaths' employment and hours reach the planner alone, counted once a year after the labour market; the feedback is always on with one persistence `mm_ramseyFeedbackPersistence` (`mm_ramseyFeedbackMargins` and `mm_ramseyFeedbackHoursPersistence` removed). The labour-force and hours shocks are ordinary shocks: the frozen models and bundles carry the calibrated ρ_L, ρ_h (the `for_simpaths_export` switch is gone), every shock is in σ-units, and the bundle declares `deviation_scale` (contracts 1, 37).** |
 
 ---
 
@@ -51,15 +52,15 @@ This replaces the previous HP-filter-based detrending architecture.
 │ Ramsey growth model          │
 │ - trend paths: w_trend,      │
 │   Y_trend, C_trend, I_trend  │
-│ - endogenizes labor supply   │
-│   when switch enabled        │
+│ - re-solved yearly on the    │  ◄── realized employment, hours ──  SimPaths
+│   labour SimPaths realized   │
 └──────────────┬───────────────┘
                     │
                     │ trend component
                     ▼
-┌──────────────────────────────┐          two-way annual coupling
-│ DSGE cycle model             │  ◄──────────────────────────────►  SimPaths
-│ - uses Ramsey-detrended data │        (eps_L, eps_h ↔ w_cycle, pi)
+┌──────────────────────────────┐          one-way annual coupling
+│ DSGE cycle model             │  ──────────────────────────────►  SimPaths
+│ - uses Ramsey-detrended data │        (w_cycle, pi; scenario shocks only in)
 │ - outputs cyclical deviations│
 └──────────────┬───────────────┘
                     │
@@ -69,8 +70,8 @@ This replaces the previous HP-filter-based detrending architecture.
 ```
 
 **Key design choices implemented:**
-- Growth model labour input is exogenous (employees `N`); SimPaths' realized labour feeds back through the yearly re-solve of the planner's remaining path (`SimPaths_Coupling.md` §8.1, `mm_ramseyFeedbackMargins`).
-- DSGE-SimPaths channel remains **two-way**
+- Growth model labour input is exogenous (employees `N`); SimPaths' realized employment and hours feed back through the yearly re-solve of the planner's remaining path, always on with a Ramsey layer, with one persistence `mm_ramseyFeedbackPersistence` (`SimPaths_Coupling.md` §8.1).
+- The DSGE-SimPaths channel is **one-way**: the DSGE hands SimPaths the cycle wage and takes no input from SimPaths; its shocks come from a scenario only (contract 38)
 - **Static integration mode is fully removed**; dynamic state-space integration is the only supported mode
 
 ### A.3 End-to-End Workflow
@@ -175,10 +176,10 @@ Inflation feedback remains the DSGE cyclical component.
 
 The macro block provides **economic guardrails** for SimPaths through a dual-layer design:
 
-- **Ramsey growth model:** long-run secular trend (top-down, no micro feedback)
-- **DSGE model:** business-cycle feedback around that moving trend (two-way with SimPaths)
+- **Ramsey growth model:** long-run secular trend, re-solved every year on the employment and hours SimPaths realized
+- **DSGE model:** business-cycle deviations around that moving trend (one-way: it hands SimPaths the cycle wage and takes no input from SimPaths)
 
-When SimPaths predicts labor-supply changes, the DSGE returns cyclical wage/inflation feedback; SimPaths then applies the total wage effect (trend + cycle).
+The DSGE returns cyclical wage and inflation deviations driven by scenario shocks alone; SimPaths' labour-supply changes reach the macro side through the Ramsey re-solve. SimPaths then applies the total wage effect (trend + cycle).
 
 ```
 ┌─────────────────────┐                      ┌─────────────────────┐
@@ -366,7 +367,7 @@ Adding hours allows the model to capture:
 
 ### 3.2 Hours Equation Specification
 
-The hours equation is a **pure AR(1) process** — hours are exogenous labor supply from SimPaths:
+The hours equation is a **pure AR(1) process** — hours are exogenous labour supply, moved by their own shock (at runtime only a scenario sets it; SimPaths sends nothing):
 
 $$h_t = \rho_h \cdot h_{t-1} + \varepsilon^h_t$$
 
@@ -925,8 +926,8 @@ All parameters pass identification tests:
 - **Consumption (c): More diversified** — technology (19.5%), cost-push (30.8%), demand (24.6%), monetary (22.3%). Broader driver base than v14's demand-dominated 71.7%
 - **Inflation (π): 83.6% cost-push** — remains clearly cost-push driven (up from 77.4% in v14); indexation provides persistence without altering primary driver
 - **Employment (n): Balanced** — labor force (38.0%) and separation (37.5%) are co-dominant, with cost-push (10.0%) gaining a meaningful share via the accelerator channel
-- **Hours (h): 100% from eps_h** — by design, h is pure AR(1) (exogenous from SimPaths)
-- **Labor force (L): 100% from eps_L** — by design, L is pure AR(1) (exogenous from SimPaths)
+- **Hours (h): 100% from eps_h** — by design, h is pure AR(1) (exogenous)
+- **Labor force (L): 100% from eps_L** — by design, L is pure AR(1) (exogenous)
 
 ### 9.6 Moment Comparison ⭐ UPDATED IN V15
 
@@ -1170,7 +1171,7 @@ Real country data: `data_for_dynare_{COUNTRY}.csv`
 The integration now combines:
 
 - **Ramsey trend layer** (secular macro path, top-down), and
-- **DSGE cycle layer** (two-way feedback with SimPaths).
+- **DSGE cycle layer** (one-way: scenario shocks in, cycle wage out; no input from SimPaths).
 
 Without the cycle feedback, SimPaths can overstate short-run macro consistency; without the trend layer, SimPaths misses structural wage drift.
 
@@ -1195,13 +1196,12 @@ This remains backward compatible: if the `terminal_growth` block is absent, SimP
 │             MICROSIMULATION–MACRO HANDSHAKE (dynamic-only)          │
 ├──────────────────────────────────────────────────────────────────────┤
 │                                                                      │
-│  INPUT (SimPaths → DSGE cycle):                                     │
-│    • ε_L,t : labor-force shock (raw log-deviation)                  │
-│    • ε_h,t : hours shock (raw log-deviation)                        │
+│  INPUT (DSGE cycle): scenario shocks only, in σ-units               │
+│    • nothing from SimPaths (one-way, contract 38)                   │
 │                                                                      │
-│  INPUT (Ramsey trend, top-down):                                    │
+│  INPUT (Ramsey trend):                                              │
 │    • w_trend,t from forward-solved Ramsey path                      │
-│    • No SimPaths feedback into Ramsey                               │
+│    • re-solved yearly on SimPaths' realized employment and hours    │
 │                                                                      │
 │  DSGE processing (quarterly, annual aggregation):                   │
 │    • s_t = A s_{t-1} + Bs ε_t                                       │
@@ -1220,12 +1220,21 @@ This remains backward compatible: if the `terminal_growth` block is absent, SimP
 
 ### 12.3 Runtime Sequence (Annual Loop)
 
-1. SimPaths updates labor market and latches/updates labor baseline.
-2. Ramsey trend advances one year (deterministic trend path).
-3. Labor aggregator computes `ε_L`, `ε_h` relative to rolling baseline.
-4. DSGE executes four quarterly steps and returns annual-average cyclical deviations.
-5. Manager composes total wage effect: `w_total = w_cycle + w_trend`.
-6. SimPaths applies updated wage multiplier and continues simulation.
+At `DSGEMacroUpdate`, before the labour market (`MacroModelManager.updateEquilibrium`):
+
+1. The Ramsey trend advances one year along the path solved at the end of the previous year. From the third
+   simulated year on, the run stops if the previous year's end-of-year feedback did not run.
+2. The DSGE executes four quarterly steps on the scenario's shocks for the year (zero without a scenario) and
+   returns annual-average cyclical deviations (`runDsgePass` ↔ `DSGEModel.stepAnnual`). It takes no input from
+   SimPaths.
+3. The manager composes the total wage effect `w_total = w_cycle + w_trend`, and SimPaths applies the wage
+   multiplier before its labour market runs.
+
+At `MacroEndYearCapture`, after the labour market and the population alignment:
+
+4. SimPaths' realized employment and hours are counted once (`computeRawAggregates`) and, in a Ramsey mode, fed
+   back into the planner, which re-solves its remaining path with persistence `mm_ramseyFeedbackPersistence`
+   for both margins (`SimPaths_Coupling.md` §8.1).
 
 ### 12.4 Dynamic-Only Integration and Static Mode Removal
 
@@ -1387,24 +1396,19 @@ When `growth_params_{COUNTRY}.json` includes `terminal_growth.enabled = true`, t
 
 Static integration classes/files were removed. Runtime and exports use only dynamic state-space components.
 
-**Critical: Shock Unit Conventions (Selective Normalization)**
+**Critical: Shock Unit Convention (one rule for every shock)**
 
 Dynare's ghu matrix (`policy_Bs.csv`, `policy_D.csv`) contains **raw derivatives** mapping unit-variance innovations to variable responses. Standard deviations σ are stored separately in `shock_params.csv`. **No σ-scaling is baked into the matrices.**
 
-- **SimPaths level inputs (ε_L, ε_h):** Pass as **raw log-deviations**. The DSGE equations define `L = eps_L` and `h = eps_h` directly (with ρ=0), so 5% labor force increase → eps_L = 0.05.
-- **Other shocks (ε_a, ε_r, ε_d, ε_p, ε_sep, ε_inv):** Scenario inputs are in **σ-units**. A 1-σ technology shock → eps_a = 1.0. These must be converted to raw innovations by **multiplying by σ**.
+- **Every shock (ε_a, ε_r, ε_d, ε_p, ε_L, ε_sep, ε_h, ε_inv):** Scenario inputs are in **σ-units**. A 1-σ technology shock → eps_a = 1.0; a 1-σ labour-force shock → eps_L = 1.0. These are converted to raw innovations by **multiplying by σ**. SimPaths sends none of them (contract 38).
+- **Persistence:** the labour force and hours follow their own AR(1) at the calibrated ρ_L and ρ_h, carried in the exported state transition like every other exogenous process. Until 2026-11 the export set ρ_L = ρ_h = 0 and took ε_L, ε_h as percent levels, because SimPaths wrote levels into them; the bundle field `deviation_scale` (which replaced `simpaths_input_scale`) makes Java refuse a bundle exported that way.
 
 ```java
 // In DSGEModel.java stepQuarterly():
 double[] processedShocks = new double[N_EXO];
 for (int j = 0; j < N_EXO; j++) {
-    if (j == IDX_EPS_L || j == IDX_EPS_H) {
-        // SimPaths level inputs: pass raw log-deviation directly
-        processedShocks[j] = shocks[j];
-    } else {
-        // Other shocks: σ-unit inputs → multiply by σ to get raw innovations
-        processedShocks[j] = shocks[j] * shockStdDev[j];
-    }
+    // Every shock: σ-unit input → multiply by σ to get the raw innovation
+    processedShocks[j] = shocks[j] * shockStdDev[j];
 }
 // Then: newState = A * state + Bs * processedShocks
 //        jumps   = C * state + D  * processedShocks
@@ -1414,8 +1418,8 @@ for (int j = 0; j < N_EXO; j++) {
 
 | Shock | Convention | Example |
 |-------|------------|---------|
-| eps_L | Raw log-deviation | 5% ↑L → eps_L = 0.05 (pass directly) |
-| eps_h | Raw log-deviation | 2% ↑h → eps_h = 0.02 (pass directly) |
+| eps_L | σ-units | 1-σ shock → raw = 1.0 × σ_L (multiply by σ) |
+| eps_h | σ-units | 1-σ shock → raw = 1.0 × σ_h (multiply by σ) |
 | eps_a | σ-units | 1-σ shock → raw = 1.0 × σ_a (multiply by σ) |
 | eps_inv | σ-units | 1-σ shock → raw = 1.0 × σ_inv (multiply by σ) |
 

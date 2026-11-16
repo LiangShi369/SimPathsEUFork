@@ -348,14 +348,8 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
     @GUIparameter(description = "CSV file name for Ramsey growth model scenario (relative to MacroModel dir, empty = baseline)")
     private String mm_ramseyScenario = "";
 
-    @GUIparameter(description = "Realized labour-supply margins fed back into the yearly Ramsey re-solve: none, employment, hours, or employment_and_hours")
-    private MacroFeedbackMargins mm_ramseyFeedbackMargins = MacroFeedbackMargins.EMPLOYMENT_AND_HOURS;
-
-    @GUIparameter(description = "Persistence of the realized employment gap in the Ramsey feedback belief: 1 = permanent (random walk), 0 = current year only")
+    @GUIparameter(description = "Persistence of the realized employment and hours gaps in the planner's belief: 1 = permanent, 0 = current year only")
     private double mm_ramseyFeedbackPersistence = 1.0;
-
-    @GUIparameter(description = "Persistence of the realized hours gap in the Ramsey feedback belief: 1 = permanent, 0 = current year only")
-    private double mm_ramseyFeedbackHoursPersistence = 1.0;
 
     @GUIparameter(description = "Maximum DSGE state deviation before the stability check fires (log-deviation units)")
     private double mm_dsgeMaxStateDeviation = DEFAULT_DSGE_MAX_STATE_DEVIATION;
@@ -423,9 +417,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         macroManager.setDsgeShockScenario(mm_dsgeShockScenario);
         macroManager.setRamseyScenario(mm_ramseyScenario);
         macroManager.setMaxBounds(mm_dsgeMaxStateDeviation);
-        macroManager.setRamseyFeedbackMargins(mm_ramseyFeedbackMargins);
         macroManager.setRamseyFeedbackPersistence(mm_ramseyFeedbackPersistence);
-        macroManager.setRamseyFeedbackHoursPersistence(mm_ramseyFeedbackHoursPersistence);
 
         warnAboutInertMacroSwitches();
 
@@ -609,13 +601,11 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         yearlySchedule.addCollectionEvent(persons, Person.Processes.Fertility);
         yearlySchedule.addCollectionEvent(persons, Person.Processes.GiveBirth, false);        //Cannot use read-only collection schedule as newborn children cause concurrent modification exception.  Need to specify false in last argument of Collection event.
 
-        // DSGE MACRO MODEL (if enabled) - computes wage/inflation feedback
-        // Placed AFTER union matching so all BenefitUnits exist before labor market iteration.
-        // Uses current labor force state to compute equilibrium deviations that will affect this year's wages.
-        // Included in BOTH schedules: in year 1 it only initializes (no feedback), so that
-        // latchBaselineFromPostLaborMarket (called later in LabourMarketAndIncomeUpdate) can
-        // latch the baseline immediately. Without this, initialization is deferred to year 2,
-        // adding an unnecessary 1-year delay before the first DSGE output.
+        // MACRO MODEL (if enabled): sets this year's wage before the labour market, from the
+        // DSGE scenario's shocks (cycle) and the planner's path (trend). Nothing from SimPaths
+        // enters the DSGE; SimPaths' labour supply reaches the planner alone, at
+        // MacroEndYearCapture. Placed AFTER union matching so all BenefitUnits exist.
+        // Included in BOTH schedules, so the macro layer initialises and records the start year.
         firstYearSched.addEvent(this, Processes.DSGEMacroUpdate);
         yearlySchedule.addEvent(this, Processes.DSGEMacroUpdate);
 
@@ -812,11 +802,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
             pw.println(line);
             line = "mm_dsgeMaxStateDeviation: " + mm_dsgeMaxStateDeviation;
             pw.println(line);
-            line = "mm_ramseyFeedbackMargins: " + mm_ramseyFeedbackMargins.name().toLowerCase();
-            pw.println(line);
             line = "mm_ramseyFeedbackPersistence: " + mm_ramseyFeedbackPersistence;
-            pw.println(line);
-            line = "mm_ramseyFeedbackHoursPersistence: " + mm_ramseyFeedbackHoursPersistence;
             pw.println(line);
         } catch (IOException ioe) {
             throw new RuntimeException(ioe);
@@ -974,11 +960,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                 if (commentsOn) log.info("Labour market update complete.");
 
                 if (macroManager.isRecorderActive()) {
-                    macroManager.latchBaselineFromPostLaborMarket(year, persons);
-                }
-
-                if (macroManager.isRecorderActive()) {
-                    macroManager.logLaborSupplyDiagnostics(year, persons, "post-labour-market");
+                    macroManager.latchStartYearAnchorsPostLabourMarket(year, persons);
                 }
             }
             case Timer -> {
@@ -3181,20 +3163,9 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
             log.warn("mm_ramseyScenario='" + mm_ramseyScenario + "' is ignored: " + mode
                     + " does not run the Ramsey trend layer.");
         }
-        if (mm_ramseyFeedbackMargins != MacroFeedbackMargins.EMPLOYMENT_AND_HOURS
-                && !mm_macroModel.usesRamseyTrend()) {
-            log.warn("mm_ramseyFeedbackMargins=" + mm_ramseyFeedbackMargins.name().toLowerCase()
-                    + " is ignored: " + mode + " does not run the Ramsey trend layer.");
-        }
-        if (mm_ramseyFeedbackPersistence != 1.0 && !mm_ramseyFeedbackMargins.feedsEmployment()) {
-            log.warn("mm_ramseyFeedbackPersistence=" + mm_ramseyFeedbackPersistence + " is ignored:"
-                    + " mm_ramseyFeedbackMargins=" + mm_ramseyFeedbackMargins.name().toLowerCase()
-                    + " does not feed back employment.");
-        }
-        if (mm_ramseyFeedbackHoursPersistence != 1.0 && !mm_ramseyFeedbackMargins.feedsHours()) {
-            log.warn("mm_ramseyFeedbackHoursPersistence=" + mm_ramseyFeedbackHoursPersistence
-                    + " is ignored: mm_ramseyFeedbackMargins=" + mm_ramseyFeedbackMargins.name().toLowerCase()
-                    + " does not feed back hours.");
+        if (mm_ramseyFeedbackPersistence != 1.0 && !mm_macroModel.usesRamseyTrend()) {
+            log.warn("mm_ramseyFeedbackPersistence=" + mm_ramseyFeedbackPersistence + " is ignored: "
+                    + mode + " does not run the Ramsey trend layer.");
         }
     }
 
@@ -3231,15 +3202,6 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         this.mm_macroLogging = level;
         macroManager.setLogMacroState(level.logsState());
         macroManager.setVerboseMacroLogging(level.isVerbose());
-    }
-
-    public MacroFeedbackMargins getMm_ramseyFeedbackMargins() {
-        return mm_ramseyFeedbackMargins;
-    }
-
-    public void setMm_ramseyFeedbackMargins(MacroFeedbackMargins margins) {
-        this.mm_ramseyFeedbackMargins = margins;
-        macroManager.setRamseyFeedbackMargins(margins);
     }
 
     public String getMm_dsgeShockScenario() {

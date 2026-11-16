@@ -36,9 +36,7 @@ class CommittedBundlesTest {
         String[] shocks = model.getShockNames();
         for (int j = 0; j < shocks.length; j++) {
             if (!Files.exists(bundle.resolve("irfs_" + shocks[j] + ".csv"))) continue;
-            // eps_L and eps_h arrive from SimPaths in percent; every other shock in sigma units.
-            boolean sigmaUnits = j != model.getIdxEpsL() && j != model.getIdxEpsH();
-            DSGEIrfParityTest.assertIrfMatches(bundle.toString(), shocks[j], sigmaUnits);
+            DSGEIrfParityTest.assertIrfMatches(bundle.toString(), shocks[j]);   // every shock in sigma units
             replayed++;
         }
         assertEquals(EXPORTED_IRFS, replayed, bundle + ": expected an exported IRF for "

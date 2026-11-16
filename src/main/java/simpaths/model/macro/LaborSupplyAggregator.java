@@ -5,38 +5,29 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Predicate;
 import org.apache.log4j.Logger;
 
 import simpaths.model.Person;
 import simpaths.model.enums.Labour;
 
 /**
- * Aggregates individual labor supply decisions into macro shocks for the DSGE model.
- * 
- * This class bridges the microsimulation (individual labor supply decisions) with the
- * macroeconomic model (aggregate labor force and hours shocks). It computes:
- * 
- * <ul>
- *   <li><b>eps_L</b>: Labor force participation shock (log-deviation from baseline)</li>
- *   <li><b>eps_h</b>: Average hours per worker shock (log-deviation from baseline)</li>
- * </ul>
- * 
+ * Aggregates SimPaths' labour supply for the macro layer's level diagnostics
+ * (MacroPaths.csv) and for the planner's end-of-year feedback. It computes no shocks:
+ * the DSGE takes no input from SimPaths.
+ *
  * <h3>Aggregation Strategy</h3>
- * 
+ *
  * <p>For each working-age person in the microsimulation:</p>
  * <ol>
  *   <li>Labor force participation: Count persons with positive hours (hours &gt; 0)</li>
  *   <li>Hours per worker: Average weekly hours among those working</li>
  * </ol>
- * 
- * <p>These are then compared to baseline values to compute PERCENT log-deviations
- * (the units of the exported DSGE, which is estimated on 100&times;log-dev data):</p>
- * <pre>
- *   eps_L = 100 &times; ln(L_current / L_baseline)
- *   eps_h = 100 &times; ln(h_current / h_baseline)
- * </pre>
- * 
+ *
+ * <p>{@link #computeRawAggregates} returns these with the working-age population, the
+ * at-risk pool, the total population and the labour-category distribution. The start-year
+ * anchors (L and h latched once after the first labour market, the head counts eagerly in
+ * the start year) are the bases of the level indices.</p>
+ *
  * <h3>Extensive Margin (L) — Critical Design Decision</h3>
  * 
  * <p>L is the population-weighted count of persons who are <b>at risk of work</b>
@@ -47,7 +38,7 @@ import simpaths.model.enums.Labour;
  * makes L responsive to wage changes (the micro-macro feedback) and prevents a
  * person who never entered this year's labour-supply model from leaking into L
  * via stale hours. The at-risk pool determines who enters the labor supply
- * model but does not itself drive eps_L.</p>
+ * model but is not itself part of L.</p>
  *
  * <h3>Weighting — Correct For Both Run Modes</h3>
  *
@@ -60,28 +51,14 @@ import simpaths.model.enums.Labour;
  *       the mother's weight. Weighted sums then reduce identically to head
  *       counts, so behaviour is unchanged.</li>
  *   <li><b>Weighted</b> ({@code useWeights = true}): survey households are kept
- *       with heterogeneous survey weights. A head count would bias eps_L,
- *       eps_h, and the cumulative capital-deepening trend; weighting removes
- *       that bias.</li>
+ *       with heterogeneous survey weights. A head count would bias L, h and
+ *       the level indices; weighting removes that bias.</li>
  * </ul>
  * <p>Because weighting by {@code getWeight()} is correct in <em>both</em> modes,
  * the aggregator no longer has a hidden coupling to the run mode. Invalid
  * weights (null, non-finite, non-positive) are rejected loudly rather than
- * silently degrading the shocks (see {@code personWeight}).</p>
- * 
- * <h3>Usage in Iterative Equilibrium</h3>
- * 
- * <pre>{@code
- * LaborSupplyAggregator aggregator = new LaborSupplyAggregator();
- * aggregator.setBaseline(baselineL, baselineH);
- * 
- * // After microsim labor market update:
- * LaborSupplyShocks shocks = aggregator.aggregate(model.getPersons());
- * 
- * // Feed to dynamic DSGE state-space step:
- * // DSGEState state = dsge.stepAnnual(shocks.epsL(), otherShocks);
- * }</pre>
- * 
+ * silently degrading the aggregates (see {@code personWeight}).</p>
+ *
  * @author DSGE-SimPaths Integration
  * @version 1.0
  */
@@ -99,9 +76,9 @@ public class LaborSupplyAggregator {
      *
      *  - It MUST equal the working-age band used by build_population_projection.m
      *    in input_processing/macromodel/ (currently 15-64), because that script builds
-     *    the N path the Ramsey trend layer consumes. eps_L and the exported
+     *    the N path the Ramsey trend layer consumes. L and the exported
      *    demographic decomposition must be measured on the SAME population the
-     *    DSGE's labour input N represents; if these diverge, the micro-macro
+     *    planner's labour input N represents; if these diverge, the planner's
      *    feedback and the demographic series are silently measured against the
      *    wrong denominator. There is no shared config between the MATLAB build
      *    and this Java runtime, so the only thing keeping them in sync is this
@@ -126,44 +103,13 @@ public class LaborSupplyAggregator {
     
     /** Minimum valid hours to count as "working" */
     private static final double MIN_HOURS_WORKING = 0.5;
-    
-    /** Small constant to avoid log(0) */
-    private static final double EPSILON = 1e-10;
-
-    /**
-     * Conversion from natural-log deviations to the DSGE's percent units.
-     * The exported policy matrices are estimated on 100&times;log-deviation data,
-     * so eps_L/eps_h handed to {@code DSGEModel} must be percent log-deviations.
-     */
-    static final double PERCENT_PER_LOG_DEV = 100.0;
-    
-    // ========== Baseline Values ==========
-    
-    /** Baseline labor force participation (number of workers) */
-    private double baselineL;
-    
-    /** Baseline average hours per worker */
-    private double baselineH;
-    
-    /** Whether baseline has been set */
-    private boolean baselineSet = false;
-
-    /**
-     * Whether the current baseline is the post-labour-market latch of {@code startYear+1}
-     * ({@link #computeAndSetBaseline}). Every later {@link #aggregate} is taken before the
-     * year's labour market, so the first one after that latch would compare two different
-     * snapshots of one year's turnover (retirements, deaths, entrants without hours). That
-     * call reports no shock and rolls the baseline to its own, pre-labour-market snapshot;
-     * from then on the shocks are year-over-year changes between snapshots of the same kind.
-     */
-    private boolean baselineIsPostLabourMarket = false;
 
     /** Whether DSGE logging is enabled */
     private boolean logEnabled = false;
-    
-    // ========== Cumulative Tracking (for capital-deepening trend) ==========
-    
-    /** Start-year labor force (fixed, never rolls forward). Used for cumulative ln(L_t/L_0). */
+
+    // ========== Start-Year Anchors (level indices) ==========
+
+    /** Start-year labor force (fixed, never rolls forward). Used for the L level index. */
     private double startYearL;
     
     /** Start-year average hours per worker (fixed, never rolls forward). Used for h level index. */
@@ -186,87 +132,33 @@ public class LaborSupplyAggregator {
      * recorded. These are labour-market-invariant head counts and are latched
      * eagerly in the first simulation year (before the labour market runs), so
      * the demographic indices are available from year 1 without waiting for the
-     * post-labour-market L/h baseline latch. Split from {@link #startYearLSet}
+     * post-labour-market L/h anchor latch. Split from {@link #startYearLSet}
      * on purpose: L/h MUST be captured post-labour-market (input-DB hours differ
      * from model-assigned hours), but the head counts must not be — see
      * {@link #latchDemographicAnchors}.
      */
     private boolean startYearDemogSet = false;
-    
-    /** Cumulative log-change in labor force since start year: sum of ln(L_t/L_{t-1}) */
-    private double cumulativeLnL = 0.0;
-    
-    // ========== Working-Age Filter ==========
-    
-    /** Filter to determine which persons are in the working-age population */
-    private Predicate<Person> workingAgeFilter;
-    
-    // ========== Latest Aggregation Results (for debugging) ==========
-    
-    private double lastL;
-    private double lastH;
-    private double lastWorkingAgeCount;
-    private double lastWorkersCount;
-    
-    // ========== Constructor ==========
-    
-    /**
-     * Create an aggregator with default working-age filter (15-64, not student/retired).
-     */
-    public LaborSupplyAggregator() {
-        this.workingAgeFilter = this::defaultWorkingAgeFilter;
-    }
-    
-    // ========== Baseline Management ==========
-    
-    /**
-     * Set the baseline labor supply values.
-     * 
-     * <p>These should be computed from the microsim under baseline/status-quo conditions,
-     * before any policy changes or shocks are applied.</p>
-     * 
-     * @param baselineL Baseline labor force (number of workers or participation rate)
-     * @param baselineH Baseline average hours per worker
-     * @throws IllegalArgumentException If values are non-positive
-     */
-    public void setBaseline(double baselineL, double baselineH) {
-        if (baselineL <= 0) {
-            throw new IllegalArgumentException("Baseline labor force must be positive: " + baselineL);
-        }
-        if (baselineH <= 0) {
-            throw new IllegalArgumentException("Baseline hours must be positive: " + baselineH);
-        }
-        
-        this.baselineL = baselineL;
-        this.baselineH = baselineH;
-        this.baselineSet = true;
 
-        if (logEnabled) {
-            log.info(String.format("Baseline set: L=%.2f workers, h=%.2f hours/week", baselineL, baselineH));
-        }
-    }
-    
+    // ========== Start-Year Latch ==========
+
     /**
-     * Compute and set baseline from current microsim state.
-     * 
-     * <p>Call this at the start of simulation (or after baseline run) to capture
-     * the reference labor supply levels.</p>
-     * 
-     * @param persons Set of all persons in the simulation
-     * @return The computed baseline aggregates
+     * Latch the start-year anchors from the post-labour-market population of the first year
+     * with a labour market ({@code startYear + 1}). The L/h anchors are latched once and
+     * never move again; the demographic anchors are latched here only if the eager start-year
+     * latch ({@link #latchDemographicAnchors}) has not run. The latch also opens the gate of
+     * the workers-derived level columns ({@link #isStartYearLatched}).
+     *
+     * @param persons Set of all persons in the simulation, after the labour market
+     * @return The aggregates of {@code persons}
      */
-    public LaborSupplyAggregates computeAndSetBaseline(Set<Person> persons) {
+    public LaborSupplyAggregates latchStartYearAnchors(Set<Person> persons) {
         LaborSupplyAggregates aggregates = computeRawAggregates(persons);
-        setBaseline(aggregates.laborForce(), aggregates.avgHoursPerWorker());
-        baselineIsPostLabourMarket = true;
-        
-        // L/h start anchors + cumulative tracking: MUST be the post-labour-market
-        // state, latched once.
+
+        // L/h start anchors: MUST be the post-labour-market state, latched once.
         if (!startYearLSet) {
             startYearL = aggregates.laborForce();
             startYearH = aggregates.avgHoursPerWorker();
             startYearLSet = true;
-            cumulativeLnL = 0.0;
             if (logEnabled) {
                 log.info(String.format("Start-year L/h recorded (post-labour-market): L_0=%.0f, h_0=%.2f",
                         startYearL, startYearH));
@@ -302,12 +194,12 @@ public class LaborSupplyAggregator {
      * identical to the post-labour-market latch — only earlier, so the
      * demographic indices (wap_level, atrisk_level, total_population) are
      * emitted from the first simulated year instead of being skipped until the
-     * L/h baseline is set. It deliberately does NOT touch the L/h anchors,
-     * {@code baselineSet}, or {@code cumulativeLnL}: those must remain
-     * post-labour-market for eps_L / capital-deepening correctness.</p>
+     * L/h anchors are latched. It deliberately does NOT touch the L/h anchors
+     * or the post-labour-market latch: those must remain post-labour-market,
+     * because the input database's hours differ from model-assigned hours.</p>
      *
      * <p>Idempotent: a no-op once the anchors are set (by this method or the
-     * {@link #computeAndSetBaseline} fallback).</p>
+     * {@link #latchStartYearAnchors} fallback).</p>
      *
      * @param persons Set of all persons in the simulation
      */
@@ -327,109 +219,18 @@ public class LaborSupplyAggregator {
     }
     
     /**
-     * Check if baseline has been set.
+     * Whether the post-labour-market latch ({@link #latchStartYearAnchors}) has run. Gates the
+     * workers-derived level columns, which are meaningful only once L comes from SimPaths'
+     * labour-supply model.
      */
-    public boolean isBaselineSet() {
-        return baselineSet;
+    public boolean isStartYearLatched() {
+        return startYearLSet;
     }
-    
+
     public void setLogEnabled(boolean logEnabled) {
         this.logEnabled = logEnabled;
     }
-    
-    /**
-     * Advance the baseline to the most recently observed values.
-     * 
-     * <p>Call this at the END of each simulation year (after aggregate() has been called).
-     * The next year's shocks will then be measured relative to this year's labor supply,
-     * producing year-over-year changes instead of cumulative deviations.</p>
-     * 
-     * <p>Requires valid baseline and latest aggregate values.</p>
-     */
-    public void advanceBaseline() {
-        if (!baselineSet) {
-            if (logEnabled) {
-                log.warn("Cannot advance baseline: baseline not yet set");
-            }
-            return;
-        }
-        if (lastL <= 0 || lastH <= 0) {
-            if (logEnabled) {
-                log.warn(String.format("Cannot advance baseline: invalid last values L=%.1f, h=%.2f", lastL, lastH));
-            }
-            return;
-        }
-        
-        double oldL = baselineL;
-        double oldH = baselineH;
-        
-        // Accumulate year-over-year log-change for capital-deepening trend
-        if (oldL > EPSILON && lastL > EPSILON) {
-            double yearOverYearLnL = Math.log(lastL / oldL);
-            cumulativeLnL += yearOverYearLnL;
-            if (logEnabled) {
-                log.info(String.format("Capital deepening: year-over-year ln(L)=%+.4f, cumulative=%+.4f (L_0=%.0f, L_now=%.0f)",
-                        yearOverYearLnL, cumulativeLnL, startYearL, lastL));
-            }
-        }
-        
-        baselineL = lastL;
-        baselineH = lastH;
-        
-        if (logEnabled) {
-            log.info(String.format("Rolling baseline advanced: L=%.0f→%.0f, h=%.2f→%.2f",
-                oldL, baselineL, oldH, baselineH));
-        }
-    }
-    
-    /**
-     * Get baseline labor force.
-     */
-    public double getBaselineL() {
-        validateBaselineSet();
-        return baselineL;
-    }
-    
-    /**
-     * Get baseline hours per worker.
-     */
-    public double getBaselineH() {
-        validateBaselineSet();
-        return baselineH;
-    }
-    
-    /**
-     * Get cumulative log-change in labor force since start year.
-     * 
-     * <p>This equals ln(L_current / L_startYear), accumulated via summing
-     * year-over-year changes. Used for the capital-deepening wage trend.</p>
-     * 
-     * <p>Negative values mean the labor force has shrunk (typical for aging
-     * economies), which produces a positive capital-deepening wage effect.</p>
-     * 
-     * @return cumulative ln(L_t / L_0), negative means labor force declined
-     */
-    public double getCumulativeLnL() {
-        return cumulativeLnL;
-    }
 
-    /**
-     * Get cumulative log-change including the current year-over-year step.
-     *
-     * <p>This is a preview that adds ln(L_t / L_{t-1}) based on the latest
-     * aggregate (lastL) and current rolling baseline (baselineL) without
-     * mutating state.</p>
-     *
-     * @return cumulative ln(L_t / L_0) including the current year
-     */
-    public double getCumulativeLnLIncludingCurrent() {
-        if (!baselineSet || lastL <= EPSILON || baselineL <= EPSILON) {
-            return cumulativeLnL;
-        }
-        double yearOverYearLnL = Math.log(lastL / baselineL);
-        return cumulativeLnL + yearOverYearLnL;
-    }
-    
     /**
      * Get the start-year labor force (L_0).
      * @return start-year labor force count, or 0 if not yet set
@@ -471,90 +272,12 @@ public class LaborSupplyAggregator {
     }
     
     // ========== Core Aggregation ==========
-    
-    /**
-     * Aggregate individual labor supply into macro shocks.
-     * 
-     * <p>Computes current labor force and hours, then returns log-deviations from baseline.</p>
-     * 
-     * @param persons Set of all persons in the simulation
-     * @return Labor supply shocks (eps_L, eps_h) for the DSGE model
-     * @throws IllegalStateException If baseline not set
-     */
-    public LaborSupplyShocks aggregate(Set<Person> persons) {
-        return aggregate(persons, 0.0);
-    }
 
     /**
-     * Aggregate individual labor supply into macro shocks, net of the labour growth the
-     * macro layers already assume.
+     * Aggregate SimPaths' labour supply: L, mean hours per worker, the head counts and the
+     * labour-category distribution of {@code persons}. Reads the persons only; no state of
+     * this aggregator changes.
      *
-     * <p>The DSGE was estimated on the labour force relative to its demographic trend
-     * ({@code detrended.L = 100 (ln L - ln L_demo)} in {@code ramsey_trend.m}), and the
-     * Ramsey layer prices the projected workforce decline in the trend wage. The raw
-     * year-over-year change of the headcount would hand the DSGE that same decline as a
-     * standing shock it was never estimated to see (JuergenWiemers/SimPathsEU#26), so
-     * {@code eps_L = 100 ln(L_t / L_{t-1}) - assumedLaborGrowthPct}: the year-over-year
-     * change of the employment rate against the projection. Hours are not detrended; the
-     * planner's own hours trend is deliberately kept out of the feedback.</p>
-     *
-     * <p>The first call after the post-labour-market latch reports no shock at all and
-     * rolls the baseline, see {@link #baselineIsPostLabourMarket}.</p>
-     *
-     * @param persons               Set of all persons in the simulation
-     * @param assumedLaborGrowthPct The projection's own growth of the labour input from the
-     *                              previous year to this one, as a percent log change
-     * @return Labor supply shocks (eps_L, eps_h) for the DSGE model
-     * @throws IllegalStateException If baseline not set
-     */
-    public LaborSupplyShocks aggregate(Set<Person> persons, double assumedLaborGrowthPct) {
-        validateBaselineSet();
-        Objects.requireNonNull(persons, "Persons set cannot be null");
-
-        // Compute current aggregates
-        LaborSupplyAggregates current = computeRawAggregates(persons);
-
-        // Store for debugging
-        this.lastL = current.laborForce();
-        this.lastH = current.avgHoursPerWorker();
-        this.lastWorkingAgeCount = current.workingAgePopulation();
-        this.lastWorkersCount = current.laborForce();
-
-        if (baselineIsPostLabourMarket) {
-            // Mixed snapshots: the baseline was taken after last year's labour market, this
-            // aggregate before this year's. Report no shock and make this pre-labour-market
-            // snapshot the baseline; advanceBaseline() then finds nothing to accumulate.
-            baselineIsPostLabourMarket = false;
-            if (current.laborForce() > EPSILON && current.avgHoursPerWorker() > EPSILON) {
-                baselineL = current.laborForce();
-                baselineH = current.avgHoursPerWorker();
-            }
-            if (logEnabled) {
-                log.info(String.format(
-                        "Labor aggregation: first pre-labour-market snapshot after the post-labour-market latch; "
-                        + "no shock reported, baseline rolled to L=%.1f, h=%.2f",
-                        baselineL, baselineH));
-            }
-            return new LaborSupplyShocks(0.0, 0.0, current);
-        }
-
-        // Compute log-deviations from baseline, net of the assumed growth of the labour input
-        double epsL = computeLogDeviation(current.laborForce(), baselineL) - assumedLaborGrowthPct;
-        double epsH = computeLogDeviation(current.avgHoursPerWorker(), baselineH);
-        
-        if (logEnabled && log.isDebugEnabled()) {
-            log.debug(String.format(
-                "Labor aggregation: L=%.1f (baseline=%.1f, eps_L=%.4f), h=%.2f (baseline=%.2f, eps_h=%.4f)",
-                current.laborForce(), baselineL, epsL,
-                current.avgHoursPerWorker(), baselineH, epsH));
-        }
-        
-        return new LaborSupplyShocks(epsL, epsH, current);
-    }
-    
-    /**
-     * Aggregate without computing deviations (for baseline computation or diagnostics).
-     * 
      * @param persons Set of all persons in the simulation
      * @return Raw labor supply aggregates
      */
@@ -566,8 +289,8 @@ public class LaborSupplyAggregator {
         // Household.resetWeights(1.0), and newborns inherit the mother's weight),
         // so these weighted sums reduce identically to plain head counts. In
         // weighted runs survey weights are heterogeneous and a head count would
-        // bias eps_L / eps_h and the capital-deepening trend. Weighting by
-        // getWeight() is therefore correct in BOTH modes.
+        // bias L, h and the level indices. Weighting by getWeight() is therefore
+        // correct in BOTH modes.
         double totalPopulationWeight = 0.0;
         double workingAgeWeight = 0.0;
         double atRiskWeight = 0.0;
@@ -595,8 +318,8 @@ public class LaborSupplyAggregator {
 
             workingAgeWeight += weight;
 
-            // Labor force: exclude students and retired by default
-            if (!workingAgeFilter.test(person)) {
+            // Labor force: the at-risk pool only (students, retired etc. excluded)
+            if (!defaultWorkingAgeFilter(person)) {
                 continue;
             }
 
@@ -691,9 +414,9 @@ public class LaborSupplyAggregator {
      * Returns the person's population weight, failing loudly on values that
      * would silently corrupt the aggregates. A non-finite or non-positive
      * weight means the run is misconfigured (e.g. a person created without a
-     * weight); silently treating it as 0 or 1 would bias eps_L and the
-     * capital-deepening trend with no warning, so this is a hard error rather
-     * than a degraded-but-quiet path.
+     * weight); silently treating it as 0 or 1 would bias L and the planner's
+     * feedback with no warning, so this is a hard error rather than a
+     * degraded-but-quiet path.
      */
     private double personWeight(Person person) {
         Double w = person.getWeight();
@@ -717,37 +440,6 @@ public class LaborSupplyAggregator {
             // Labour supply not yet initialized
             return 0;
         }
-    }
-    
-    /**
-     * Compute the shock in the DSGE's units: 100 * ln(current / baseline).
-     *
-     * <p><b>Units contract:</b> the exported policy matrices are estimated on
-     * percent-unit data (the Ramsey detrending writes observables as
-     * 100&times;log-deviations, so e.g. sigma_L = 0.783 means 0.78%). eps_L/eps_h
-     * must therefore be handed to the DSGE as percent log-deviations. Passing a
-     * raw ln fraction (0.05 for a 5% change) would enter the model as a 0.05%
-     * shock — a factor-100 attenuation of the whole cyclical feedback channel.</p>
-     *
-     * <p>(Package-private for unit testing.)</p>
-     */
-    double computeLogDeviation(double current, double baseline) {
-        // Handle edge cases
-        if (baseline <= EPSILON) {
-            if (logEnabled) {
-                log.warn("Baseline is zero or negative, returning 0 for log-deviation");
-            }
-            return 0.0;
-        }
-        if (current <= EPSILON) {
-            // Large negative shock (approaching -infinity), cap it
-            if (logEnabled) {
-                log.warn("Current value is zero or negative, capping log-deviation at -500 (percent)");
-            }
-            return -5.0 * PERCENT_PER_LOG_DEV;
-        }
-
-        return PERCENT_PER_LOG_DEV * Math.log(current / baseline);
     }
     
     // ========== Working-Age Filter ==========
@@ -811,25 +503,9 @@ public class LaborSupplyAggregator {
     }
     
     /**
-     * Set a custom working-age filter.
-     * 
-     * @param filter Predicate that returns true for persons in the working-age population
-     */
-    public void setWorkingAgeFilter(Predicate<Person> filter) {
-        this.workingAgeFilter = Objects.requireNonNull(filter, "Filter cannot be null");
-    }
-    
-    /**
-     * Reset to default working-age filter.
-     */
-    public void resetWorkingAgeFilter() {
-        this.workingAgeFilter = this::defaultWorkingAgeFilter;
-    }
-
-    /**
-     * Whether a person is in the at-risk pool — i.e. would pass the current
+     * Whether a person is in the at-risk pool — i.e. would pass the
      * working-age filter and so be eligible to enter the discrete-choice labour
-     * supply model. This is the canonical entry gate used by {@link #aggregate}
+     * supply model. This is the canonical entry gate used by {@link #computeRawAggregates}
      * to compute {@code atRiskPool}, so callers that need to measure something
      * over the same population (e.g. the realized-wage diagnostic) should use
      * this predicate rather than re-implementing the filter.
@@ -841,93 +517,28 @@ public class LaborSupplyAggregator {
         if (person == null) {
             return false;
         }
-        return workingAgeFilter.test(person);
-    }
-    
-    // ========== Diagnostic Methods ==========
-    
-    /**
-     * Get the last computed labor force (from most recent aggregate() call).
-     */
-    public double getLastL() {
-        return lastL;
-    }
-    
-    /**
-     * Get the last computed average hours (from most recent aggregate() call).
-     */
-    public double getLastH() {
-        return lastH;
-    }
-    
-    /**
-     * Get the last working-age population (weighted).
-     */
-    public double getLastWorkingAgeCount() {
-        return lastWorkingAgeCount;
+        return defaultWorkingAgeFilter(person);
     }
 
-    /**
-     * Get the last workers count (weighted extensive margin).
-     */
-    public double getLastWorkersCount() {
-        return lastWorkersCount;
-    }
-    
-    // ========== Validation ==========
-    
-    private void validateBaselineSet() {
-        if (!baselineSet) {
-            throw new IllegalStateException(
-                "Baseline not set. Call setBaseline() or computeAndSetBaseline() first.");
-        }
-    }
-    
     @Override
     public String toString() {
-        if (!baselineSet) {
-            return "LaborSupplyAggregator[baseline not set]";
+        if (!startYearLSet) {
+            return "LaborSupplyAggregator[start year not latched]";
         }
         return String.format(
-            "LaborSupplyAggregator[baseline: L=%.1f, h=%.2f; last: L=%.1f, h=%.2f]",
-            baselineL, baselineH, lastL, lastH);
+            "LaborSupplyAggregator[start year: L=%.1f, h=%.2f]", startYearL, startYearH);
     }
-    
+
     // ========== Inner Records ==========
-    
-    /**
-     * Container for labor supply shocks to feed into the DSGE model.
-     * 
-     * @param epsL  Labor force shock (log-deviation from baseline participation)
-     * @param epsH  Hours shock (log-deviation from baseline hours per worker)
-     * @param aggregates The raw aggregates that produced these shocks
-     */
-    public record LaborSupplyShocks(
-            double epsL,
-            double epsH,
-            LaborSupplyAggregates aggregates
-    ) {
-        /**
-         * Create zero shocks (steady state).
-         */
-        public static LaborSupplyShocks zero() {
-            return new LaborSupplyShocks(0.0, 0.0, null);
-        }
-        
-        @Override
-        public String toString() {
-            return String.format("LaborSupplyShocks[eps_L=%.4f, eps_h=%.4f]", epsL, epsH);
-        }
-    }
-    
+
     /**
      * Container for raw labor supply aggregates (before computing deviations).
      * 
      * <p><b>Critical distinction:</b></p>
      * <ul>
      *   <li>{@code laborForce} = extensive margin of labor supply = at-risk-of-work
-     *       persons with positive hours (hours > 0.5). This is what drives eps_L in the
-     *       DSGE and can respond to wage changes because it is measured AFTER the discrete
+     *       persons with positive hours (hours > 0.5). This is the L the planner's feedback
+     *       reads and can respond to wage changes because it is measured AFTER the discrete
      *       choice labor supply model.</li>
      *   <li>{@code atRiskPool} = persons aged 15-64 who are at risk of work in SimPaths'
      *       sense ({@link simpaths.model.Person#atRiskOfWork()}: not student/retired, not
@@ -940,7 +551,7 @@ public class LaborSupplyAggregator {
      * not raw head counts: they equal the head count when every weight is 1.0
      * (unweighted runs) and the survey-weighted total otherwise.</p>
      *
-     * @param laborForce          Extensive margin: weighted at-risk persons with positive hours (drives eps_L)
+     * @param laborForce          Extensive margin: weighted at-risk persons with positive hours (L)
      * @param avgHoursPerWorker   Weighted mean weekly hours among workers (intensive margin)
      * @param totalHours          Weighted total hours worked by all workers (sum of weight*hours)
      * @param workingAgePopulation Weighted working-age population (15-64)

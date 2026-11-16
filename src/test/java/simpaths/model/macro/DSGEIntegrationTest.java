@@ -57,7 +57,10 @@ class DSGEIntegrationTest {
     void testDynamicModelWageResponseToLaborShock() throws IOException {
         DSGEModel model = new DSGEModel();
         model.loadFromDirectory(PL_MODEL_PATH);
-        DSGEState response = model.stepAnnual(0.01);
+        int epsL = java.util.Arrays.asList(model.getShockNames()).indexOf("eps_L");
+        double[][] byQuarter = new double[4][model.getNumShocks()];
+        for (double[] quarter : byQuarter) quarter[epsL] = 0.01;
+        DSGEState response = model.stepAnnual(byQuarter);
 
         assertFalse(Double.isNaN(response.getWageDeviation()), "Wage response must be numeric");
         assertFalse(Double.isNaN(response.getInflationDeviation()), "Inflation response must be numeric");
@@ -73,7 +76,7 @@ class DSGEIntegrationTest {
         model.loadFromDirectory(PL_MODEL_PATH);
 
         double[] shocks = new double[model.getNumShocks()];
-        shocks[model.getIdxEpsL()] = 0.01;
+        shocks[java.util.Arrays.asList(model.getShockNames()).indexOf("eps_L")] = 0.01;
         model.stepQuarterly(shocks);
 
         DSGEState stateAfterShock = model.stepQuarterly(new double[model.getNumShocks()]);
@@ -404,7 +407,7 @@ class DSGEIntegrationTest {
 
         @Test
         @EnabledIf("modelFilesExist")
-        void testBaselineMustBeLatchedPostLaborMarket() {
+        void testStartYearAnchorsLatchOncePostLabourMarket() throws Exception {
         MacroModelManager manager = new MacroModelManager();
         manager.setEnabled(true);
         manager.setUseDsge(true);
@@ -418,35 +421,40 @@ class DSGEIntegrationTest {
         when(worker.getLabourSupplyHoursWeekly()).thenReturn(40);
         Set<Person> persons = Set.of(worker);
 
-        // Year 1: initialize DSGE, but baseline must remain unset until post-labor-market latch.
-        // The start year is the bundle's handoff year: since 2026-10-20 the DSGE-only mode loads
-        // the population projection for the labour shock and aligns it on the handoff quarter,
-        // exactly as the trend layer does, so an arbitrary start year is refused.
+        // Year 1: initialize DSGE; the start-year anchors stay unlatched until the
+        // post-labour-market latch. The start year is the bundle's handoff year: DSGE-only
+        // mode refuses any other.
         manager.updateEquilibrium(2023, 2023, "PL", persons, Collections.emptySet(), false);
-        assertFalse(manager.isLaborSupplyBaselineSet(),
-            "Baseline should not be auto-set during first-year DSGE macro update");
+        assertFalse(manager.isStartYearLatched(),
+            "Anchors should not be latched during the first-year macro update");
 
-        // Strict fix: latch baseline from post-labor-market state.
-        assertTrue(manager.latchBaselineFromPostLaborMarket(2023, persons),
-            "Baseline should be latched exactly once from post-labor-market state");
-        assertTrue(manager.isLaborSupplyBaselineSet(),
-            "Baseline should be set after explicit post-labor-market latch");
-        assertFalse(manager.latchBaselineFromPostLaborMarket(2023, persons),
+        assertTrue(manager.latchStartYearAnchorsPostLabourMarket(2023, persons),
+            "Anchors should be latched exactly once from the post-labour-market state");
+        assertTrue(manager.isStartYearLatched(),
+            "Anchors should be latched after the explicit post-labour-market latch");
+        assertFalse(manager.latchStartYearAnchorsPostLabourMarket(2023, persons),
             "Second latch call should be a no-op");
 
-        // Year 2 should run normally now that baseline exists.
         manager.updateEquilibrium(2024, 2023, "PL", persons, Collections.emptySet(), false);
         assertTrue(Double.isFinite(manager.getWageDeviation()),
             "Wage deviation should be finite after year-2 DSGE update");
 
-        // Control check: without explicit latch, baseline remains unset in year 2 and DSGE keeps skipping.
+        // Without a latch the DSGE still runs in year 2: no year waits for a baseline any more.
         MacroModelManager noLatchManager = new MacroModelManager();
         noLatchManager.setEnabled(true);
         noLatchManager.setUseDsge(true);
         noLatchManager.setUseRamseyTrend(false);
         noLatchManager.updateEquilibrium(2023, 2023, "PL", persons, Collections.emptySet(), false);
         noLatchManager.updateEquilibrium(2024, 2023, "PL", persons, Collections.emptySet(), false);
-        assertFalse(noLatchManager.isLaborSupplyBaselineSet(),
-            "Without post-labor-market latch, baseline should remain unset");
+        assertFalse(noLatchManager.isStartYearLatched(),
+            "Without the post-labour-market latch, the anchors remain unlatched");
+        assertTrue(Double.isFinite(noLatchManager.getInflationDeviation()),
+            "The 2024 update ran the DSGE");
+        java.lang.reflect.Field dsgeField = MacroModelManager.class.getDeclaredField("dynamicDsgeModel");
+        dsgeField.setAccessible(true);
+        DSGEModel dsge = (DSGEModel) dsgeField.get(noLatchManager);
+        for (double s : dsge.getState()) {
+            assertEquals(0.0, s, 0.0, "no scenario: the DSGE state stays at zero");
+        }
         }
 }

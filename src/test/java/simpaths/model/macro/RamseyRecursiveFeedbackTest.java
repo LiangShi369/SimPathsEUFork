@@ -1,6 +1,5 @@
 package simpaths.model.macro;
 
-import simpaths.model.enums.MacroFeedbackMargins;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -96,7 +95,6 @@ public class RamseyRecursiveFeedbackTest {
         m.setUseDsge(false);
         m.setUseRamseyTrend(true);
         m.setPathRecordingEnabled(false);
-        m.setRamseyFeedbackMargins(MacroFeedbackMargins.EMPLOYMENT_AND_HOURS);
         m.setRamseyFeedbackPersistence(persistence);
         setField(m, "simulationStartYear", START_YEAR);
         m.initializeRamseyTrend(PL_MODEL_PATH);
@@ -112,7 +110,6 @@ public class RamseyRecursiveFeedbackTest {
         m.setUseDsge(false);
         m.setUseRamseyTrend(true);
         m.setPathRecordingEnabled(false);
-        m.setRamseyFeedbackMargins(MacroFeedbackMargins.EMPLOYMENT_AND_HOURS);
         m.setRamseyFeedbackPersistence(persistence);
         m.setRamseyScenario(scenarioFile);
         setField(m, "simulationStartYear", START_YEAR);
@@ -193,14 +190,6 @@ public class RamseyRecursiveFeedbackTest {
         // extra investment out of one year's windfall moves next year's wage.
         assertTrue(Math.abs(revisionPct) < 0.10,
                 "transitory belief should give near-zero wage revision, got " + revisionPct + "%");
-    }
-
-    @Test
-    public void testFeedbackDisabledIsNoOp() throws Exception {
-        MacroModelManager m = newFeedbackManager(1.0);
-        m.setRamseyFeedbackMargins(MacroFeedbackMargins.NONE);
-        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0);
-        assertTrue(Double.isNaN((Double) getField(m, "ramseyFeedbackLambda", Double.class)));
     }
 
     /**
@@ -339,14 +328,6 @@ public class RamseyRecursiveFeedbackTest {
 
     // ========== Hours feedback ==========
 
-    private MacroModelManager newHoursFeedbackManager(double persistence, double hoursPersistence)
-            throws Exception {
-        MacroModelManager m = newFeedbackManager(persistence);
-        m.setRamseyFeedbackMargins(MacroFeedbackMargins.EMPLOYMENT_AND_HOURS);
-        m.setRamseyFeedbackHoursPersistence(hoursPersistence);
-        return m;
-    }
-
     /** Mean of the 4 quarters of calendar year `year` in the retained original hours path. */
     private double assumedMeanH(MacroModelManager m, int year) throws Exception {
         double[] projH = getField(m, "ramseyProjH", double[].class);
@@ -361,26 +342,10 @@ public class RamseyRecursiveFeedbackTest {
      */
     @Test
     public void testHoursReferenceLatchesSimPathsOwnLevel() throws Exception {
-        MacroModelManager m = newHoursFeedbackManager(1.0, 1.0);
+        MacroModelManager m = newFeedbackManager(1.0);
         m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0);
 
         assertEquals(40.0, (double) getField(m, "ramseyFeedbackHoursBase", Double.class), 1e-12);
-    }
-
-    /**
-     * The hours reference is latched in every mode, including employment-only. Measurement is
-     * deliberately separate from application: latching costs nothing and keeps h_realized_gap
-     * populated as a diagnostic while the hours path itself stays unrevised, which
-     * {@link #testHoursSurpriseIgnoredWhenHoursFeedbackOff()} pins.
-     */
-    @Test
-    public void testHoursReferenceIsLatchedEvenWhenHoursNotFedBack() throws Exception {
-        MacroModelManager m = newFeedbackManager(1.0);
-        m.setRamseyFeedbackMargins(MacroFeedbackMargins.EMPLOYMENT);   // employment only
-        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0);
-
-        assertEquals(40.0, (Double) getField(m, "ramseyFeedbackHoursBase", Double.class), 1e-12);
-        assertFalse(Double.isNaN((Double) getField(m, "ramseyFeedbackLambda", Double.class)));
     }
 
     /**
@@ -391,7 +356,7 @@ public class RamseyRecursiveFeedbackTest {
      */
     @Test
     public void testFlatSimPathsHoursLeaveTheDecliningProjectionAlone() throws Exception {
-        MacroModelManager m = newHoursFeedbackManager(1.0, 1.0);
+        MacroModelManager m = newFeedbackManager(1.0);
         // The planner's own hours path really does decline, or the test proves nothing.
         assertTrue(assumedMeanH(m, START_YEAR + 2) < assumedMeanH(m, START_YEAR + 1),
                 "fixture no longer has a declining hours projection; this test is vacuous");
@@ -414,7 +379,7 @@ public class RamseyRecursiveFeedbackTest {
      */
     @Test
     public void testPersistentPositiveHoursSurpriseLowersNextYearWage() throws Exception {
-        MacroModelManager m = newHoursFeedbackManager(1.0, 1.0);
+        MacroModelManager m = newFeedbackManager(1.0);
         m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0);
         double neutralN = 1000.0 * assumedMeanN(m, START_YEAR + 2) / assumedMeanN(m, START_YEAR + 1);
         double w2026Before = meanWageAtQuarter(m, 12);
@@ -426,26 +391,10 @@ public class RamseyRecursiveFeedbackTest {
         assertTrue(revisionPct > -1.20, "implausibly large dip: " + revisionPct + "%");
     }
 
-    /** The same hours surprise must leave the path alone when the hours channel is off. */
-    @Test
-    public void testHoursSurpriseIgnoredWhenHoursFeedbackOff() throws Exception {
-        MacroModelManager m = newFeedbackManager(1.0);
-        m.setRamseyFeedbackMargins(MacroFeedbackMargins.EMPLOYMENT);   // employment only
-        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0);
-        double neutralN = 1000.0 * assumedMeanN(m, START_YEAR + 2) / assumedMeanN(m, START_YEAR + 1);
-        double w2026Before = meanWageAtQuarter(m, 12);
-
-        m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN, 40.0 * 1.02);
-
-        double w2026After = meanWageAtQuarter(m, 4);
-        assertTrue(Math.abs(w2026After / w2026Before - 1.0) < 1e-6,
-                "hours channel off, yet the wage path moved by " + (w2026After / w2026Before - 1.0));
-    }
-
     /** The two-argument overload must behave exactly like the old employment-only call. */
     @Test
     public void testTwoArgOverloadIsEmploymentOnly() throws Exception {
-        MacroModelManager m = newHoursFeedbackManager(1.0, 1.0);
+        MacroModelManager m = newFeedbackManager(1.0);
         m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0);
 
         assertTrue(Double.isNaN((Double) getField(m, "ramseyFeedbackHoursBase", Double.class)));
@@ -454,69 +403,60 @@ public class RamseyRecursiveFeedbackTest {
     /** A non-finite or non-positive hours aggregate must not latch or perturb anything. */
     @Test
     public void testInvalidRealizedHoursLeavesHoursChannelInert() throws Exception {
-        MacroModelManager m = newHoursFeedbackManager(1.0, 1.0);
+        MacroModelManager m = newFeedbackManager(1.0);
         m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 0.0);
 
         assertTrue(Double.isNaN((Double) getField(m, "ramseyFeedbackHoursBase", Double.class)));
         assertFalse(Double.isNaN((Double) getField(m, "ramseyFeedbackLambda", Double.class)));
     }
-    // ========== Single-margin decomposition ==========
 
-    /**
-     * The mirror of {@link #testHoursSurpriseIgnoredWhenHoursFeedbackOff()}. Feeding hours
-     * alone was not expressible before the margins became a mode: the employment margin had
-     * no switch of its own, so every feedback run revised the employment path.
-     */
+    /** Both references latch in the first labour-market year, so both gaps are measured. */
     @Test
-    public void testEmploymentSurpriseIgnoredInHoursOnlyMode() throws Exception {
+    public void testBothReferencesLatchInTheFirstLabourMarketYear() throws Exception {
         MacroModelManager m = newFeedbackManager(1.0);
-        m.setRamseyFeedbackMargins(MacroFeedbackMargins.HOURS);
-        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0);
-        double neutralN = 1000.0 * assumedMeanN(m, START_YEAR + 2) / assumedMeanN(m, START_YEAR + 1);
-        double w2026Before = meanWageAtQuarter(m, 12);
-
-        m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN * 1.02, 40.0);
-
-        double w2026After = meanWageAtQuarter(m, 4);
-        assertTrue(Math.abs(w2026After / w2026Before - 1.0) < 1e-6,
-                "employment channel off, yet the wage path moved by " + (w2026After / w2026Before - 1.0));
-    }
-
-    /**
-     * Hours-only feedback still dilutes capital, in the same band as the both-margins case:
-     * the planner's labour input is N*h and it cannot tell which factor moved.
-     */
-    @Test
-    public void testHoursOnlyModeStillLowersNextYearWage() throws Exception {
-        MacroModelManager m = newFeedbackManager(1.0);
-        m.setRamseyFeedbackMargins(MacroFeedbackMargins.HOURS);
-        m.setRamseyFeedbackHoursPersistence(1.0);
-        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0);
-        double neutralN = 1000.0 * assumedMeanN(m, START_YEAR + 2) / assumedMeanN(m, START_YEAR + 1);
-        double w2026Before = meanWageAtQuarter(m, 12);
-
-        m.applyRamseyFeedbackWithRealized(START_YEAR + 2, neutralN, 40.0 * 1.02);
-
-        double revisionPct = (meanWageAtQuarter(m, 4) / w2026Before - 1.0) * 100.0;
-        assertTrue(revisionPct < -0.10, "expected a wage dip, got " + revisionPct + "%");
-        assertTrue(revisionPct > -1.20, "implausibly large dip: " + revisionPct + "%");
-    }
-
-    /**
-     * Both references are latched in every mode, so both gaps can be measured whichever margin
-     * is fed back. Without this the single-margin modes would lose the diagnostic for the
-     * margin they leave alone, which is the column an analyst reads to interpret the
-     * decomposition. The mirror case is
-     * {@link #testHoursReferenceIsLatchedEvenWhenHoursNotFedBack()}.
-     */
-    @Test
-    public void testBothReferencesLatchInHoursOnlyMode() throws Exception {
-        MacroModelManager m = newFeedbackManager(1.0);
-        m.setRamseyFeedbackMargins(MacroFeedbackMargins.HOURS);
         m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0);
 
         assertFalse(Double.isNaN((Double) getField(m, "ramseyFeedbackLambda", Double.class)),
-                "the employment reference must latch even when employment is not fed back");
+                "the employment reference must latch");
         assertEquals(40.0, (Double) getField(m, "ramseyFeedbackHoursBase", Double.class), 1e-12);
+    }
+
+    // ========== Always on, one persistence ==========
+
+    /**
+     * A Ramsey run whose config names no feedback key feeds back both margins: lambda latches
+     * in the first labour-market year and an employment surprise re-solves the path.
+     */
+    @Test
+    public void testFeedbackRunsWithoutAnyFeedbackKey() throws Exception {
+        assumeRamseyInputsAvailable();
+        MacroModelManager m = new MacroModelManager();
+        m.setEnabled(true); m.setUseDsge(false); m.setUseRamseyTrend(true); m.setPathRecordingEnabled(false);
+        setField(m, "simulationStartYear", START_YEAR);
+        m.initializeRamseyTrend(PL_MODEL_PATH);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0);
+        assertFalse(Double.isNaN((Double) getField(m, "ramseyFeedbackLambda", Double.class)));
+        double onProjection = 1000.0 * assumedMeanN(m, START_YEAR + 2) / assumedMeanN(m, START_YEAR + 1);
+        m.applyRamseyFeedbackWithRealized(START_YEAR + 2, 1.02 * onProjection, 40.0);
+        assertEquals(START_YEAR + 2, (int) getField(m, "ramseyQuarterZeroYear", Integer.class), "re-solved");
+    }
+
+    /**
+     * {@code mm_ramseyFeedbackPersistence} governs the hours gap too: with employment on the
+     * projection and hours 5% up, a more permanent belief gives a lower next-year trend wage.
+     */
+    @Test
+    public void testHoursGapUsesTheOnePersistence() throws Exception {
+        double[] nextYearWage = new double[3];
+        double[] rhos = {0.0, 0.5, 1.0};
+        for (int i = 0; i < rhos.length; i++) {
+            MacroModelManager m = newFeedbackManager(rhos[i]);
+            m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0);
+            double onProjection = 1000.0 * assumedMeanN(m, START_YEAR + 2) / assumedMeanN(m, START_YEAR + 1);
+            m.applyRamseyFeedbackWithRealized(START_YEAR + 2, onProjection, 42.0);   // hours 5% up, employment on projection
+            nextYearWage[i] = meanWageAtQuarter(m, 4);
+        }
+        assertTrue(nextYearWage[2] < nextYearWage[1] && nextYearWage[1] < nextYearWage[0],
+                "more permanent hours, lower next-year trend wage: " + java.util.Arrays.toString(nextYearWage));
     }
 }

@@ -24,12 +24,9 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>Reproducing them end to end pins, in one assertion, every convention on the import path:
  * matrix loading (A, B_s, C, D), the state/jump split, row and column alignment against
- * {@code model_info.json}, the AR(1) shock processes carried inside the state transition, and above
- * all the σ-scaling asymmetry that {@code CLAUDE.md} names as the top pitfall — {@code eps_L} and
- * {@code eps_h} arrive already in percent and must NOT be scaled, while every other shock is in
- * σ-units and must be multiplied by its standard deviation. Both conventions are exercised here,
- * because the bundle ships IRFs for shocks on each side of the split. Dividing by σ instead of
- * multiplying, or treating {@code eps_L} like the others, fails this test immediately.</p>
+ * {@code model_info.json}, the AR(1) shock processes carried inside the state transition, and the
+ * σ-scaling: every shock is scaled by its standard deviation, so an input of 1.0 is a one-σ
+ * innovation. Dividing by σ instead of multiplying fails this test immediately.</p>
  */
 public class DSGEIrfParityTest {
 
@@ -82,21 +79,16 @@ public class DSGEIrfParityTest {
         return m;
     }
 
-    /**
-     * Replays one shock through the loaded model and compares against MATLAB's IRF.
-     *
-     * @param sigmaUnits true for shocks the model scales by σ internally (pass 1.0 for a 1-σ IRF);
-     *                   false for eps_L/eps_h, which arrive in percent (pass σ explicitly).
-     */
-    private void assertIrfMatches(String shockName, boolean sigmaUnits) throws IOException {
+    /** Replays one 1-σ shock through the loaded model and compares against MATLAB's IRF. */
+    private void assertIrfMatches(String shockName) throws IOException {
         assumeBundleAvailable();
         Assumptions.assumeTrue(Files.exists(Paths.get(MODEL_PATH, "irfs_" + shockName + ".csv")),
                 "no exported IRF for " + shockName);
-        assertIrfMatches(MODEL_PATH, shockName, sigmaUnits);
+        assertIrfMatches(MODEL_PATH, shockName);
     }
 
     /** The replay itself, for any bundle folder; CommittedBundlesTest runs it on every committed bundle. */
-    static void assertIrfMatches(String modelPath, String shockName, boolean sigmaUnits) throws IOException {
+    static void assertIrfMatches(String modelPath, String shockName) throws IOException {
         Path irfFile = Paths.get(modelPath, "irfs_" + shockName + ".csv");
         assertTrue(Files.exists(irfFile), "no exported IRF for " + shockName + " in " + modelPath);
 
@@ -122,8 +114,7 @@ public class DSGEIrfParityTest {
         for (int period = 0; period < expected.rows().size(); period++) {
             double[] shocks = new double[model.getNumShocks()];
             if (period == 0) {
-                // A 1-sigma impulse, expressed in whatever units this shock's channel expects.
-                shocks[idx] = sigmaUnits ? 1.0 : sigma;
+                shocks[idx] = 1.0;   // a 1-sigma impulse: every shock is in standard-deviation units
             }
             DSGEState state = model.stepQuarterly(shocks);
 
@@ -146,46 +137,43 @@ public class DSGEIrfParityTest {
     }
 
     /**
-     * eps_L is the SimPaths input channel: it arrives already in percent log-deviations and must
-     * NOT be scaled by sigma inside the model. Passing sigma explicitly here must therefore
-     * reproduce Dynare's 1-sigma IRF. If someone ever "fixes" eps_L to be sigma-scaled like the
-     * others, this fails.
+     * eps_L is an ordinary shock: 1.0 is one standard deviation, and the labour force follows
+     * its AR(1) at the calibrated rho_L, carried inside the state transition.
      */
     @Test
     public void testLaborForceShockIrfMatchesMatlab() throws IOException {
-        assertIrfMatches("eps_L", false);
+        assertIrfMatches("eps_L");
     }
 
-    /** eps_h shares the SimPaths percent convention with eps_L. */
+    /** eps_h likewise, at the calibrated rho_h. */
     @Test
     public void testHoursShockIrfMatchesMatlab() throws IOException {
-        assertIrfMatches("eps_h", false);
+        assertIrfMatches("eps_h");
     }
 
     /**
-     * The other side of the split: eps_a is in sigma-units, so 1.0 means one standard deviation
-     * and the model multiplies by sigma internally. It also has rho = 0.95, so this additionally
-     * checks that the AR(1) process is carried inside the state transition rather than applied to
-     * the shock input.
+     * eps_a is in sigma-units, so 1.0 means one standard deviation and the model multiplies by
+     * sigma internally. It also has rho = 0.95, so this additionally checks that the AR(1)
+     * process is carried inside the state transition rather than applied to the shock input.
      */
     @Test
     public void testTechnologyShockIrfMatchesMatlab() throws IOException {
-        assertIrfMatches("eps_a", true);
+        assertIrfMatches("eps_a");
     }
 
     @Test
     public void testDemandShockIrfMatchesMatlab() throws IOException {
-        assertIrfMatches("eps_d", true);
+        assertIrfMatches("eps_d");
     }
 
     @Test
     public void testMonetaryShockIrfMatchesMatlab() throws IOException {
-        assertIrfMatches("eps_r", true);
+        assertIrfMatches("eps_r");
     }
 
     @Test
     public void testInvestmentShockIrfMatchesMatlab() throws IOException {
-        assertIrfMatches("eps_inv", true);
+        assertIrfMatches("eps_inv");
     }
 
     /**

@@ -43,28 +43,6 @@
 @#define use_real_data = true
 @#define use_custom_irfs = false   // FROZEN: use standard IRFs for export
 
-
-// =========================================================================
-// SIMPATHS INTEGRATION SWITCH
-// =========================================================================
-// Set to true when exporting policy functions for SimPaths Java integration.
-// When true, rho_L and rho_h are set to ZERO so that:
-//   - L = eps_L (labor force directly equals SimPaths input)
-//   - h = eps_h (hours directly equals SimPaths input)
-//
-// RATIONALE: During estimation, rho_L=0.95 and rho_h=0.80 capture the observed
-// persistence in the estimation sample. But for SimPaths coupling, SimPaths sends LEVELS
-// (deviation from baseline), not innovations. Setting rho=0 ensures the DSGE
-// interprets SimPaths inputs as levels, not as innovations that accumulate.
-//
-// UNITS: eps_L/eps_h are PERCENT log-deviations (100*ln ratio), matching the
-// 100x-log-deviation data the model is estimated on. +5% labour force = eps_L ~= 4.879.
-//
-// Without this switch: SimPaths input eps_L=5 would cause L to grow to
-// 5/(1-0.95) = 100 (i.e. +100%) due to AR(1) accumulation.
-// With this switch: L = eps_L = 5 directly (5%), as intended.
-@#define for_simpaths_export = true
-
 //
 // PURPOSE:
 // This model serves as "economic guardrails" for a dynamic microsimulation.
@@ -207,14 +185,7 @@ rho_r    = 0.80;    // interest rate smoothing (NBP slightly less persistent tha
 
 // ----- SHOCK PERSISTENCE -----
 rho_a    = 0.95;    // technology persistence (standard)
-// Labor force persistence: CONDITIONAL on SimPaths export switch
-@#if for_simpaths_export
-    rho_L    = 0;       // SimPaths mode: L = eps_L directly (no accumulation)
-                        // SimPaths sends LEVELS, not innovations
-@#else
-    rho_L    = 0.95;    // Estimation mode: AR(1) captures observed persistence
-                        // (Perplexity fix: rho_L and SE_eps_L were perfectly collinear)
-@#endif
+rho_L    = 0.95;    // labor force persistence (calibrated, same identification logic as Germany)
 rho_v    = 0.85;    // vacancy persistence (Poland: somewhat faster hiring adjustment)
 rho_sep  = 0.8;     // separation shock persistence
 rho_d    = 0.8;     // preference/demand shock persistence
@@ -246,14 +217,8 @@ lambda_w = 0.65;    // baseline: shorter average wage duration than Germany
 // ----- INTENSIVE MARGIN (HOURS) PARAMETERS -----
 // Poland has less formalized short-time work (no equivalent to Germany's Kurzarbeit)
 // Hours adjustment margin weaker than in Germany
-// Hours persistence: CONDITIONAL on SimPaths export switch
-@#if for_simpaths_export
-    rho_h    = 0;       // SimPaths mode: h = eps_h directly (no accumulation)
-                        // SimPaths sends LEVELS, not innovations
-@#else
-    rho_h    = 0.80;    // Estimation mode: AR(1) captures observed persistence
-                        // (calibrated in country_params/Poland_calibration.mod)
-@#endif
+rho_h    = 0.80;    // hours persistence (calibrated; shorter than Germany due to
+                    // less institutional hours adjustment)
 omega_h  = 0.319313;  // ESTIMATED (posterior mode)    // hours weight in production (same starting point)
 
 // ----- DIRECT LABOR FORCE → WAGE EFFECT (CALIBRATED) -----

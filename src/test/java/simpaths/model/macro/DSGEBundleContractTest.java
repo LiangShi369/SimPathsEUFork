@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.List;
 
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -46,57 +45,52 @@ class DSGEBundleContractTest {
     }
 
     @Test
-    void nonZeroRhoOnSimPathsLevelInputIsRefused(@TempDir Path dir) throws IOException {
-        assumeBundle();
-        copyBundle(dir);
-
-        List<String> lines = Files.readAllLines(dir.resolve("shock_params.csv"));
-        boolean tampered = false;
-        for (int i = 1; i < lines.size(); i++) {
-            String[] parts = lines.get(i).split(",", -1);
-            if (parts[0].trim().equals("eps_L")) {
-                parts[2] = "0.95";
-                lines.set(i, String.join(",", parts));
-                tampered = true;
-            }
-        }
-        assertTrue(tampered, "eps_L row not found in shock_params.csv");
-        Files.write(dir.resolve("shock_params.csv"), lines);
-
-        DSGEModel model = new DSGEModel();
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> model.loadFromDirectory(dir.toString()));
-        assertTrue(ex.getMessage().contains("eps_L"), ex.getMessage());
-        assertTrue(ex.getMessage().contains("rho"), ex.getMessage());
-    }
-
-    @Test
-    void missingInputScaleDeclarationIsRefused(@TempDir Path dir) throws IOException {
+    void missingDeviationScaleIsRefused(@TempDir Path dir) throws IOException {
         assumeBundle();
         copyBundle(dir);
         String json = Files.readString(dir.resolve("model_info.json"));
-        String stripped = json.replaceAll(",?\\s*\"simpaths_input_scale\"\\s*:\\s*[0-9.eE+\\-]+", "");
-        assertNotEquals(json, stripped, "live bundle should declare simpaths_input_scale");
+        String stripped = json.replaceAll(",?\\s*\"deviation_scale\"\\s*:\\s*[0-9.eE+\\-]+", "");
+        assertNotEquals(json, stripped, "live bundle should declare deviation_scale");
         Files.writeString(dir.resolve("model_info.json"), stripped);
 
         DSGEModel model = new DSGEModel();
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> model.loadFromDirectory(dir.toString()));
-        assertTrue(ex.getMessage().contains("simpaths_input_scale"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("deviation_scale"), ex.getMessage());
     }
 
     @Test
-    void wrongInputScaleDeclarationIsRefused(@TempDir Path dir) throws IOException {
+    void wrongDeviationScaleIsRefused(@TempDir Path dir) throws IOException {
         assumeBundle();
         copyBundle(dir);
         String json = Files.readString(dir.resolve("model_info.json"));
         Files.writeString(dir.resolve("model_info.json"),
-                json.replaceAll("\"simpaths_input_scale\"\\s*:\\s*[0-9.eE+\\-]+",
-                        "\"simpaths_input_scale\": 1"));
+                json.replaceAll("\"deviation_scale\"\\s*:\\s*[0-9.eE+\\-]+",
+                        "\"deviation_scale\": 1"));
 
         DSGEModel model = new DSGEModel();
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> model.loadFromDirectory(dir.toString()));
-        assertTrue(ex.getMessage().contains("simpaths_input_scale"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("deviation_scale"), ex.getMessage());
+    }
+
+    /**
+     * A bundle exported before 2026-11 carries the old unit field and zero persistence for the
+     * labour shocks; it must be refused with a message that says to re-export.
+     */
+    @Test
+    void testBundleWithTheOldUnitFieldIsRefused(@TempDir Path dir) throws IOException {
+        assumeBundle();
+        copyBundle(dir);
+        String json = Files.readString(dir.resolve("model_info.json"));
+        String old = json.replace("\"deviation_scale\"", "\"simpaths_input_scale\"");   // as exported before 2026-11
+        assertNotEquals(json, old, "live bundle should declare deviation_scale");
+        Files.writeString(dir.resolve("model_info.json"), old);
+
+        DSGEModel model = new DSGEModel();
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> model.loadFromDirectory(dir.toString()));
+        assertTrue(ex.getMessage().contains("deviation_scale") && ex.getMessage().contains("re-export"),
+                ex.getMessage());
     }
 }

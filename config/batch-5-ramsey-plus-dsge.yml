@@ -1,4 +1,8 @@
 # Batch scenario 5/5 — Ramsey counterfactual + DSGE energy shock
+# Until 2026-11 this arm ran with the planner's feedback switched off.
+# The feedback is now always on with a Ramsey layer, here with rho = 1, so earlier results of
+# this arm are not reproduced by the same file. The DSGE takes no input from SimPaths: its
+# cycle comes from the energy-shock scenario alone.
 countryString: "Poland"
 maxNumberOfRuns: 1
 executeWithGui: false
@@ -25,10 +29,7 @@ model_args:
     mm_macroLogging: verbose          # off | state | verbose (verbose implies state)
     mm_dsgeMaxStateDeviation: 30
 
-    mm_ramseyFeedbackMargins: none
-    # none | employment | hours | employment_and_hours
     mm_ramseyFeedbackPersistence: 1.0
-    mm_ramseyFeedbackHoursPersistence: 1.0
 
     mm_ramseyScenario: "_macroScenario_ramsey_high_gA_0_5pp.csv"
     mm_dsgeShockScenario: "_macroScenario_energy_shock_1_5sd_60_quarters.csv"

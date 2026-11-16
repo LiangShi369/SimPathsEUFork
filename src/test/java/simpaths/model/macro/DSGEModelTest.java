@@ -146,12 +146,12 @@ public class DSGEModelTest {
         assertEquals(model.getNumShocks(), rho.length, "Should have correct number of shock rhos");
 
         // eps_L should be positive and finite (value depends on current estimation export)
-        assertTrue(Double.isFinite(stdDev[model.getIdxEpsL()]), "eps_L std dev should be finite");
-        assertTrue(stdDev[model.getIdxEpsL()] > 0.0, "eps_L std dev should be positive");
+        assertTrue(Double.isFinite(stdDev[indexOf(model.getShockNames(), "eps_L")]), "eps_L std dev should be finite");
+        assertTrue(stdDev[indexOf(model.getShockNames(), "eps_L")] > 0.0, "eps_L std dev should be positive");
 
         // eps_L persistence should be finite and in a valid AR(1) range
-        assertTrue(Double.isFinite(rho[model.getIdxEpsL()]), "eps_L rho should be finite");
-        assertTrue(Math.abs(rho[model.getIdxEpsL()]) < 1.0, "eps_L rho should be within (-1,1)");
+        assertTrue(Double.isFinite(rho[indexOf(model.getShockNames(), "eps_L")]), "eps_L rho should be finite");
+        assertTrue(Math.abs(rho[indexOf(model.getShockNames(), "eps_L")]) < 1.0, "eps_L rho should be within (-1,1)");
     }
 
     @Test
@@ -162,12 +162,6 @@ public class DSGEModelTest {
         assertTrue(model.getNumStates() > 0, "nState should be positive");
         assertTrue(model.getNumJumps() > 0, "nJump should be positive");
         assertTrue(model.getNumShocks() > 0, "nExo should be positive");
-
-        // Verify shock indices were loaded
-        assertTrue(model.getIdxEpsL() >= 0 && model.getIdxEpsL() < model.getNumShocks(),
-            "eps_L index should be valid");
-        assertTrue(model.getIdxEpsH() >= 0 && model.getIdxEpsH() < model.getNumShocks(),
-            "eps_h index should be valid");
 
         // Verify VarIndices were loaded
         DSGEState.VarIndices idx = model.getVarIndices();
@@ -207,7 +201,7 @@ public class DSGEModelTest {
         model.resetToSteadyState();
 
         double[] shocks = new double[model.getNumShocks()];
-        shocks[model.getIdxEpsL()] = 0.01;
+        shocks[indexOf(model.getShockNames(), "eps_L")] = 0.01;
 
         DSGEState state = model.stepQuarterly(shocks);
 
@@ -215,15 +209,49 @@ public class DSGEModelTest {
         assertNotEquals(0.0, state.getWageDeviation(), "Wage should change");
     }
 
+    /**
+     * Each quarter's row enters in that quarter only: nothing is held across quarters, so a
+     * shock set in quarter 1 alone gives the average of that quarterly step and three steps
+     * with zero shocks.
+     */
     @Test
-    public void testStepAnnual_LaborShock() {
+    public void testStepAnnualAppliesEachQuartersShocksOnce() throws IOException {
+        assumeTestDataAvailable();
+
+        int epsL = indexOf(model.getShockNames(), "eps_L");
+        double[][] byQuarter = new double[4][model.getNumShocks()];
+        byQuarter[0][epsL] = 0.02;
+
+        model.resetToSteadyState();
+        DSGEState annualState = model.stepAnnual(byQuarter);
+
+        DSGEModel manualModel = new DSGEModel();
+        manualModel.loadFromDirectory(MACRO_MODEL_PATH);
+        manualModel.resetToSteadyState();
+        double laborForce = 0.0;
+        double wage = 0.0;
+        for (int q = 0; q < 4; q++) {
+            double[] shocks = new double[manualModel.getNumShocks()];
+            if (q == 0) shocks[epsL] = 0.02;
+            DSGEState quarterState = manualModel.stepQuarterly(shocks);
+            laborForce += quarterState.getLaborForceDeviation() / 4.0;
+            wage += quarterState.getWageDeviation() / 4.0;
+        }
+
+        assertTrue(annualState.getLaborForceDeviation() > 0, "Labor force should increase");
+        assertEquals(laborForce, annualState.getLaborForceDeviation(), 1e-12);
+        assertEquals(wage, annualState.getWageDeviation(), 1e-12);
+    }
+
+    @Test
+    public void testStepAnnualRejectsAShockArrayThatIsNotFourByNExo() {
         assumeTestDataAvailable();
 
         model.resetToSteadyState();
-
-        DSGEState annualState = model.stepAnnual(0.02);
-
-        assertTrue(annualState.getLaborForceDeviation() > 0, "Labor force should increase");
+        assertThrows(IllegalArgumentException.class,
+                () -> model.stepAnnual(new double[3][model.getNumShocks()]));
+        assertThrows(IllegalArgumentException.class,
+                () -> model.stepAnnual(new double[4][model.getNumShocks() - 1]));
     }
 
     @Test
@@ -233,7 +261,7 @@ public class DSGEModelTest {
         model.resetToSteadyState();
 
         double[] shocks = new double[model.getNumShocks()];
-        shocks[model.getIdxEpsL()] = 0.01;
+        shocks[indexOf(model.getShockNames(), "eps_L")] = 0.01;
         model.stepQuarterly(shocks);
 
         double[] zeroShocks = new double[model.getNumShocks()];
@@ -295,19 +323,13 @@ public class DSGEModelTest {
         manualModel.loadFromDirectory(MACRO_MODEL_PATH);
         manualModel.resetToSteadyState();
 
-        double epsL = 0.015;
-        double epsH = -0.010;
-        DSGEState annualAverage = model.stepAnnualWithScenario(epsL, epsH, scenario, 2032);
+        DSGEState annualAverage = model.stepAnnual(scenario, 2032);
 
         double[] sumState = new double[manualModel.getNumStates()];
         double[] sumJumps = new double[manualModel.getNumJumps()];
         DSGEState quarterState = null;
-        int idxEpsL = manualModel.getIdxEpsL();
-        int idxEpsH = manualModel.getIdxEpsH();
         for (int quarter = 1; quarter <= 4; quarter++) {
             double[] quarterShocks = scenario.getShocks(2032, quarter);
-            quarterShocks[idxEpsL] += epsL;
-            quarterShocks[idxEpsH] += epsH;
 
             quarterState = manualModel.stepQuarterly(quarterShocks);
             for (int i = 0; i < sumState.length; i++) {
@@ -334,6 +356,47 @@ public class DSGEModelTest {
             "Internal end-of-year state should match the explicit fourth-quarter rollout");
     }
 
+    /**
+     * Contract 37: a one-σ labour-force (or hours) innovation in one quarter moves L (h) by
+     * σ on impact and by σ ρ^k after k quarters, with ρ read from the bundle and not zero.
+     * Fails on a bundle exported with the old zero-persistence switch.
+     */
+    @Test
+    public void testLabourForceInnovationDecaysAtTheBundlesPersistence() {
+        assumeTestDataAvailable();
+        for (String[] pair : new String[][] {{"eps_L", "L"}, {"eps_h", "h"}}) {
+            model.resetToSteadyState();
+            int idx = indexOf(model.getShockNames(), pair[0]);
+            double sigma = model.getShockStdDev()[idx];
+            double rho = model.getShockRho()[idx];
+            assertTrue(rho > 0.5 && rho < 1.0, pair[0] + " persistence in the bundle: " + rho);
+            for (int k = 0; k < 8; k++) {
+                double[] shocks = new double[model.getNumShocks()];
+                if (k == 0) shocks[idx] = 1.0;
+                DSGEState s = model.stepQuarterly(shocks);
+                double level = pair[1].equals("L") ? s.getLaborForceDeviation() : s.getHoursDeviation();
+                assertEquals(sigma * Math.pow(rho, k), level, 1e-10, pair[0] + ", quarter " + k);
+            }
+        }
+    }
+
+    /**
+     * A labour-force shock repeated every quarter accumulates under the restored persistence and
+     * must trip the stability bound with its message, not hand SimPaths a huge wage.
+     */
+    @Test
+    public void testRepeatedLabourShockTripsTheStabilityBound() {
+        assumeTestDataAvailable();
+        model.resetToSteadyState();
+        model.setMaxStateDeviation(10.0);                     // the default bound; 3 sigma a quarter passes it in year 2
+        double[][] everyQuarter = new double[4][model.getNumShocks()];
+        for (double[] q : everyQuarter) q[indexOf(model.getShockNames(), "eps_L")] = 3.0;
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> {
+            for (int year = 0; year < 5; year++) model.stepAnnual(everyQuarter);
+        });
+        assertTrue(ex.getMessage().contains("mm_dsgeMaxStateDeviation"), ex.getMessage());
+    }
+
     // ========== IRF Validation Tests ==========
 
     @Test
@@ -343,7 +406,7 @@ public class DSGEModelTest {
         model.resetToSteadyState();
 
         double[] shocks = new double[model.getNumShocks()];
-        shocks[model.getIdxEpsL()] = 0.04;  // 1 std dev for quarterly
+        shocks[indexOf(model.getShockNames(), "eps_L")] = 0.04;  // 1 std dev for quarterly
 
         double[] wageIRF = new double[20];
         double[] laborIRF = new double[20];
@@ -375,7 +438,7 @@ public class DSGEModelTest {
 
         for (int t = 0; t < 100; t++) {
             double[] shocks = new double[model.getNumShocks()];
-            shocks[model.getIdxEpsL()] = 0.01 * Math.sin(t * 0.1);
+            shocks[indexOf(model.getShockNames(), "eps_L")] = 0.01 * Math.sin(t * 0.1);
             model.stepQuarterly(shocks);
         }
 
@@ -389,7 +452,7 @@ public class DSGEModelTest {
         model.resetToSteadyState();
 
         double[] shocks = new double[model.getNumShocks()];
-        shocks[model.getIdxEpsL()] = 0.05;
+        shocks[indexOf(model.getShockNames(), "eps_L")] = 0.05;
         model.stepQuarterly(shocks);
 
         double[] stateAfterShock = model.getState();

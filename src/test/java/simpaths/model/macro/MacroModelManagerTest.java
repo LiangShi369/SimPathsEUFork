@@ -1,6 +1,5 @@
 package simpaths.model.macro;
 
-import simpaths.model.enums.MacroFeedbackMargins;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -79,17 +78,16 @@ class MacroModelManagerTest {
         }
 
     /**
-     * CONTRACT: a scenario shock lands in the year it declares, including the first
-     * two simulation years.
+     * CONTRACT: a scenario shock lands in the year it declares, the start year included.
      *
-     * <p>The DSGE cycle is skipped until the labour-supply baseline is latched
-     * post-labour-market, but that only prevents measuring eps_L/eps_h. Scenario
-     * shocks are exogenous. Until 2026-08 both skip branches returned before the
-     * scenario was consulted, so a scenario declared from startYear silently lost
-     * its first eight quarters and began two years late at decayed magnitude.</p>
+     * <p>The DSGE runs the same annual step in every year, driven through
+     * {@code updateEquilibrium} as the schedule drives it. Until 2026-08 the first two
+     * years returned before the scenario was consulted, so a scenario declared from
+     * startYear silently lost its first eight quarters and began two years late at
+     * decayed magnitude.</p>
      */
     @Test
-    void testScenarioShocksApplyInBaselinePendingYears() throws Exception {
+    void testScenarioShocksApplyFromTheStartYear() throws Exception {
         assumeRamseyInputsAvailable();
 
         // Written here rather than reusing a shipped scenario: those declare their
@@ -106,6 +104,7 @@ class MacroModelManagerTest {
 
         MacroModelManager manager = new MacroModelManager();
         setIntField(manager, "simulationStartYear", 2023);
+        manager.setEnabled(true);
         manager.setUseDsge(true);
 
         Method initialize = MacroModelManager.class
@@ -123,10 +122,7 @@ class MacroModelManagerTest {
                 "Fixture scenario should declare shocks in the start year");
         setField(manager, "shockScenario", scenario);
 
-        Method pass = MacroModelManager.class.getDeclaredMethod(
-                "runBaselinePendingPass", int.class, java.util.Set.class, String.class);
-        pass.setAccessible(true);
-        pass.invoke(manager, 2023, Collections.emptySet(), "test");
+        manager.updateEquilibrium(2023, 2023, "PL", Collections.emptySet(), Collections.emptySet(), false);
 
         // The cost-push shock moves inflation on impact. Before the fix this was
         // exactly zero, because the scenario was never consulted in this year.
@@ -490,22 +486,6 @@ class MacroModelManagerTest {
     }
 
     /**
-     * The DSGE combination is allowed. The eps_L channel responds to the year-over-year change
-     * in labour supply while the Ramsey re-solve responds to the cumulative level gap against
-     * the projection, so the two overlap only while the cycle decays back to the trend. The
-     * config emits a warning instead of failing.
-     */
-    @Test
-    public void testRecursiveFeedbackAllowsDsge() {
-        MacroModelManager m = new MacroModelManager();
-        m.setEnabled(true);
-        m.setUseDsge(true);
-        m.setUseRamseyTrend(true);
-        m.setRamseyFeedbackMargins(MacroFeedbackMargins.EMPLOYMENT_AND_HOURS);
-        assertDoesNotThrow(m::validateRamseyFeedbackConfig);
-    }
-
-    /**
      * Tripwire for the cross-repository conventions that no artefact carries. The upstream
      * MATLAB {@code input_processing/macromodel/ramsey_trend.m} extends the demographic path with window 20 and
      * the hours path with window 1; Java must match, or the two sides build different paths
@@ -587,21 +567,10 @@ class MacroModelManagerTest {
                 "windows 1 and 20 must diverge on a non-exponential sample, else the tripwire is vacuous");
     }
 
-    @Test
-    public void testRecursiveFeedbackRejectsBadHoursPersistence() {
-        MacroModelManager m = new MacroModelManager();
-        m.setEnabled(true);
-        m.setUseDsge(false);
-        m.setUseRamseyTrend(true);
-        m.setRamseyFeedbackMargins(MacroFeedbackMargins.EMPLOYMENT_AND_HOURS);
-        m.setRamseyFeedbackHoursPersistence(-0.1);
-        assertThrows(IllegalStateException.class, m::validateRamseyFeedbackConfig);
-    }
-
     /**
-     * Without the Ramsey layer the feedback is inert, not fatal. The margins default to on, so
-     * a deliberate dsge-only run must not be forced to switch them off by hand; the re-solve
-     * itself is already guarded by the null ramseyTrend check in applyRamseyFeedbackWithRealized.
+     * Without the Ramsey layer the feedback is inert, not fatal, whatever the persistence: a
+     * dsge-only run never reads it, and the re-solve itself is guarded by the null ramseyTrend
+     * check in applyRamseyFeedbackWithRealized.
      */
     @Test
     public void testRecursiveFeedbackIsInertWithoutRamseyTrend() {
@@ -609,7 +578,7 @@ class MacroModelManagerTest {
         m.setEnabled(true);
         m.setUseDsge(true);
         m.setUseRamseyTrend(false);
-        m.setRamseyFeedbackMargins(MacroFeedbackMargins.EMPLOYMENT_AND_HOURS);
+        m.setRamseyFeedbackPersistence(1.5);
         assertDoesNotThrow(m::validateRamseyFeedbackConfig);
         assertDoesNotThrow(() -> m.applyRamseyFeedbackWithRealized(2030, 1000.0, 40.0));
     }
@@ -620,7 +589,6 @@ class MacroModelManagerTest {
         m.setEnabled(true);
         m.setUseDsge(false);
         m.setUseRamseyTrend(true);
-        m.setRamseyFeedbackMargins(MacroFeedbackMargins.EMPLOYMENT_AND_HOURS);
         m.setRamseyFeedbackPersistence(1.5);
         assertThrows(IllegalStateException.class, m::validateRamseyFeedbackConfig);
     }

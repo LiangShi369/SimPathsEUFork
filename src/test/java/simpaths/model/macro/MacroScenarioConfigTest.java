@@ -18,7 +18,6 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -65,17 +64,6 @@ class MacroScenarioConfigTest {
     @DisplayName("the batch family differs only in which macro layers and scenarios are active")
     void batchFamilyIsCeterisParibus() throws IOException {
         assertFamilyDiffersOnlyIn(BATCH_FAMILY, BATCH_TREATMENT);
-    }
-
-    @Test
-    @DisplayName("the batch family pins the Ramsey feedback off, so the layers are the only treatment")
-    void batchFamilyPinsFeedbackOff() throws IOException {
-        for (String name : BATCH_FAMILY) {
-            Object v = flatten(read(name)).get("model_args.mm_ramseyFeedbackMargins");
-            assertEquals("none", v,
-                    name + " must pin model_args.mm_ramseyFeedbackMargins to none; the margins"
-                    + " default to employment_and_hours, which would silently add a second treatment");
-        }
     }
 
     @Test

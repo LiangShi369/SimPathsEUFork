@@ -26,10 +26,7 @@ model_args:
     mm_macroLogging: verbose          # off | state | verbose (verbose implies state)
     mm_dsgeMaxStateDeviation: 30
 
-    mm_ramseyFeedbackMargins: employment_and_hours
-    # none | employment | hours | employment_and_hours
     mm_ramseyFeedbackPersistence: 1.0
-    mm_ramseyFeedbackHoursPersistence: 1.0
 
     # mm_useMacroPathRecorder: true  # (works with mm_macroModel: off); defaults to true
     # mm_ramseyScenario: "_macroScenario_ramsey_high_gA.csv"

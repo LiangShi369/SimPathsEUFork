@@ -195,8 +195,8 @@ Eurostat's `CLV15` basis.
 `demographic_L_{country}.csv` follows the SimPaths workbook from the handoff quarter
 (2023q1) on, and that quarter lies inside the estimation sample, so the workbook's
 growth over 2023q1-2025q1 enters the estimated `L` observable as well as the forward
-`N` path. Contract 38 needs this: `eps_L` is measured against the projection the
-DSGE was estimated against. A step in the workbook therefore reads as a labour-force
+`N` path. This matters for the estimation alone: the DSGE takes no labour input from
+SimPaths at runtime (contract 38), but a step in the workbook reads as a labour-force
 shock in the sample's last quarters. The UK workbook's working-age population falls
 1.2% from 2023 to 2024 (the note in `UK_growth_params.json`), while the observed labour
 force rises, and the UK's `L` goes from -0.41 in 2023q1 to +3.10 in 2025q1, against a
@@ -359,9 +359,10 @@ versions of this list expected h↑ → w↓, which the model cannot produce by
 construction.
 
 Remember that the exported matrices hold **raw `ghu`** entries: a one-standard-deviation
-response is `ghu(y, eps_j) * sigma_j` (multiply, never divide), while `eps_L` and `eps_h`
-from SimPaths are percent log-deviations and are not sigma-scaled. See contracts #1 and #3
-in `docs/Integration_Contracts.md`.
+response is `ghu(y, eps_j) * sigma_j` (multiply, never divide), for every shock, `eps_L` and
+`eps_h` included: all are innovations in standard-deviation units, and the labour force and hours
+follow their calibrated AR(1) (contract #37). See contracts #1, #3 and #37 in
+`docs/Integration_Contracts.md`.
 
 ## File Organization
 

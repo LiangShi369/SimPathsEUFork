@@ -1,6 +1,6 @@
 # SimPaths Coupling: the Java Side of the Macro Layer
 
-**Status:** describes the Java runtime (`simpaths.model.macro`) as of 2026-10-20. Until 2026-10-14 this file was
+**Status:** describes the Java runtime (`simpaths.model.macro`) as of 2026-11-06. Until 2026-10-14 this file was
 `docs/DSGE_INTEGRATION_PLAN.md`. The MATLAB/Dynare model is described in
 `Technical_Documentation_Macromodel.md`, the contracts between the two sides in `Integration_Contracts.md`,
 both in this folder.
@@ -13,13 +13,14 @@ This document describes the current SimPaths macro-coupling architecture.
 
 The macro stack has two orthogonal layers:
 - **Ramsey growth model (trend layer):** long-run structural path, re-solved each year against the labour
-  supply SimPaths realized (§8.1; on by default)
-- **DSGE state-space model (cycle layer):** quarterly cycle dynamics with annual two-way coupling to SimPaths
+  supply SimPaths realized (§8.1; always on with a Ramsey layer)
+- **DSGE state-space model (cycle layer):** quarterly cycle dynamics driven by exogenous shocks only. It is
+  one-way: it hands SimPaths the cycle wage and takes no input from SimPaths
 
 ```
 SimPaths population projection -------> Ramsey trend model (trend layer)
-SimPaths realized employment, hours --> Ramsey trend model (yearly re-solve, default on, §8.1)
-SimPaths labor shocks (eps_L, eps_h) -> DSGE cycle model (quarterly state-space)
+SimPaths realized employment, hours --> Ramsey trend model (yearly re-solve, always on, §8.1)
+Scenario shocks (mm_dsgeShockScenario) -> DSGE cycle model (quarterly state-space)
 SimPaths receives: delta_w_total = delta_w_cycle + delta_w_trend, delta_pi = delta_pi_cycle
 ```
 
@@ -28,9 +29,9 @@ SimPaths receives: delta_w_total = delta_w_cycle + delta_w_trend, delta_pi = del
 1. Opt-in macro feedback via `mm_macroModel` (default `off`)  
 2. Macro model provides trend (Ramsey growth model) and cycle (DSGE) decomposition; the two layers are selected together by `mm_macroModel`: `off | ramsey | dsge | ramsey_dsge`
 3. SimPaths wage application uses total wage effect (trend + cycle changes)
-4. Rolling labor baseline for DSGE, i.e., DSGE sees wage _changes_ only (DSGE cannot handle arbitrary wage drift)
+4. The DSGE takes no input from SimPaths. SimPaths' labour supply reaches the macro side through the planner alone, counted once a year after the labour market and the population alignment (§4, §7.1).
 5. Path recording is completely decoupled from the macro model usage (controlled via `mm_useMacroPathRecorder`, default `true`).
-6. Realized labour supply is fed back into the Ramsey re-solve by default, per margin, via `mm_ramseyFeedbackMargins` (default `employment_and_hours`).
+6. Realized employment and hours are fed back into the Ramsey re-solve whenever a Ramsey layer runs, with one persistence `mm_ramseyFeedbackPersistence` (default `1.0`) for both.
 
 How the macro wage enters SimPaths' wage equation is in §3.3, the order of events within a simulated year and
 across a run in §4, and what the feedback assumes about employment in §8.1.
@@ -44,7 +45,7 @@ across a run in §4, and what the feedback assumes about employment in §8.1.
 - Main integration orchestration: `simpaths.model.macro.MacroModelManager`
 - Simulation manager bridge: `simpaths.model.SimPathsModel`
 - Dynamic policy evaluator: `simpaths.model.macro.DSGEModel`
-- Micro-to-macro shock aggregation: `simpaths.model.macro.LaborSupplyAggregator`
+- Labour-supply aggregation for the planner's feedback and the level diagnostics: `simpaths.model.macro.LaborSupplyAggregator`
 
 ### 2.2 Bundle files consumed
 
@@ -96,13 +97,15 @@ legacy constant-growth interpretation.
 
 ### 3.1 SimPaths -> DSGE inputs
 
-- `epsilon_L`: labor-force/positive-hours shock (raw log-deviation, net of the projection's own labour growth)
-- `epsilon_h`: hours shock (raw log-deviation)
+None. The DSGE takes no input from SimPaths: its annual step (`DSGEModel.stepAnnual(DSGEShockScenario, int)`,
+called from `MacroModelManager.runDsgePass`) receives the scenario's shocks for the year and nothing else, all
+zero without a scenario. `eps_L` and `eps_h` remain shocks of the model, which a scenario may set like any other.
+SimPaths' labour supply reaches the macro side through the planner's end-of-year feedback alone (§8.1).
 
-Both are computed by `LaborSupplyAggregator` as log deviations from the rolling baseline; `epsilon_L` additionally
-subtracts the percent log change of the population projection's annual means
-(`MacroModelManager.projectedLaborGrowthPct`), so it is the year-over-year change of the employment rate against
-the projection, the object the DSGE was estimated on (§7.1).
+Until 2026-11 SimPaths also wrote `eps_L` and `eps_h` into the DSGE, as year-over-year changes of its headcount
+and hours. Nothing SimPaths produces is a business-cycle movement (its workers move
+with ageing, reforms, alignment and sampling noise), and the same movement already reached the planner, so the
+channel was removed.
 
 ### 3.2 DSGE -> SimPaths outputs
 
@@ -143,9 +146,9 @@ person:
 
 The macro wage is therefore a multiplicative overlay on the *output* of the wage equation, applied once a year
 and kept out of the equation's dynamics. It is a real wage: the Ramsey wage is real, and SimPaths wages are in
-`BASE_PRICE_YEAR` prices. It feeds back: the hours people choose become `L_sim` and `h`
-(`LaborSupplyAggregator`), which reach the DSGE as `eps_L`, `eps_h` and the Ramsey re-solve as `delta_t`
-(§8.1), and move next year's `dw`.
+`BASE_PRICE_YEAR` prices. It feeds back through the planner: the hours people choose become `L_sim` and `h`
+(`LaborSupplyAggregator`), which reach the Ramsey re-solve as `delta_t` and `delta_h` at the end of the year
+(§8.1) and move next year's `dw`. They do not reach the DSGE.
 
 **Companion switch.** Whenever the Ramsey layer runs, `Parameters.freezeWageGrowthForRamseyTrend` holds the
 exogenous `wage_growth` index (below) at its last in-sample year, `Parameters.wageGrowthLastInSampleYear` (2023
@@ -178,7 +181,7 @@ independent of `mm_macroModel`.
 | Entry point | Regressor inside the wage equation | Multiplier on the equation's output |
 | Pass-through | Partial, as estimated, shaped by the lag | One for one on the level, by construction |
 | Heterogeneity | One index; its effect differs between the `a` and `b` specifications (`W1ma`/`W1fa` vs `W1mb`/`W1fb`) through the lag | The same multiplier for everyone |
-| Feedback from SimPaths | None | `L_sim`, `h` → `eps_L`, `eps_h` (DSGE) and the re-solve (Ramsey) → next year's wage |
+| Feedback from SimPaths | None | `L_sim`, `h` → the Ramsey re-solve → next year's wage (the DSGE takes no input) |
 | Memory | The lag carries the index's effect forward, as estimated | The overlay is kept out of the lag |
 | Out-of-sample trend | From the index's extension | From the Ramsey path; the index is frozen at its last in-sample year |
 
@@ -210,26 +213,25 @@ A simulated year has two link points, with the labour market between them (`SimP
 
 At `DSGEMacroUpdate`, after union matching and fertility, before `LabourMarketAndIncomeUpdate`:
 
-1. Advance the Ramsey trend one year along the currently solved path, giving `w_trend(t)` (Ramsey modes).
-2. Aggregate SimPaths' labour supply and build `epsilon_L` and `epsilon_h` against the rolling baseline,
-   `epsilon_L` net of the projection's labour growth (DSGE modes, §7.1).
-3. Step the DSGE four quarters and average them into the annual cycle feedback `w_cycle(t)`, `pi_cycle(t)`.
-4. Compose the total wage effect `w_trend + w_cycle` and apply it to every person's potential wage (§3.3).
-5. Advance the rolling baseline for next year.
+1. Advance the Ramsey trend one year along the currently solved path, giving `w_trend(t)` (Ramsey modes). From
+   `startYear+2` on this requires the end-of-year feedback of `t-1` to have run; otherwise the run stops (§8.1).
+2. Step the DSGE four quarters on the scenario's shocks for `t` (zero without a scenario) and average them into
+   the annual cycle values `w_cycle(t)`, `pi_cycle(t)` (DSGE modes). The step is the same in every year, the
+   start year included (`MacroModelManager.runDsgePass`).
+3. Compose the total wage effect `w_trend + w_cycle` and apply it to every person's potential wage (§3.3).
+4. Record the year's row, with in-year level indices that step 5 overwrites.
 
 At `MacroEndYearCapture`, after mortality and population alignment:
 
-6. Overwrite the year's recorded level columns with the post-alignment population and, unless
-   `mm_ramseyFeedbackMargins: none`, re-solve the remaining Ramsey horizon against the realized employment and
-   hours (§8.1).
+5. Overwrite the year's recorded level columns with the post-alignment population and, in a Ramsey mode,
+   re-solve the remaining Ramsey horizon against the realized employment and hours (§8.1). This is the one count
+   of SimPaths' labour supply the macro side uses (§7.1).
 
-No static equilibrium iteration is performed. The order of steps 1 and 3 does not matter for the wage: neither
-layer reads the other's output within the year, the DSGE takes `epsilon_L` and `epsilon_h` only, the planner the
-level gap only, and the wage is the sum. Both macro responses to the labour market of year `t` reach wages in
-`t+1`, through two different statistics of the same headcount: the DSGE through its year-over-year change, the
-planner through the cumulative gap against the projection. The one dependency between the layers is
-conceptual: the DSGE was estimated on Ramsey-detrended data, so the Ramsey path is its steady state, which is
-why `mm_macroModel: dsge` alone is diagnostic (§6.1).
+No static equilibrium iteration is performed. The order of steps 1 and 2 does not matter for the wage: neither
+layer reads the other's output within the year, and the wage is the sum. The labour market of year `t` reaches
+wages in `t+1` through one channel, the planner's re-solve on the post-alignment count; the DSGE never sees it.
+The one dependency between the layers is conceptual: the DSGE was estimated on Ramsey-detrended data, so the
+Ramsey path is its steady state, which is why `mm_macroModel: dsge` alone is diagnostic (§6.1).
 
 ### 4.1 One simulated year
 
@@ -257,6 +259,7 @@ flowchart TB
   Y["EndYear, UpdateYear"]
   R["Ramsey trend<br/>(path solved at the end of t-1)"]
   D["DSGE cycle<br/>(state-space, 4 quarterly steps)"]
+  SC["Scenario shocks<br/>(mm_dsgeShockScenario)"]
   RS["Ramsey re-solve<br/>from K(t), A(t)"]
 
   A ~~~ R
@@ -265,9 +268,8 @@ flowchart TB
   LM --> B --> P --> O --> E --> Y
 
   R -- "w_trend(t) = w(t)/w(q0) - 1" --> M
-  M -- "eps_L (net of projected growth), eps_h:<br/>pre-labour-market snapshot vs the previous one" --> D
+  SC -- "shocks of the 4 quarters of t<br/>(zero without a scenario)" --> D
   D -- "w_cycle(t), pi_cycle(t)" --> M
-  LM -. "startYear+1 only:<br/>latch DSGE L/h baseline" .-> D
   E -- "L_sim(t), h(t)<br/>(post-labour-market, post-alignment)" --> RS
   RS -- "revised path, used from t+1" --> R
 
@@ -276,7 +278,7 @@ flowchart TB
   classDef macro fill:#dbeafe,stroke:#1d4ed8;
   class A,W0,U,LM,B,P,O,Y micro;
   class M,E link;
-  class R,D,RS macro;
+  class R,D,SC,RS macro;
 ```
 
 ### 4.2 Message sequence across a run
@@ -295,11 +297,11 @@ sequenceDiagram
     Note over S,C: startYear (firstYearSched: no labour market, no unions, no fertility)
     S->>M: DSGEMacroUpdate
     M->>M: initialize: verify bundle, latch demographic anchors (Pop, WAP, atRisk)
-    M->>D: load state-space, reset to steady state (DSGE modes, dsge alone also loads the N projection for eps_L)
+    M->>D: load state-space, reset to steady state (DSGE modes; dsge alone checks the bundle's handoff quarter)
     M->>R: load bundle, solve the full forward path from (K_T, A_T) with the N and h projections, baseline = quarter 0 (Ramsey modes)
     M->>R: advanceRamseyTrend
     R-->>M: w_trend(startYear)
-    M->>D: stepAnnual with zero feedback shocks (scenario shocks if declared)
+    M->>D: stepAnnual on the scenario's shocks for startYear (zero without a scenario)
     M->>S: labWageHrly x (1 + dw/100) for all persons
     M->>C: row for startYear
     S->>M: MacroEndYearCapture
@@ -308,31 +310,25 @@ sequenceDiagram
     loop every year t from startYear+1 (yearlySchedule)
         Note over S: aging, retirement, education, health, UpdatePotentialHourlyEarnings (dw of t-1), unions, fertility
         S->>M: DSGEMacroUpdate
-        M->>R: advanceRamseyTrend (Ramsey modes)
-        R-->>M: w_trend(t), from the path solved at the end of t-1
+        opt Ramsey modes
+            M->>M: from startYear+2: stop unless the feedback of t-1 ran
+            M->>R: advanceRamseyTrend
+            R-->>M: w_trend(t), from the path solved at the end of t-1
+        end
         opt DSGE modes
-            alt t = startYear+1 (L/h baseline not latched yet)
-                M->>D: stepAnnual with zero feedback shocks (scenario shocks if declared)
-            else t = startYear+2 (first snapshot after the latch)
-                M->>M: aggregate: no shock, this snapshot becomes the reference (advanceBaseline then has nothing to do)
-                M->>D: stepAnnual with zero feedback shocks (scenario shocks if declared)
-            else from startYear+3
-                M->>M: aggregate: eps_L net of the projection's growth, eps_h, against the previous snapshot
-                M->>D: stepAnnual(eps_L, eps_h, scenario shocks)
-                M->>M: advanceBaseline
-            end
+            M->>D: stepAnnual on the scenario's shocks for t (zero without a scenario)
             D-->>M: w_cycle(t), pi_cycle(t)
         end
         M->>S: labWageHrly x (1 + (w_trend + w_cycle)/100) for all persons
-        M->>C: row t: trend, cycle, wage_realized and, where the pass computes them, pre-alignment level indices
+        M->>C: row t: trend, cycle, wage_realized and the pre-alignment level indices
         S->>S: LabourMarketAndIncomeUpdate: at-risk pool, labour-supply choice at the new wages, earnings, tax-benefit match, disposable income
         opt t = startYear+1
-            S->>M: latchBaselineFromPostLaborMarket: DSGE L/h baseline, l_level and h_level anchors
+            S->>M: latchStartYearAnchorsPostLabourMarket: l_level and h_level anchors
         end
         Note over S: benefits, consumption, EDI, mortality, PopulationAlignment, output variables
         S->>M: MacroEndYearCapture
         M->>C: overwrite the level columns of row t with the post-alignment population
-        opt mm_ramseyFeedbackMargins is not none (Ramsey modes)
+        opt Ramsey modes
             M->>M: computeRawAggregates: L_sim(t), h(t)
             alt t = startYear+1
                 M->>M: latch lambda = N_assumed(t)/L_sim(t) and the hours base
@@ -352,12 +348,11 @@ sequenceDiagram
 
 | When | Direction | What | Computed from | Consumed by | First fires |
 |---|---|---|---|---|---|
-| Offline (MATLAB) | micro to macro | `population_projection_{CC}.csv` (the employees level at the handoff quarter, grown with the projected population aged 15-64) and `hours_projection_{CC}.csv` | `input/{CC}/align_popProjections.xlsx`, the projection SimPaths' population alignment uses; the hours trend fitted to observed hours | the forward Ramsey solve; the projection's growth also nets `eps_L` | before the run |
+| Offline (MATLAB) | micro to macro | `population_projection_{CC}.csv` (the employees level at the handoff quarter, grown with the projected population aged 15-64) and `hours_projection_{CC}.csv` | `input/{CC}/align_popProjections.xlsx`, the projection SimPaths' population alignment uses; the hours trend fitted to observed hours | the forward Ramsey solve | before the run |
 | `DSGEMacroUpdate` | macro to micro | `w_trend(t)`, cumulative percent against the handoff quarter | the Ramsey path solved at the end of `t-1` (`advanceRamseyTrend`) | the wage multiplier | `startYear` |
-| `DSGEMacroUpdate` | micro to macro | `eps_L`, `eps_h` (100·log changes) | the positive-hours headcount and mean hours before this year's labour market, against the previous `DSGEMacroUpdate` snapshot; `eps_L` net of the projection's growth (`projectedLaborGrowthPct`) | `DSGEModel.stepAnnual` | `startYear+3`; `startYear+2` only rolls the reference (§7.1) |
-| `DSGEMacroUpdate` | macro to micro | `w_cycle(t)`; `pi_cycle(t)` is computed too | the DSGE annual average after four quarterly steps | the wage multiplier (`pi_cycle` is only recorded) | labour feedback from `startYear+3`; scenario shocks from the year they declare |
+| `DSGEMacroUpdate` | macro to micro | `w_cycle(t)`; `pi_cycle(t)` is computed too | the DSGE annual average after four quarterly steps on the scenario's shocks | the wage multiplier (`pi_cycle` is only recorded) | `startYear`; zero without scenario shocks |
 | `DSGEMacroUpdate` | macro to micro | every person's potential wage times `1 + (w_trend + w_cycle)/100` | `Person.updateFullTimeHourlyEarnings` (§3.3) | labour-supply choice, earnings, tax-benefit match | `startYear` |
-| End of `LabourMarketAndIncomeUpdate` | micro to macro | the DSGE's L/h baseline and the `l_level`/`h_level` start anchors, latched once | the post-labour-market population | the `l_level`/`h_level` indices (§7.2); as the shock reference it is replaced, without a shock, by the `startYear+2` snapshot | `startYear+1`, once |
+| End of `LabourMarketAndIncomeUpdate` | micro to macro | the `l_level`/`h_level` start anchors, latched once (`latchStartYearAnchorsPostLabourMarket`) | the post-labour-market population | the `l_level`/`h_level` indices and the gate of `participation_rate`, `workers_over_atRiskPool` (§7.2) | `startYear+1`, once |
 | `MacroEndYearCapture` | micro to macro | post-alignment level indices (`l_level`, `h_level`, `wap_level`, `cat_*`, `wage_realized`) | `computeRawAggregates` after mortality and population alignment | `MacroPaths.csv` only | `startYear` (`l_level`, `h_level` from `startYear+1`, §7.2) |
 | `MacroEndYearCapture` | micro to macro | `L_sim(t)`, `h(t)`; the `lambda` latch, then `delta_t`, `delta_h` and the Ramsey re-solve | the same post-alignment snapshot | the Ramsey path from `t+1` on, hence next year's `w_trend` | `lambda` in `startYear+1`; re-solves from `startYear+2` |
 | `UpdateYear` of `endYear` | | `MacroPaths.csv` export, diagnostics summary | | | `endYear` |
@@ -366,21 +361,22 @@ sequenceDiagram
 
 | Year | Labour market | Wage multiplier | DSGE (DSGE modes) | Ramsey feedback |
 |---|---|---|---|---|
-| `startYear` | none (`firstYearSched`) | `w_trend` only, already nonzero | initialised, stepped without a labour shock | none |
-| `startYear+1` | yes | `w_trend` only | stepped without a labour shock; reference headcount and hours latched after the labour market | `lambda` latched at year end, no re-solve |
-| `startYear+2` | yes | `w_trend` only (the cycle stays at zero unless a scenario declares shocks) | reference rolled to the pre-labour-market snapshot, no labour shock | first gap and first re-solve at year end, effective from `startYear+3` |
-| `startYear+3` | yes | `w_trend + w_cycle` | first live `eps_L`, `eps_h` (before the labour market) | yearly |
-| later | yes | both | yearly | yearly |
+| `startYear` | none (`firstYearSched`) | `w_trend + w_cycle`; `w_trend` already nonzero | initialised, stepped on the scenario's shocks | none |
+| `startYear+1` | yes | `w_trend + w_cycle` | stepped on the scenario's shocks | `lambda` and the hours base latched at year end, no re-solve |
+| `startYear+2` | yes | `w_trend + w_cycle` | stepped on the scenario's shocks | first gap and first re-solve at year end, effective from `startYear+3` |
+| later | yes | `w_trend + w_cycle` | the same step | yearly |
+
+`w_cycle` is zero in every year without scenario shocks.
 
 ### 4.5 What does not cross
 
 - `pi_cycle`, `r*` and the planner's output, consumption, investment and capital are computed and written to
   `MacroPaths.csv` but reach no agent (`SimPathsModel.getMm_inflationDeviation` has no caller).
 - SimPaths' incomes, taxes, benefits, consumption and wealth never reach the macro side. The only micro
-  quantities it sees are the positive-hours headcount, mean hours, and the demographic counts (population,
-  working-age population, at-risk pool), and, for recording only, potential wages (`wage_realized`) and the
-  labour-category shares (`cat_*`).
-- Nothing crosses in the DSGE direction at `MacroEndYearCapture`, and nothing crosses in the Ramsey direction at
+  quantities the planner sees are the positive-hours headcount and mean hours; the demographic counts
+  (population, working-age population, at-risk pool), potential wages (`wage_realized`) and the
+  labour-category shares (`cat_*`) are recorded only.
+- Nothing from SimPaths reaches the DSGE, at any point of the year. Nothing crosses in the Ramsey direction at
   `DSGEMacroUpdate` except the already-solved path.
 
 ### 4.6 Timing facts that are easy to get wrong
@@ -395,16 +391,14 @@ sequenceDiagram
   part-time, the `wage_growth` index) union matching and fertility change only one: a newly matched woman moves
   to her partner's region (`UnionMatching.localMatch`). For everyone else only the multiplier differs between
   the two calls.
-- **`eps_L` is a pre-labour-market snapshot.** At `DSGEMacroUpdate` the hours on persons are last year's choices
-  on this year's population (after aging, retirement, deaths and new entrants). `eps_L(t)` therefore carries the
-  labour-market outcome of `t-1` plus demographic turnover, net of the growth the projection already assumes,
-  not the choice made in `t`.
-- **Two labour snapshots per year.** The DSGE uses the pre-labour-market snapshot, the Ramsey feedback the
-  post-alignment one at `MacroEndYearCapture`. They differ by what this year's labour market, mortality and
-  population alignment did in between.
-- **No labour feedback in the first years** (§4.4): the start year gets the trend wage only, `startYear+1`
-  latches both references, `startYear+2` has the first Ramsey re-solve and rolls the DSGE reference, and
-  `startYear+3` has the first DSGE labour shock.
+- **One labour count per year.** The planner's feedback takes `L_sim(t)` and `h(t)` at `MacroEndYearCapture`,
+  after this year's labour market, mortality and population alignment. The level indices written at
+  `DSGEMacroUpdate` come from the population before the labour market and are overwritten at the year end; no
+  macro quantity is computed from them.
+- **The first feedback moves the wage in `startYear+3`** (§4.4): `startYear+1` latches `lambda` and the hours
+  base, `startYear+2` has the first re-solve, which the wage of `startYear+3` is the first to use.
+- **A missing feedback stops the run.** If the end-of-year feedback of `t-1` did not run (`t-1 > startYear`),
+  `updateEquilibrium` throws before advancing the planner's trend into `t`, naming `MacroEndYearCapture`.
 - **`n_ramsey` changes meaning under feedback**: after the first re-solve it tracks the fed-back path, not the
   projection (§8.1).
 
@@ -415,10 +409,17 @@ sequenceDiagram
 Dynare-exported policy matrices (`Bs`, `D`) contain raw `ghu` derivatives.  
 Therefore input handling must be:
 
-- `epsilon_L`, `epsilon_h` from SimPaths: raw log-deviations, no scaling
-- Other scenario shocks (`eps_a`, `eps_r`, `eps_d`, `eps_p`, `eps_sep`, `eps_inv`): interpreted as sigma-units and converted to raw innovations by multiplying by sigma
+- Every scenario shock (`eps_a`, `eps_r`, `eps_d`, `eps_p`, `eps_L`, `eps_sep`, `eps_h`, `eps_inv`): an
+  innovation in sigma-units, converted to a raw innovation by multiplying by sigma. SimPaths sends none.
+- The labour force and hours follow their own AR(1) at the calibrated persistence the bundle carries
+  (`shock_params.csv`; Poland 0.95 and 0.80 per quarter), like every other exogenous process, so a
+  labour-force shock repeated every quarter accumulates and can trip `mm_dsgeMaxStateDeviation`.
+- Until 2026-11 the export set that persistence to zero and `eps_L`/`eps_h` were percent levels written by
+  SimPaths. A bundle exported that way lacks the field `deviation_scale` in `model_info.json` and is refused
+  with a message to re-export; a scenario file of that time with an `eps_L` or `eps_h` column meant a percent
+  level and must be rewritten in sigma-units.
 
-Formula for non-`epsilon_L/epsilon_h` shocks:
+Formula for every shock:
 
 `rawInnovation_j = shockInSigmaUnits_j * sigma_j`
 
@@ -442,11 +443,9 @@ All under `model_args`:
 - `mm_ramseyScenario` (string; ignored unless `mm_macroModel` runs the Ramsey layer)
 - `mm_dsgeMaxStateDeviation` (double, default `10.0`; DSGE stability bound in log-deviation units)
 - `mm_macroLogging` (`off | state | verbose`, default `off`; `verbose` implies `state`)
-- `mm_ramseyFeedbackMargins` (`none | employment | hours | employment_and_hours`, default
-  `employment_and_hours`; which realized margins enter the yearly Ramsey re-solve — see §8.1.
-  Inert without the Ramsey layer)
-- `mm_ramseyFeedbackPersistence` (double, default `1.0`; persistence of the realized employment gap in the feedback belief, range `[0,1]` — see §8.1)
-- `mm_ramseyFeedbackHoursPersistence` (double, default `1.0`; persistence of the realized hours gap, range `[0,1]`)
+- `mm_ramseyFeedbackPersistence` (double, default `1.0`, range `[0,1]`; the planner's belief about how
+  persistent a realized employment or hours gap is — see §8.1. The feedback itself has no switch: it is always
+  on with a Ramsey layer. Ignored without one)
 
 Unquoted `off` is a YAML 1.1 boolean, so SnakeYAML delivers `Boolean.FALSE`; the enum parser
 maps it to the disabled constant, which is why `mm_macroModel: off` works without quotes.
@@ -462,38 +461,29 @@ The following are removed from active code/config:
 - `mm_dampingFactor`
 - `mm_capitalShareAlphaK`
 - `mm_capitalPartialAdjustment`
+- `mm_ramseyFeedbackMargins` and `mm_ramseyFeedbackHoursPersistence` (2026-11: the feedback is always on for
+  both margins, with the one persistence `mm_ramseyFeedbackPersistence`)
+
+Like every unknown key, a removed switch left in a config is ignored without a message;
+`MacroScenarioConfigTest` fails on any `mm_*` key in `config/` that is not a field of `SimPathsModel`.
 
 ---
 
-## 7. Baseline Strategy
+## 7. Labour Count and Level Anchors
 
-### 7.1 Rolling baseline
+### 7.1 One count per year
 
-Shocks are always year-over-year, and `epsilon_L` is measured against the projection:
+The macro side counts SimPaths' labour supply once a year, at `MacroEndYearCapture`, after the labour market,
+mortality and population alignment (`LaborSupplyAggregator.computeRawAggregates`). That count, the positive-hours
+headcount `L_sim(t)` and mean hours `h(t)`, is what the planner's feedback reads (§8.1) and what the year's
+level columns in `MacroPaths.csv` keep. The in-year level columns written at `DSGEMacroUpdate` come from the
+population before the labour market and are overwritten by the end-of-year values.
 
-- `epsilon_L,t = 100 [ln(L_t / L_{t-1}) - ln(N_proj,t / N_proj,t-1)]`
-- `epsilon_h,t = 100 ln(h_t / h_{t-1})`
-
-`N_proj` is the retained original population projection (`ramseyProjN`, annual means), the same path the
-Ramsey feedback gap is measured against (§8.1); `epsilon_L` is the first difference of that gap. The DSGE was
-estimated on `L` net of its demographic trend (`detrended.L = 100 (ln L - ln L_demo)` in `ramsey_trend.m`);
-handing it the raw change of the headcount gave it the whole projected workforce decline as a standing shock
-(about -0.85%/yr for Poland against -0.89%/yr projected, measured 2026-10-20) while the trend layer already
-priced that decline. Hours are not detrended: SimPaths has no hours trend and the planner's hours trend is
-kept out of the feedback. `mm_macroModel: dsge` loads the projection for this purpose alone
-(`loadProjectionForLaborShock`), aligned on the handoff quarter like the trend layer, and fails without it or
-with a start year other than the handoff year.
-
-This keeps shocks in the local-linear range and avoids secular drift overwhelming the DSGE approximation.
-
-**Snapshot timing.** The baseline is latched after the labour market of `startYear+1`
-(`latchBaselineFromPostLaborMarket`), but every later aggregate is taken at `DSGEMacroUpdate`, before the
-year's labour market. The first aggregate after the latch (`startYear+2`) would therefore compare a
-pre-labour-market snapshot with a post-labour-market one and report the year's gross outflow (retirements,
-deaths, entrants without hours) as a labour-supply shock (-3.4% in every DSGE run before 2026-10-20). That call
-now reports no shock and rolls the baseline to its own snapshot (`LaborSupplyAggregator.aggregate`); the first
-live `epsilon_L` is in `startYear+3`. Pinned by `LaborSupplyAggregatorTest` and, end to end through
-`updateEquilibrium`, by `LaborShockProjectionTest`.
+Until 2026-11 the DSGE also received a second count, taken before the labour market, as year-over-year
+changes, with special rules for the first three years. The DSGE now takes no input from SimPaths (§3.1), and
+that count and its first-year rules are gone: the DSGE runs the same annual step in every year from the start
+year on, and DSGE-only mode no longer loads the population projection (it still refuses a start year other
+than the bundle's handoff year).
 
 ### 7.2 Anchor-year asymmetry: the level indices start to move at different points
 
@@ -508,11 +498,12 @@ Cause — two latches at different schedule phases, and an end-of-year rewrite:
   that year's mortality and population alignment. They are labour-market-invariant
   head counts, so this is safe.
 - **L/h anchors** (`startL`, `startH`) are deliberately latched *post-labour-market*,
-  and only in the **second** simulation year (`latchBaselineFromPostLaborMarket`),
+  and only in the **second** simulation year (`latchStartYearAnchorsPostLabourMarket`),
   because `L_0`/`h_0` must use SimPaths' model-assigned hours, not the input-DB
-  hours present before the first labour-market update; the DSGE's reference is first
-  latched after a labour market for the same reason (§7.1). It must not be moved
-  earlier.
+  hours present before the first labour-market update. The same latch opens the gate
+  of `participation_rate`, `workers_over_atRiskPool` and the category diagnostics
+  (`LaborSupplyAggregator.isStartYearLatched`; `LevelDiagnosticsTest`). It must not be
+  moved earlier.
 - **End-of-year rewrite.** At `MacroEndYearCapture`, `updateLevelAggregatesPostAlignment`
   recomputes the year's level columns from the post-alignment population, against the
   same anchors (`demographicIndexUpdates`, shared with the in-year pass), so the value
@@ -540,9 +531,9 @@ Implications:
 - In `compare_scenarios.do` the macro-impact panel is a scenario−baseline
   *difference*, so the lag cancels provided both arms use identical code and
   seed (the standard requirement); the asymmetry only matters for level plots.
-- If this ever needs to change, re-sampling L for the recorder after the
-  labour market is parity-sensitive (eps_L, cumulative trend,
-  `growth_model_reference`) and requires full parity re-validation.
+- If the latch ever moves, the base of `l_level`/`h_level` and the first year of
+  `participation_rate` move in every run; `compare_scenarios.do` anchors on the first
+  non-zero value and must be checked with it.
 
 ---
 
@@ -557,14 +548,15 @@ Implications:
 	zero-growth shortcut. This keeps SimPaths aligned with the MATLAB export contract used to generate the Ramsey
 	inputs.
 - If Ramsey trend is unavailable, secular wage trend fallback is currently `0` (no reduced-form alpha/gamma fallback)
-- With `mm_ramseyFeedbackMargins: none` the trend is strictly top-down. The default, `employment_and_hours`,
-	feeds realized labour supply back into the yearly re-solve (§8.1)
+- The trend is not strictly top-down: with a Ramsey layer, realized labour supply always feeds back into the
+	yearly re-solve (§8.1)
 
 ### 8.1 Recursive trend feedback (extended path)
 
-With `mm_ramseyFeedbackMargins` set to a margin, SimPaths' realized labour supply is fed back into the
+Whenever a Ramsey layer runs, SimPaths' realized labour supply, employment and hours, is fed back into the
 Ramsey trend once per simulated year, using the standard extended-path convention (re-solve the
-remaining horizon from the predetermined capital state each time new information arrives).
+remaining horizon from the predetermined capital state each time new information arrives). There is no
+switch for it.
 
 **Yearly mechanism.** At `MacroEndYearCapture` — after mortality and population alignment, the
 only point in the year where employment is final — realized labour force
@@ -592,31 +584,27 @@ trend fails to solve. (Until 2026-10-20 it also refused the endogenous-labour Ra
 participation FOC approximated the same response ex ante; that variant was removed,
 JuergenWiemers/SimPathsEU#28, so the feedback is the only labour channel into the planner.)
 
-A DSGE mode was also fatal until 2026-08-18; it now only warns. The two channels do not
-measure the same object: `eps_L` is a *year-over-year* log change against a rolling baseline, net of the
-projection's growth (§7.1), while `delta_t` is a *cumulative level* ratio against the same fixed original
-projection; the one is the first difference of the other. A permanent labour-supply shift therefore gives `eps_L` once and zero
-thereafter, the DSGE response decays back to the trend (the DSGE steady state *is* the Ramsey path),
-and only the Ramsey revision persists — the overlap is a transitional overshoot while the cycle
-decays, not a permanent double count. Its size is bounded by the measured loop gain of about -0.04,
-i.e. a few percent of the labour response. What does remain is a different problem: at `rho=1` the
-planner extrapolates *every* realized deviation as permanent, and with the DSGE on part of that
-deviation is cyclical by construction. Prefer `rho < 1` when running both. Measured end to end on
-2026-10-20 (one seed, both margins, `rho = 1`, no scenario shocks; `config/ramsey-feedback-persistent.yml`
-against `config/ramsey-dsge-feedback-persistent.yml`, after the fix of the same day): with `eps_L` measured
-against the projection it averages +0.01 over 2026-2060 (it averaged -0.85 before, the projected decline
-itself), the first comparison after the latch is zero, and the cycle layer's response to SimPaths' own labour
-input moves `w_total` by 0.29 pp of the index on average in absolute value (maximum 0.84 pp), with a mean of
-+0.004 pp: a zero-mean wobble, no standing offset. The Ramsey-only arm is unchanged to the last digit.
+**A missing feedback is fatal.** `applyRamseyRecursiveFeedback` records the year it ran, and
+`updateEquilibrium` refuses to advance the trend into year `t` when the feedback of `t-1` did not run
+(`t-1 > startYear`), with a message naming `MacroEndYearCapture`. Advancing on a path that ignores a year of
+SimPaths' labour supply would be a silent fallback. The guard is in the schedule-driven path, not in
+`advanceRamseyTrend`, which tests step on their own. The warn-and-skip branches for degenerate inputs
+(non-positive realised `L`, exhausted projection horizon, unusable hours) are unchanged.
 
-**Hours feedback (the `hours` margin of `mm_ramseyFeedbackMargins`, added 2026-08-18 as a separate
-switch).** On by default since 2026-08-19 (`employment_and_hours`); it was off in the four arms behind
-the recursive-feedback note, which therefore report a heads-only loop. Heads-only feedback shows the
-planner `delta_n` while the labour input is `N*h`, so it gets the capital-dilution response wrong
-whenever the two margins move in opposite directions. When on, realized mean hours per worker are fed
-back alongside headcount, with their own persistence `mm_ramseyFeedbackHoursPersistence`. The Ramsey
-labour input is `N*h` (`RamseyTrendModel`), so an x% hours gap dilutes capital exactly as an x%
-headcount gap does. Diagnostic column: `h_realized_gap`.
+**The DSGE takes no part.** With a DSGE mode the cycle layer runs on the scenario's shocks alone and takes no
+input from SimPaths (§3.1), so the planner's feedback is the only channel from SimPaths' labour supply to the
+macro side. Consequence: with no scenario shocks, a Ramsey+DSGE run has the Ramsey-only wage index year by year
+on the same seed, and its cycle wage is zero (`DsgeOneWayTest`; end to end, `config/ramsey-feedback-persistent.yml`
+against `config/ramsey-dsge-feedback-persistent.yml`). Until 2026-11 SimPaths also handed the DSGE the
+year-over-year change of the same headcount, so one movement moved the trend wage and the cycle wage at once.
+
+**Hours feedback.** Realized mean hours per worker are fed back alongside the headcount, with the same
+persistence `rho`. Heads-only feedback would show the planner `delta_n` while the labour input is `N*h`
+(`RamseyTrendModel`), getting the capital-dilution response wrong whenever the two margins move in opposite
+directions; an x% hours gap dilutes capital exactly as an x% headcount gap does. Diagnostic column:
+`h_realized_gap`. (History: hours were added on 2026-08-18 as a separate margin with its own persistence, and
+the four arms behind the recursive-feedback note ran heads-only. Since 2026-11 both margins are always fed
+back, with one `rho`.)
 
 **The two gaps use different references, and this is the subtle part.** `delta_n` is measured
 against the planner's projected `N`, which is legitimate only because `extDemographic` is
@@ -629,7 +617,7 @@ hours (`hours_trend_method` in the growth params; for PL, -0.203%/yr, and the `h
 SimPaths models no hours trend at all, so measuring `delta_h` against `projH` would compare two
 different modelling assumptions: by 2060 the planner assumes hours 7.0% below their 2024 level
 while SimPaths delivers 1.3% above, i.e. a spurious `delta_h` near +9% that grows monotonically
-instead of mean-reverting, worth roughly -2.5% of the trend wage at `rho_h=1`.
+instead of mean-reverting, worth roughly -2.5% of the trend wage at `rho=1`.
 
 `delta_h` is therefore measured against **SimPaths' own latch-year hours** (`ramseyFeedbackHoursBase`),
 not against `projH`: the planner keeps its fitted trend as a maintained assumption and SimPaths
@@ -655,8 +643,8 @@ reached ~69% of their handoff level, at odds with the terminal condition `K/(kyB
 balanced growth path hours per worker must be constant. The tail is a terminal-condition device, not a
 forecast; its effect on the trend wage over 2023-2060 is under 0.003%.
 
-**Persistence (`rho`) semantics.** `rho` is the assumed persistence of a realized employment
-surprise, applied as a per-year geometric decay on the tail: `rho=1` treats the whole gap as
+**Persistence (`rho`) semantics.** `rho` is the assumed persistence of a realized employment or hours
+surprise, the same for both, applied as a per-year geometric decay on the tail: `rho=1` treats the whole gap as
 permanent (a random-walk belief in the surprise), `rho=0` replaces only the realized year and
 leaves every future quarter at the originally assumed path. **`rho=0` is a near-zero-feedback
 setting by construction, not a "weak feedback" setting**: with only the current year replaced, the
@@ -676,15 +664,13 @@ all workers" below) — and
 `w_trend_revision` — the percent change in the year-`t+1` trend wage caused by the re-solve. Both
 default to `0` for any year with no re-solve: the latch year (`n_realized_gap` is legitimately `0`
 there, since `delta ≡ 1`; `w_trend_revision` is `0` because no re-solve happens to produce a
-revision) and every year of a run where the feedback is disabled.
+revision) and every year of a run without a Ramsey layer.
 
 **`n_ramsey` changes meaning under feedback.** `advanceRamseyTrend` derives the `n_ramsey` column
 (§7.2) from the *currently solved* trend's `ts.labor()`, so once a re-solve has happened,
-`n_ramsey` tracks the fed-back, revised labour path — not the population-projection-based path
-`n_ramsey` represents when the feedback is off. Analysts comparing `n_ramsey` across arms of an
-experiment should treat the off arm's `n_ramsey` as the assumed path and `n_realized_gap` (not the
-persistent/transitory arm's own `n_ramsey`) as the measure of how far the feedback run departed
-from it.
+`n_ramsey` tracks the fed-back, revised labour path — not the population-projection-based path it
+represents before the first re-solve. The measure of how far a run departed from the assumed path is
+`n_realized_gap`, not `n_ramsey`.
 
 **Employees versus all workers: what `lambda` holds fixed.** The planner's `N` is employees, the
 national-accounts headcount behind its wage and hours: compensation and hours exist per employee only, because
@@ -724,8 +710,7 @@ Three consequences:
 - There is no NAIRU wedge: realized labour supply is fed back directly, without an exogenous
   `N = L (1 - u*)` adjustment. The NAWRU series `ramsey_trend.m` builds is kept for diagnostics only.
 - Unemployment exists only in the DSGE layer (search and matching, `U = L - N`), where it is cyclical and
-  mean-reverting. With the feedback off (`none`), the planner's `N` follows the projection while `L_sim` is
-  unconstrained; the distance between them is two projections that nothing reconciles, not unemployment.
+  mean-reverting, and driven by the scenario's shocks alone.
 
 The diagnostics follow the code's naming: "employment" in `n_realized_gap` and in the log lines means SimPaths'
 workers with positive hours, which in this market is employment.
@@ -771,10 +756,11 @@ Dynamic DSGE paths export to:
 `src/test/java/simpaths/model/macro/`
 
 `BundleProvenanceTest` (contract 18), `DSGEBundleContractTest`, `DSGEIntegrationTest`, `DSGEIrfParityTest`,
-`DSGEModelTest`, `DSGEShockScenarioTest`, `DSGEStateTest`, `LaborSupplyAggregatorTest`, `MacroJsonTest`,
-`MacroModelManagerTest`, `MacroPathRecorderTest`, `MacroScenarioConfigTest`, `MacroSwitchContractTest`,
-`RamseyRecursiveFeedbackTest`, `RamseyScenarioTest`, `RamseyTrendModelTest` (MATLAB parity in exogenous
-mode at `RELATIVE_TOLERANCE = 1e-9`), `ScenarioLoaderParityTest`
+`DSGEModelTest`, `DSGEShockScenarioTest`, `DSGEStateTest`, `DsgeOneWayTest` (contract 38),
+`LaborSupplyAggregatorTest`, `LevelDiagnosticsTest`, `MacroJsonTest`, `MacroModelManagerTest`,
+`MacroPathRecorderTest`, `MacroScenarioConfigTest`, `MacroSwitchContractTest`, `RamseyRecursiveFeedbackTest`,
+`RamseyScenarioTest`, `RamseyTrendModelTest` (MATLAB parity in exogenous mode at `RELATIVE_TOLERANCE = 1e-9`),
+`ScenarioLoaderParityTest`. `MacroTestSupport` holds the helpers that drive a manager through the schedule.
 
 ---
 

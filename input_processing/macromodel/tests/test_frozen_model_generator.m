@@ -84,9 +84,9 @@ function test_frozen_model_generator()
 
     %% ================================================================
     fprintf('\nTEST 5: calibrated value is read as written, and only when unambiguous\n');
-    % The estimation-mode branch of the rho_L / rho_h conditional blocks must
-    % carry the country's own calibrated value. It used to be a constant
-    % (Germany's 0.95 / 0.85), which misrecorded Poland and Spain (rho_h = 0.80).
+    % TEST 6 compares every frozen model's rho_L / rho_h with the country's own
+    % calibration through this reader. A constant once stood in for it (Germany's
+    % 0.95 / 0.85), which misrecorded Poland and Spain (rho_h = 0.80).
     calib = sprintf(['rho_L    = 0.95;    // labor force persistence\n' ...
                      'rho_h    = 0.80;    // hours persistence (below Germany''s 0.85)\n' ...
                      '// RATIONALE: rho_L=0.95 and rho_h=0.85 capture persistence\n']);
@@ -112,9 +112,11 @@ function test_frozen_model_generator()
         'parameter assigned twice', n_pass, n_fail);
 
     %% ================================================================
-    fprintf('\nTEST 6: every frozen model records its own country''s persistence\n');
-    % End-to-end form of TEST 5, on the generated files themselves: the
-    % @#else (estimation-mode) branch must equal the calibration file.
+    fprintf('\nTEST 6: every frozen model carries its own country''s persistence, once\n');
+    % The exported model is the estimated model for every shock: no export switch,
+    % and rho_L / rho_h each assigned exactly once, with the calibration's value.
+    % Until 2026-11 the frozen models zeroed both for the SimPaths export
+    % (for_simpaths_export), because SimPaths wrote levels into eps_L / eps_h.
     countries = {'Germany', 'Poland', 'Spain', 'Sweden', 'UK'};
     for i = 1:numel(countries)
         country = countries{i};
@@ -126,21 +128,29 @@ function test_frozen_model_generator()
         end
         frozen_text = fileread(frozen_file);
         calib_text = fileread(calib_file);
+        if contains(frozen_text, 'for_simpaths_export')
+            fprintf('  [FAIL] %s: %s still contains for_simpaths_export\n', country, frozen_file);
+            n_fail = n_fail + 1;
+        else
+            fprintf('  [PASS] %-8s no for_simpaths_export\n', country);
+            n_pass = n_pass + 1;
+        end
         pnames = {'rho_L', 'rho_h'};
         for j = 1:numel(pnames)
             pname = pnames{j};
             expected = str2double(read_calibrated_value(calib_text, pname));
-            tok = regexp(frozen_text, ...
-                sprintf('@#else\\s*\\n\\s*%s\\s*=\\s*([0-9.]+)\\s*;', pname), 'tokens', 'once');
-            if isempty(tok)
-                fprintf('  [FAIL] %s: no estimation-mode %s branch in %s\n', country, pname, frozen_file);
+            toks = regexp(frozen_text, ...
+                sprintf('(?m)^\\s*%s\\s*=\\s*([0-9.]+)\\s*;', pname), 'tokens');
+            if numel(toks) ~= 1
+                fprintf('  [FAIL] %s: %s assigned %d time(s) in %s, expected once\n', ...
+                        country, pname, numel(toks), frozen_file);
                 n_fail = n_fail + 1;
-            elseif str2double(tok{1}) == expected
-                fprintf('  [PASS] %-8s %s = %s in both\n', country, pname, tok{1});
+            elseif str2double(toks{1}{1}) == expected
+                fprintf('  [PASS] %-8s %s = %s in both\n', country, pname, toks{1}{1});
                 n_pass = n_pass + 1;
             else
                 fprintf('  [FAIL] %-8s %s: frozen model says %s, calibration says %g\n', ...
-                        country, pname, tok{1}, expected);
+                        country, pname, toks{1}{1}, expected);
                 n_fail = n_fail + 1;
             end
         end

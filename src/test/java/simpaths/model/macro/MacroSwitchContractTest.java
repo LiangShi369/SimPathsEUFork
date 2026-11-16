@@ -17,7 +17,6 @@ import org.yaml.snakeyaml.Yaml;
 import simpaths.model.SimPathsModel;
 import simpaths.model.enums.ConfigEnumValue;
 import simpaths.model.enums.Country;
-import simpaths.model.enums.MacroFeedbackMargins;
 import simpaths.model.enums.MacroLogLevel;
 import simpaths.model.enums.MacroModelMode;
 
@@ -40,9 +39,7 @@ class MacroSwitchContractTest {
         EXPECTED.put("mm_useMacroPathRecorder",           "boolean true");
         EXPECTED.put("mm_dsgeShockScenario",              "String ");
         EXPECTED.put("mm_ramseyScenario",                 "String ");
-        EXPECTED.put("mm_ramseyFeedbackMargins",          "MacroFeedbackMargins EMPLOYMENT_AND_HOURS");
         EXPECTED.put("mm_ramseyFeedbackPersistence",      "double 1.0");
-        EXPECTED.put("mm_ramseyFeedbackHoursPersistence", "double 1.0");
         EXPECTED.put("mm_dsgeMaxStateDeviation",          "double 10.0");
     }
 
@@ -83,8 +80,6 @@ class MacroSwitchContractTest {
         assertEquals(MacroModelMode.RAMSEY_DSGE, MacroModelMode.fromConfigValue("ramsey_dsge"));
         assertEquals(MacroModelMode.RAMSEY_DSGE, MacroModelMode.fromConfigValue("ramsey-dsge"));
         assertEquals(MacroModelMode.RAMSEY, MacroModelMode.fromConfigValue("RAMSEY"));
-        assertEquals(MacroFeedbackMargins.EMPLOYMENT_AND_HOURS,
-                MacroFeedbackMargins.fromConfigValue("employment_and_hours"));
         assertEquals(MacroLogLevel.VERBOSE, MacroLogLevel.fromConfigValue("verbose"));
     }
 
@@ -106,14 +101,10 @@ class MacroSwitchContractTest {
     @DisplayName("the enum lattices agree with what each mode claims to run")
     void modeLatticesAreConsistent() {
         assertEquals("off | ramsey | dsge | ramsey_dsge", ConfigEnumValue.valueList(MacroModelMode.class));
-        assertEquals("none | employment | hours | employment_and_hours",
-                ConfigEnumValue.valueList(MacroFeedbackMargins.class));
         assertEquals("off | state | verbose", ConfigEnumValue.valueList(MacroLogLevel.class));
 
         assertTrue(MacroModelMode.RAMSEY_DSGE.usesRamseyTrend() && MacroModelMode.RAMSEY_DSGE.usesDsge());
         assertTrue(MacroModelMode.DSGE.usesDsge() && !MacroModelMode.DSGE.usesRamseyTrend());
-        assertTrue(MacroFeedbackMargins.HOURS.feedsHours() && !MacroFeedbackMargins.HOURS.feedsEmployment());
-        assertTrue(MacroFeedbackMargins.EMPLOYMENT.feedsEmployment() && !MacroFeedbackMargins.EMPLOYMENT.feedsHours());
         assertTrue(MacroLogLevel.VERBOSE.logsState(), "verbose must imply state");
     }
 }

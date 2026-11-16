@@ -25,10 +25,7 @@ model_args:
     mm_macroLogging: verbose          # off | state | verbose (verbose implies state)
     mm_dsgeMaxStateDeviation: 30
 
-    mm_ramseyFeedbackMargins: none
-    # none | employment | hours | employment_and_hours
     mm_ramseyFeedbackPersistence: 1.0
-    mm_ramseyFeedbackHoursPersistence: 1.0
 
 collector_args:
     exportToCSV: true

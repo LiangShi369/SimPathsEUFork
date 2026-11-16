@@ -1,4 +1,6 @@
-# Recursive Ramsey feedback experiment - arm 2: feedback ON for headcount and hours, persistent belief (rho=1.0, default)
+# Recursive Ramsey feedback experiment - arm 2: feedback for headcount and hours, persistent belief (rho=1.0, default)
+# "persistent" in the file name is historical: the planner's feedback is always on with a
+# Ramsey layer, and rho (mm_ramseyFeedbackPersistence) is 1 here.
 countryString: "Poland"
 maxNumberOfRuns: 8
 executeWithGui: false
@@ -28,10 +30,7 @@ model_args:
     # around SimPaths' own wage trend instead)
     mm_macroLogging: state          # off | state | verbose (verbose implies state)
 
-    mm_ramseyFeedbackMargins: employment_and_hours
-    # none | employment | hours | employment_and_hours
     mm_ramseyFeedbackPersistence: 1.0
-    mm_ramseyFeedbackHoursPersistence: 1.0
 
     # mm_ramseyScenario: "_macroScenario_ramsey_high_gA_0_5pp.csv"
 
