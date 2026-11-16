@@ -9,19 +9,19 @@ function info = write_hours_projection(growth_mat, output_dir, country)
 % export_dynamic_for_simpaths.m (full workflow) and export_ramsey_for_simpaths.m
 % (Ramsey-only refresh) call it, following write_growth_terminal_state.m.
 %
-% WHY THE FILE EXISTS. Until 2026-08-18 SimPaths re-derived the hours path itself
-% by extending the `h` column of growth_model_reference_*.csv, so the trailing
-% growth window was an unenforced convention across the repository boundary. This
-% side extends hours with window 1 (extend_level_path(handoff_h_hist, ..., 1) in
-% ramsey_trend.m); Java used 20. The divergence was invisible only because
-% hours_trend_method is log_linear, which makes the exported h column a pure
-% exponential, so every window recovers the same rate. A change to that method
-% would have made the two sides project different hours from the same bundle with
-% no error anywhere. Emitting the path removes the duplicated computation rather
-% than documenting the convention and hoping.
+% WHY THE FILE EXISTS. SimPaths reads the hours path from here instead of
+% re-deriving it by extending the `h` column of growth_model_reference_*.csv, so
+% the trailing growth window is not a convention to keep in step across the
+% MATLAB/Java boundary. This side extends hours with window 1
+% (extend_level_path(handoff_h_hist, ..., 1) in ramsey_trend.m). A Java-side
+% extension with another window would agree only while hours_trend_method is
+% log_linear, which makes the exported h column a pure exponential, so every
+% window recovers the same rate; after a change to that method the two sides
+% would project different hours from the same bundle with no error anywhere.
+% Emitting the path leaves one computation instead of two.
 %
-% The employment side already worked this way: population_projection_*.csv is
-% written here and read there. This closes the same gap for hours.
+% The employment side works the same way: population_projection_*.csv is
+% written here and read there.
 %
 % FORMAT: `time,h`, one row per quarter, starting at the handoff quarter so the
 % first row coincides with the last row of growth_model_reference_*.csv. Length is
@@ -91,8 +91,8 @@ function info = write_hours_projection(growth_mat, output_dir, country)
         label_quarter = mod(absolute_quarter, 4) + 1;
         % %.10f, not the %.6f used for population_projection_*.csv: hours are
         % O(500) where N is O(14000), so six decimals would cap the handoff at
-        % ~1e-9 relative and make this file, rather than the solve, the precision
-        % bottleneck. The parity check in the handoff-contract plan asserts 1e-12.
+        % ~1e-9 relative, the size of the Java parity tolerance, and make this
+        % file, rather than the solve, the precision bottleneck.
         fprintf(fid, '%dq%d,%.10f\n', label_year, label_quarter, hours_proj(i));
     end
 

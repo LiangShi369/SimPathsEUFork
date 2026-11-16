@@ -1,11 +1,11 @@
 function test_export_bundle_marker
 % A bundle that verify_export_bundle refuses must say so INSIDE the bundle.
 %
-% The refusal used to live only in the error message of the run that produced
-% it. The files it refused stayed in the bundle folder input/{CC}/MacroModel/,
-% which is where SimPaths loads macro files, and nothing there distinguished
-% them from a shippable bundle. The marker file is that distinction: written on
-% every failed (or never-reached) verification, removed by one that passes.
+% The error message of a refused export reaches only whoever ran it. The files
+% it refused stay in the bundle folder input/{CC}/MacroModel/, which is where
+% SimPaths loads macro files, so the marker file is what distinguishes them from
+% a shippable bundle: written on every failed (or never-reached) verification,
+% removed by one that passes.
 
     setup_path();
     td = tempname; mkdir(td);

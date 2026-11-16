@@ -190,10 +190,10 @@ else if "$country" == "Poland" {
         "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SA.SAL_DC.PL"                  , "employees"                , "Employees, domestic concept (1000 persons, SCA)"                        \
         "Eurostat"  , "namq_10_pe"  , "Q.THS_PER.SA.SAL_NC.PL"                  , "employees_nat"            , "Employees, national concept (1000 persons, SCA)"                        \
         // CURRENCY: wage aggregates in million PLN (CP_MNAC), the currency of the
-        // HICP that deflates them, as for Sweden. Until 2026-10 these were CP_MEUR,
-        // converted at the CURRENT exchange rate, so every PLN/EUR swing landed in
-        // the "real" wage (-28% in w_level between 2008q3 and 2009q1; issue #29).
-        // The wage section converts them to euro at the fixed 2015 rate.
+        // HICP that deflates them, as for Sweden. CP_MEUR would convert at the
+        // CURRENT exchange rate and put every PLN/EUR swing into the "real" wage
+        // (-28% between 2008q3 and 2009q1). The wage section converts them to euro
+        // at the fixed 2015 rate.
         "Eurostat"  , "namq_10_gdp" , "Q.CP_MNAC.SCA.D1.PL"                     , "labour_cost"              , "Compensation of employees D1 (million PLN, current prices, SCA)"        \
         "Eurostat"  , "namq_10_gdp" , "Q.CP_MNAC.SCA.D11.PL"                    , "gross_wages"              , "Wages and salaries - Poland D11 (million PLN, current prices, SCA)"     \
         "Eurostat"  , "namq_10_a10_e", "Q.THS_HW.TOTAL.SCA.SAL_DC.PL"           , "hours_employees_total"    , "Hours worked by employees, domestic concept (1000 hours, SCA)"          \
@@ -220,14 +220,12 @@ else if "$country" == "Poland" {
         // Source: Eurostat irt_st_m (3-month interbank rate, monthly AVERAGE,
         // % p.a.), the same dataset Sweden uses.
         //
-        // Until 2026-10 this was OECD MEI POL.IR3TIB01.ST.M. That dataset stopped
-        // at 2024-01, so R was missing for 2024q1-2025q1 and the Kalman filter
-        // ran without the rate observable for the last five quarters. The two
-        // sources are not interchangeable in history either: the OECD series is
-        // an END-OF-MONTH value, so the quarterly R differs from the Eurostat one
-        // by up to 0.5 pp in quarters where the rate was moving (2008q4, 2022q1;
-        // median 0.01 pp). Do not splice them. The monthly average is also what
-        // Germany and Spain (ECB Euribor) and Sweden already use.
+        // Not OECD MEI POL.IR3TIB01.ST.M: that dataset stops at 2024-01, which
+        // would leave R missing for 2024q1-2025q1, and it is an END-OF-MONTH value,
+        // so its quarterly R differs from the Eurostat one by up to 0.5 pp in
+        // quarters where the rate moves (2008q4, 2022q1; median 0.01 pp). Do not
+        // splice them. The monthly average is also what Germany and Spain (ECB
+        // Euribor) and Sweden use.
         // TODO: I'm using the name R_eur3 for the Polish interest rate variable for now.
         "Eurostat"  , "irt_st_m"       , "M.IRT_M3.PL"                          , "R_eur3"                  , "WIBOR 3-month, monthly average (% p.a.)"                                 \
 
@@ -487,9 +485,8 @@ else {
 
 // Merge the seasonally adjusted HICP from `hicp_file' into the main dataset; this is the
 // series we use for the DSGE model estimation. It is merged after the branch above, so a
-// regenerated `hicp_file' reaches the data whether the series were fetched or reused. A
-// data_${country}_raw.dta saved before 2026-10 still carries the HICP it was fetched
-// with; that copy is dropped.
+// regenerated `hicp_file' reaches the data whether the series were fetched or reused. An
+// HICP already in data_${country}_raw.dta is dropped first.
 cwf default
 use `hicp_file', clear
 sort time
@@ -730,7 +727,6 @@ label variable n "Employment (national, excl. self-empl.) - HP-filtered (% devia
 // IMPORTANT: Use ILO unemployment rate for consistency with Destatis
 // employment and labor force data. The Bundesbank registered unemployment
 // rate (ur) uses a different definition that breaks the identity U = L - N.
-// See _CHATS_23_Perplexity_ILO_unemployment.md for details.
 gen ur_ilo = (unemp_pers_ilo / pop_active) * 100
 label variable ur_ilo "ILO unemployment rate (in percent)"
 
@@ -839,7 +835,7 @@ rename gfcf_mn inv_level         // Eurostat, million EUR (same units as y_level
 rename inv_cycle inv
 
 rename HICP P
-// CRITICAL FIX: Use QoQ annualized inflation for DSGE estimation
+// Use QoQ annualized inflation for DSGE estimation:
 // The NK Phillips Curve describes quarterly pricing decisions, not 4-quarter averages.
 // YoY inflation is artificially smooth (4-quarter moving average of price changes).
 // QoQ annualized: pi_t = 400 * (P_t / P_{t-1} - 1)
@@ -860,7 +856,7 @@ rename pop_active L_level  // Labor force (national concept)
 rename hours_employees_pp h_level  // Hours per employee (domestic concept)
 // h is already named correctly from HP-filter step
 
-// Rename u to u_rate for diagnostics/plots (u_rate is no longer in varobs)
+// Rename u to u_rate for diagnostics/plots (u_rate is not in varobs)
 rename u u_rate
 
 //=========================================================================
@@ -935,7 +931,7 @@ if `do_dsge_graphs' {
 save data_for_dynare_${country}, replace
 
 //=========================================================================
-// EXPORT LEVEL DATA FOR RAMSEY GROWTH MODEL (NEW)
+// EXPORT LEVEL DATA FOR RAMSEY GROWTH MODEL
 //=========================================================================
 // The Ramsey growth model (ramsey_trend.m) does structural detrending.
 // It needs level data as input. This export provides:
@@ -1000,10 +996,8 @@ restore
 //=========================================================================
 // input_processing/macromodel/data/ is tracked in git, so these CSVs are a snapshot of moving
 // external sources: statistical agencies revise national accounts, and the
-// dbnomics series IDs themselves drift (the Poland WIBOR series rode a
-// deprecated OECD dataset that silently stopped updating in 2024-01, which
-// left R missing for five quarters until the source was switched to Eurostat).
-// Without a stamp a tracked CSV is
+// dbnomics series themselves can stop updating without notice (the OECD MEI
+// interbank rates end in 2024-01). Without a stamp a tracked CSV is
 // "some vintage"; with one it is identifiable, and an upstream revision that
 // rewrites history shows up as a diff here rather than silently.
 //
@@ -1077,8 +1071,7 @@ quietly {
     file write provfh "NAMING TRAP: data_for_dynare_${country}.dta is NOT the Stata form of" _n
     file write provfh "input_processing/macromodel/data/data_for_dynare_${country}.csv. The CSV is RAMSEY-detrended" _n
     file write provfh "and written by ramsey_trend.m; the .dta is this script's HP frame. Same stem," _n
-    file write provfh "different producer, different content -- a leftover from when Stata owned that" _n
-    file write provfh "filename (integration contract #12)." _n
+    file write provfh "different producer, different content (integration contract 12)." _n
     file write provfh _n
     file write provfh "Series definitions: see the mata series_codes_* blocks in make_datasets.do" _n
     file write provfh "at the checksum above." _n
@@ -1093,19 +1086,12 @@ display as text "Wrote ../data/PROVENANCE_${country}.txt"
 // That file is the DSGE estimation input and is owned solely by
 // ramsey_trend.m, which writes the Ramsey-detrended observables to it.
 //
-// This script used to also export an HP-filtered version to the same path as a
-// "legacy fallback until the Ramsey pipeline overwrites it". Both writers
-// produced identical column names in identical order, so the two versions were
-// indistinguishable except by content, and the last writer silently won.
-// Re-running this script after a data refresh therefore replaced the
-// Ramsey-detrended estimation input with HP-filtered data with no warning --
-// which is exactly what happened between 2026-05 and 2026-08: the DSGE was
-// estimated, frozen and exported on HP-filtered data while the pipeline was
-// believed to be running on Ramsey trends.
-//
-// The HP-filtered observables are still exported above, under their own name
+// The HP-filtered observables are exported above under their own name
 // (data_for_dynare_hp_${country}.csv), which is what run_detrending_benchmark.m
-// consumes. Do not reintroduce a second writer to the shared path.
+// consumes. Do not add a second writer to the shared path: both writers would
+// produce the same columns in the same order, the last one would silently win,
+// and a rerun of this script would replace the Ramsey-detrended estimation input
+// with HP-filtered data without a warning.
 
 frames dir
 // NOTE: no interactive commands (browse, edit, ...) in this script — it runs

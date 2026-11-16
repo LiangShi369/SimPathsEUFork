@@ -59,9 +59,9 @@ function test_frozen_model_generator()
 
     %% ================================================================
     fprintf('\nTEST 4: value pattern accepts negative and scientific notation\n');
-    % psi_wL is -0.08 (Poland) / -0.05 (Germany). The previous [0-9.]+ pattern
-    % could not match either, so estimating such a parameter would have silently
-    % left the calibrated value in the "frozen" model.
+    % psi_wL is -0.08 (Poland) / -0.05 (Germany). An unsigned [0-9.]+ pattern
+    % matches neither, so estimating such a parameter would silently leave the
+    % calibrated value in the "frozen" model.
     cases = { ...
         'psi_wL   = -0.08;',  'psi_wL',  'negative value'; ...
         'lambda_p = 1.5e-3;', 'lambda_p', 'scientific notation'; ...
@@ -85,8 +85,8 @@ function test_frozen_model_generator()
     %% ================================================================
     fprintf('\nTEST 5: calibrated value is read as written, and only when unambiguous\n');
     % TEST 6 compares every frozen model's rho_L / rho_h with the country's own
-    % calibration through this reader. A constant once stood in for it (Germany's
-    % 0.95 / 0.85), which misrecorded Poland and Spain (rho_h = 0.80).
+    % calibration through this reader. No constant can stand in for it: rho_h is
+    % 0.85 for Germany and Sweden, 0.80 for Poland, Spain and the UK.
     calib = sprintf(['rho_L    = 0.95;    // labor force persistence\n' ...
                      'rho_h    = 0.80;    // hours persistence (below Germany''s 0.85)\n' ...
                      '// RATIONALE: rho_L=0.95 and rho_h=0.85 capture persistence\n']);
@@ -113,10 +113,9 @@ function test_frozen_model_generator()
 
     %% ================================================================
     fprintf('\nTEST 6: every frozen model carries its own country''s persistence, once\n');
-    % The exported model is the estimated model for every shock: no export switch,
-    % and rho_L / rho_h each assigned exactly once, with the calibration's value.
-    % Until 2026-11 the frozen models zeroed both for the SimPaths export
-    % (for_simpaths_export), because SimPaths wrote levels into eps_L / eps_h.
+    % The exported model is the estimated model for every shock: no export switch
+    % (for_simpaths_export), and rho_L / rho_h each assigned exactly once, with the
+    % calibration's value.
     countries = {'Germany', 'Poland', 'Spain', 'Sweden', 'UK'};
     for i = 1:numel(countries)
         country = countries{i};

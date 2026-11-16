@@ -510,9 +510,9 @@ public class PersonTest {
     /**
      * The copy constructor seeds labWageHrlyRegression, which updateLaggedVariables rolls into
      * labWageHrlyL1. The start-year Person.Update rolls it before any wage update has run, so for
-     * a start-population person it must be the current wage, as the lag roll took labWageHrly
-     * before the macro layer existed. Seeding it with last year's wage made the start-year lag the
-     * old lag, and a zero old lag fed log(0) into the W1mb/W1fb equations (wage 0).
+     * a start-population person it must be the current wage. Seeded with last year's wage, the
+     * start-year lag would stay the previous lag, and a zero previous lag would feed log(0) into
+     * the W1mb/W1fb equations (wage 0).
      */
     @Nested
     @DisplayName("WageLagSeedTests: copy constructor seeds the wage the first lag roll uses")
@@ -545,7 +545,7 @@ public class PersonTest {
         }
 
         @Test
-        @DisplayName("Older lag: the first lag roll gets the current wage, as before the macro layer")
+        @DisplayName("Older lag: the first lag roll gets the current wage, as with the macro layer off")
         public void olderLagSeedsTheCurrentWage() throws Exception {
             assertEquals(15.0, seededPreOverlayWage(startPopulationPerson(15.0, 12.0)), 1e-12);
         }

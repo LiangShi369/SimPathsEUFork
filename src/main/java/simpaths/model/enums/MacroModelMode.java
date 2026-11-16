@@ -5,9 +5,8 @@ package simpaths.model.enums;
  *
  * <p>The module has two layers that are independently switchable: the Ramsey growth model,
  * which supplies the secular wage trend, and the DSGE, which supplies the business cycle
- * around it. This enum replaces the three booleans {@code mm_useMacroModel},
- * {@code mm_useRamseyTrend} and {@code mm_useDSGE}, whose eight combinations expressed only
- * these four states.</p>
+ * around it. The four constants are the only meaningful layer combinations, so one key
+ * selects among them and no other combination can be configured.</p>
  *
  * <p>{@link #DSGE} is a diagnostic configuration, not a production one. The DSGE is estimated
  * on Ramsey-detrended observables and its steady state is the Ramsey path by construction, so

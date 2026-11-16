@@ -55,7 +55,7 @@ rho_v    = 0.9;     // vacancy persistence (as Germany; advanced-economy hiring)
 rho_sep  = 0.8;     // separation shock persistence
 rho_d    = 0.8;     // preference/demand shock persistence
 
-// ----- HABIT PERSISTENCE (V14) -----
+// ----- HABIT PERSISTENCE -----
 hab      = 0.5;     // external habit formation (standard advanced-economy range)
 
 // ----- NEW KEYNESIAN PARAMETERS -----
@@ -63,7 +63,7 @@ lambda_p = 0.02;    // Phillips curve slope (as Germany and Spain)
 phi_mc   = 1.0;     // output gap effect on marginal cost (same structural mechanism)
 phi_v_y  = 5.0;     // vacancy response to demand conditions (same mechanism)
 
-// ----- INFLATION INDEXATION (V15: Smets-Wouters style) -----
+// ----- INFLATION INDEXATION (Smets-Wouters style) -----
 // The LOWEST of the four. Sweden has run a credible inflation target since 1993,
 // inflation expectations are tightly anchored at 2%, and there is no formal
 // price or wage indexation of the kind that keeps Poland's iota_p at 0.45.

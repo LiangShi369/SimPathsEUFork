@@ -1,9 +1,7 @@
-# Recursive Ramsey feedback experiment - arm 3: as ramsey-feedback-persistent.yml, with the
+# Recursive Ramsey feedback experiment - as ramsey-feedback-persistent.yml, with the
 # DSGE cycle layer on and no scenario shocks. The DSGE takes no input from SimPaths, so paired
-# with arm 2 (same seed) this arm checks that the cycle layer adds nothing on its own: w_total
-# equals arm 2's in every year and the cycle wage is zero.
-# "persistent" in the file name is historical: the planner's feedback is always on with a
-# Ramsey layer, and rho (mm_ramseyFeedbackPersistence) is 1 here.
+# with ramsey-feedback-persistent.yml (same seed) this run checks that the cycle layer adds
+# nothing on its own: w_total equals that run's in every year and the cycle wage is zero.
 countryString: "Poland"
 maxNumberOfRuns: 8
 executeWithGui: false

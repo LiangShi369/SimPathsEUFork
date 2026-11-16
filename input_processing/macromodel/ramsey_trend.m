@@ -1,7 +1,7 @@
 function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, options)
 % RAMSEY_TREND  Solve Ramsey growth model and detrend DSGE observables.
 %
-% Replaces HP filtering in the DSGE estimation pipeline. Computes optimal
+% Detrends the DSGE estimation data in place of an HP filter. Computes optimal
 % trend paths for Y, C, I, K, w, r* from a deterministic Ramsey model,
 % then detrends all 8 DSGE observables.
 %
@@ -145,8 +145,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     tol      = get_solver_numeric(params.solver, 'newton_tolerance', 'tolerance', 1e-10);
     T_extend_extra = round(get_solver_numeric(params.solver, 'terminal_tail_quarters', 'terminal_extension_quarters', 300));
 
-    % Labour input is exogenous: N is taken as given (the endogenous-labour
-    % variant was removed on 2026-10-20, JuergenWiemers/SimPathsEU#28).
+    % Labour input is exogenous: N is taken as given.
     fprintf('  Labor supply: exogenous (N taken as given)\n\n');
 
     %% =====================================================================
@@ -237,7 +236,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
         L_demo_post = [];
     end
     
-    % 3b. NAWRU (kept for diagnostics; no longer used for N_trend)
+    % 3b. NAWRU (diagnostics only; N_trend does not use it, see 3c)
     nawru_file = artifact_path('data', sprintf('nawru_%s.csv', lower(country)));
     if exist(nawru_file, 'file')
         nawru_data = readtable(nawru_file);
@@ -349,7 +348,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     % system, with K_1 fixed and the terminal transversality closure
     % K_{Tt-1}/Y_{Tt-1} = KY_bgp. Because the linear solve is global,
     % saddle-path conditioning is irrelevant: this handles anticipated /
-    % delayed permanent shocks that broke the legacy one-dimensional solve.
+    % delayed permanent shocks, which a one-dimensional forward solve does not.
     % Mirrors RamseyTrendModel.java (SimPaths runtime).
     % =====================================================================
     % Build extended exogenous paths
@@ -499,10 +498,9 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     %   NX_trend = nx_Y × Y_trend   (exogenous share)
     %   I_trend = Y - C - G - NX    (residual investment)
     %
-    % This eliminates the old expenditure-share workaround (Chats 116, 125)
-    % which was necessary because the closed-economy Ramsey produced
-    % overly high private-consumption shares whenever G+NX absorb a large
-    % fraction of output in the country sample.
+    % G and NX are in the resource constraint for that reason: a closed-economy
+    % Ramsey overstates the private-consumption share whenever G+NX absorb a
+    % large fraction of output in the country sample.
     
     C_trend_det = N_trend .* c_trend_pc;  % aggregate private consumption
     G_trend     = gY_smooth .* Y_trend_q;
@@ -539,9 +537,9 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     % Otherwise a drifting policy-rate environment can show up as a spurious
     % persistent monetary shock in the DSGE sample.
     %
-    % Fix: smoothed ex-ante real rate = HP_trend(R - E[pi]), capturing
+    % Hence the R trend is the smoothed ex-ante real rate HP_trend(R - E[pi]), capturing
     % the secular decline without imposing a structural model on ECB
-    % behaviour. See Chat 119 for the full diagnosis.
+    % behaviour.
     pi_expected = movmean(data.pi, [3 0], 'omitnan');  % 4Q backward MA
     r_ex_ante = data.R - pi_expected;                   % ex-ante real rate
     
@@ -553,9 +551,9 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
 
         % An interior gap is interpolated. A gap at either END is extrapolated
         % along the last two observations, and an HP trend with lambda this high
-        % follows that line across the whole sample. Poland's R was missing for
-        % 2024q1-2025q1 until 2026-10: the extrapolation ran the ex-ante real
-        % rate up to +12.5% and shifted the R gap by up to 0.9 pp at both ends
+        % follows that line across the whole sample. Measured on Poland with R
+        % missing for 2024q1-2025q1 (2026-10): the extrapolation runs the ex-ante
+        % real rate up to +12.5% and shifts the R gap by up to 0.9 pp at both ends
         % of the sample. So an edge gap is a data fault, not benign missingness.
         n_lead = valid_idx(1) - 1;
         n_trail = T - valid_idx(end);
@@ -760,8 +758,8 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     fprintf('  ✓ %s (through SimPaths handoff quarter %s)\n', ref_file, simpaths_handoff_time);
     
     % 9d. Save MATLAB workspace for later use (e.g., by export scripts)
-    % K_terminal/A_terminal are kept as SimPaths handoff aliases for backward
-    % compatibility with the Java import side.
+    % K_terminal/A_terminal are the handoff values under the names
+    % write_growth_terminal_state reads and growth_terminal_state.json carries to Java.
     K_sample_end = K_path(T);
     A_sample_end = A_ext(T);
     K_handoff = handoff_K_path(1); %#ok<NASGU>
@@ -790,7 +788,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     diagnostics.c0_optimal = c_try;
     diagnostics.iterations = iter;
     diagnostics.converged = converged;
-    diagnostics.KY_terminal = K_path(T) / Y_path(T);  % legacy sample-end field
+    diagnostics.KY_terminal = K_path(T) / Y_path(T);  % sample-end K/Y, same as KY_sample_end
     diagnostics.KY_sample_end = K_path(T) / Y_path(T);
     diagnostics.KY_extension_end = K_path(end) / Y_path(end);
     diagnostics.KY_bgp = KY_bgp;
@@ -837,7 +835,7 @@ function [detrended, trend, diagnostics] = ramsey_trend(country, data_file, opti
     fprintf('  G/Y (mean)  = %.2f%%  NX/Y (mean)  = %.2f%%\n', ...
             100*diagnostics.GY_mean, 100*diagnostics.NXY_mean);
 
-    % --- Automated sanity check (replaces eyeballing the trend plots) ---
+    % --- Automated sanity check (instead of eyeballing the trend plots) ---
     % Quantifies what the operator otherwise reads off the Investment panel:
     % is the residual investment trend positive, are the C/I/G/NX shares
     % structurally plausible, and does the trend actually track observed
@@ -1062,7 +1060,7 @@ function [K, c, Y, l, N, iter, converged] = ramsey_stacked_newton( ...
     z = zeros(m, 1);
 
     % Feasible BGP-like initial guess via a constant BGP investment share.
-    % m2: terminal gross growth mirrors RamseyTrendModel.terminalGrossGrowth —
+    % Terminal gross growth mirrors RamseyTrendModel.terminalGrossGrowth —
     % TFP-augmented growth times the exogenous labour-scale growth (Java's
     % nPath; here labScale plays the same role). Falls back to the TFP-only
     % factor if the empirical ratio is non-finite.
@@ -1074,12 +1072,9 @@ function [K, c, Y, l, N, iter, converged] = ramsey_stacked_newton( ...
     end
     invShare = max(0.03, min(0.45, (G_term - 1 + delta) * KY_bgp));
     Kg = K0;
-    % m1: per-capita consumption carried across periods. The exogenous econ
+    % Per-capita consumption carried across periods. The exogenous econ
     % ignores c (N is given), but the solver's econ interface takes (t, K, c)
     % and the previous period's guessed c is the consistent value to pass.
-    % (The old code passed 0.5*Kg, an aggregate capital value used as
-    % per-capita consumption, and had a dead Ng<=0 branch that econ can never
-    % trigger.)
     [Ng1, ~, ~] = econ(1, K0, 1);   % the exogenous econ ignores the c arg
     Yg1 = A(1) * K0^alpha * (Ng1*h(1))^(1-alpha);
     cg_prev = max(1e-6*Yg1/Ng1, (1 - gY(1) - nxY(1) - invShare) * Yg1 / Ng1);
@@ -1114,12 +1109,12 @@ function [K, c, Y, l, N, iter, converged] = ramsey_stacked_newton( ...
         if nrm < ftol, converged = true; break; end
 
         % Finite-difference tridiagonal Jacobian (sparse assembly).
-        % m4: one-sided forward difference (step = 1e-7*max(1,|z|)) is a
+        % One-sided forward difference (step = 1e-7*max(1,|z|)) is a
         % deliberate choice — the Newton converges in ~5 iterations to
-        % ||f||<1e-10 reproducing the legacy reference to ~1e-12, so the
-        % ~1e-7 truncation error is absorbed near the root. Central
-        % differencing would double residual evaluations for no gain here.
-        % m5: each column recomputes the FULL residual (O(Tt)), so assembly
+        % ||f||<1e-10, so the ~1e-7 truncation error is absorbed near the
+        % root. Central differencing would double residual evaluations for no
+        % gain here.
+        % Each column recomputes the FULL residual (O(Tt)), so assembly
         % is O(Tt^2) (~ms at Tt~900). A localised recompute would be O(Tt)
         % but is intentionally NOT done: it would diverge the MATLAB/Java
         % code paths and risk the bit-exact cross-validation parity for an
@@ -1149,15 +1144,15 @@ function [K, c, Y, l, N, iter, converged] = ramsey_stacked_newton( ...
                 p = p + 1; Ii(p)=i; Jj(p)=j; Vv(p)=(fp(i)-f(i))/step;
             end
 
-            % M2 guard: the tridiagonal banding is only valid because every
+            % Band guard: the tridiagonal banding is only valid because every
             % residual couples strictly adjacent periods (resource/Euler) and
             % labour is intratemporal. A future structural term spanning >1
             % period (adjustment costs, time-to-build, habits, two-period-
             % ahead expectations) would create non-zero Jacobian entries
             % outside the band that this assembly silently drops, masking a
             % wrong Newton direction as slow/false convergence. Probe the
-            % off-band sensitivity once and fail loudly if the assumption no
-            % longer holds. Mirrors RamseyTrendModel.java.
+            % off-band sensitivity once and fail loudly if the assumption does
+            % not hold. Mirrors RamseyTrendModel.java.
             if iter == 1
                 offIdx = [1:inBandLo-1, inBandHi+1:m];
                 dOff = abs((fp(offIdx) - f(offIdx)) / step);
@@ -1317,7 +1312,7 @@ function [N_ext, h_ext, A_ext, g_A_annual_path] = extend_exogenous(N_trend, h_tr
 %
 % Beyond T_sample:
 %   - N continues at constant growth rate (from last 20 quarters)
-%   - h continues at constant growth rate (from fitted log-linear trend)
+%   - h continues at the fitted log-linear trend's growth rate, tapered to zero
 %   - A grows at constant rate g_A, or converges toward a lower terminal
 %     TFP growth rate if terminal_growth.enabled is true.
 
@@ -1365,8 +1360,8 @@ function [N_ext, h_ext, A_ext, g_A_annual_path] = extend_exogenous(N_trend, h_tr
     % 600-quarter terminal tail hours per worker fall to ~69% of their handoff
     % level (~26h/week). The solve then imposes K/(KY_bgp*Y) = 1, a balanced-growth
     % relation, on a system whose labour input is still shrinking, and on a BGP
-    % hours per worker must be asymptotically constant. The same taper the
-    % demographic tail already uses restores that. Measured effect on the trend
+    % hours per worker must be asymptotically constant. The same taper as the
+    % demographic tail restores that. Measured effect on the trend
     % wage over 2023-2060 is under 0.003%; the tail is a terminal-condition device,
     % not a forecast. Java mirrors this in RamseyTrendModel.extendWithTaperedGrowth.
     g_h = h_trend(T_sample) / h_trend(T_sample-1) - 1;
@@ -1503,7 +1498,7 @@ end
 
 
 function s = ramsey_sanity_check(I_trend, Y_trend, C_trend, gY, nxY, inv_obs, y_obs)
-% RAMSEY_SANITY_CHECK  Quantitative replacement for eyeballing the trend plots.
+% RAMSEY_SANITY_CHECK  Quantitative check in place of eyeballing the trend plots.
 %
 % Returns s.pass (overall), s.failed (cellstr of failed gating checks) and
 % prints an explicit PASS/FAIL table. The verdict gates ONLY on structural
@@ -1516,8 +1511,8 @@ function s = ramsey_sanity_check(I_trend, Y_trend, C_trend, gY, nxY, inv_obs, y_
 % never a FAIL: investment is the volatile Y-C-G-NX residual, so its level
 % RMSE is structurally larger than Y/C/G even in an accepted run (the
 % Poland baseline sits ~0.27). A genuine blow-up still trips the
-% gating checks; this number is the honest fit signal you previously read
-% off the Investment panel, surfaced but not used to reject the run.
+% gating checks; this number is the fit signal the Investment panel shows,
+% surfaced but not used to reject the run.
     IY  = I_trend ./ Y_trend;
     CY  = C_trend ./ Y_trend;
     IY_obs_mean = mean(inv_obs ./ y_obs, 'omitnan');

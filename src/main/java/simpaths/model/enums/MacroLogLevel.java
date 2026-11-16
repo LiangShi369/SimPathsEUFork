@@ -4,10 +4,9 @@ package simpaths.model.enums;
  * Verbosity of the macro module's yearly logging, selected by the {@code mm_macroLogging}
  * config key.
  *
- * <p>Replaces {@code mm_logMacroState} and {@code mm_verboseMacroLogging}, which were read
- * exclusively as {@code logMacroState && verboseMacroLogging}: verbose logging without state
- * logging was accepted by the config loader and then did nothing. The levels are ordered, so
- * {@link #VERBOSE} implies {@link #STATE}.</p>
+ * <p>The levels are ordered, so {@link #VERBOSE} implies {@link #STATE}: the verbose
+ * diagnostics are only written alongside the state summaries, and a single ordered key
+ * cannot ask for one without the other.</p>
  */
 public enum MacroLogLevel {
 

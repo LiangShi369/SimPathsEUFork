@@ -13,17 +13,18 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The two scenario readers parse the same family of files and must agree on the
- * two things they had silently drifted apart on.
+ * The two scenario readers parse the same family of files and must agree on two
+ * cases that otherwise fail silently.
  *
- * <p><b>NaN.</b> {@code Double.parseDouble("NaN")} succeeds. {@link RamseyScenario}
- * rejected non-finite values; {@link DSGEShockScenario} did not, so a NaN in a
- * shock column entered the state vector — and because every comparison against
- * NaN is false, the ±bound stability guard did not fire either.</p>
+ * <p><b>NaN.</b> {@code Double.parseDouble("NaN")} succeeds. Both
+ * {@link RamseyScenario} and {@link DSGEShockScenario} must reject non-finite
+ * values: a NaN in a shock column would enter the state vector, and because every
+ * comparison against NaN is false, the ±bound stability guard would not fire
+ * either.</p>
  *
  * <p><b>Trailing empty fields.</b> {@code split(",")} discards them, so a row
- * ending in {@code ,} produced fewer columns than the header declared and the
- * final column was never assigned.</p>
+ * ending in {@code ,} would produce fewer columns than the header declares and the
+ * final column would never be assigned.</p>
  */
 class ScenarioLoaderParityTest {
 

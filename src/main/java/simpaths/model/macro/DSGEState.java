@@ -18,10 +18,9 @@ import java.util.Map;
  *
  * Key for SimPaths coupling:
  * - Wage (w) is a STATE variable → extract from state vector
- * - Inflation (π): state since V15; side resolved via VarIndices.piIsState
+ * - Inflation (π): a state when the model has price indexation; side resolved via VarIndices.piIsState
  *
  * @author DSGE-SimPaths Integration
- * @version 3.0 (dynamic dimensions from model_info.json)
  */
 public class DSGEState {
 
@@ -58,7 +57,7 @@ public class DSGEState {
         public final int yMC;
         public final int yTheta;
 
-        /** True if pi is a state variable (V15+ indexation exports), false if a jump */
+        /** True if pi is a state variable (exports with iota_p indexation), false if a jump */
         public final boolean piIsState;
         /** Index of pi within the state vector (piIsState) or jump vector (!piIsState) */
         public final int piIdx;
@@ -99,9 +98,10 @@ public class DSGEState {
             this.yMC = jumpIdx.getOrDefault("mc", 7);
             this.yTheta = jumpIdx.getOrDefault("theta", 8);
 
-            // pi is a STATE since V15 (iota_p indexation puts pi(-1) in the NKPC), but
-            // a jump in indexation-free exports. Resolve from whichever map declares it;
-            // no silent default — a wrong fallback here once reported the gap as inflation.
+            // pi is a STATE when iota_p indexation puts pi(-1) in the NKPC, and a jump
+            // in indexation-free exports. Resolve from whichever map declares it, with
+            // no silent default: a fallback index can point at another variable (the
+            // output gap) and report it as inflation.
             Integer piState = stateIdx.get("pi");
             Integer piJump = jumpIdx.get("pi");
             if (piState != null) {
@@ -160,7 +160,7 @@ public class DSGEState {
         }
     }
 
-    // ========== Default Dimensions (for backward-compatible constructors) ==========
+    // ========== Default Dimensions (for the constructors without an index map) ==========
 
     /** Default number of state variables (current exported SimPaths DSGE schema) */
     static final int DEFAULT_N_STATE = 13;
@@ -187,7 +187,7 @@ public class DSGEState {
     /** Wage deviation from steady state (%) - STATE */
     public final double wageDeviation;
 
-    /** Inflation deviation from steady state (%) — state since V15, side resolved via piIsState */
+    /** Inflation deviation from steady state (%) — state or jump, side resolved via piIsState */
     public final double inflationDeviation;
 
     /** Employment deviation from steady state (%) - STATE */
@@ -247,7 +247,7 @@ public class DSGEState {
 
     /**
     * Create a DSGEState using default variable indices from the current exported schema.
-     * Backward-compatible constructor for tests and simple usage.
+     * Convenience constructor for tests and simple usage.
      *
      * @param stateVars Array of state variable values (% deviations)
      * @param jumpVars  Array of jump variable values (% deviations)
@@ -322,7 +322,7 @@ public class DSGEState {
         return wageDeviation;
     }
 
-    /** Inflation (π) — side resolved via piIsState (state since V15) */
+    /** Inflation (π) — side resolved via piIsState */
     public double getInflationDeviation() {
         return inflationDeviation;
     }

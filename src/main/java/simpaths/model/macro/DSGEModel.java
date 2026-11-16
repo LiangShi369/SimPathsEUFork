@@ -20,7 +20,7 @@ import org.apache.log4j.Logger;
  * <h3>Key insight for SimPaths coupling</h3>
  * <ul>
  *   <li>Wage (w) is a STATE variable → extract from s_t directly</li>
- *   <li>Inflation (π) is a STATE since V15 (iota_p indexation puts pi(-1) in the NKPC); DSGEState resolves the side from model_info.json (piIsState)</li>
+ *   <li>Inflation (π) is a STATE when iota_p indexation puts pi(-1) in the NKPC; DSGEState resolves the side from model_info.json (piIsState)</li>
  * </ul>
  *
  * <h3>Inputs</h3>
@@ -41,7 +41,6 @@ import org.apache.log4j.Logger;
  * annual aggregation when interfacing with SimPaths.</p>
  *
  * @author DSGE-SimPaths Integration
- * @version 3.0 (dynamic dimensions from model_info.json)
  */
 public class DSGEModel {
 
@@ -249,11 +248,11 @@ public class DSGEModel {
         Map<String, Integer> jumpIdx = extractJsonIntMap(content, "jump_idx_in_y");
         varIndices = new DSGEState.VarIndices(stateIdx, jumpIdx);
 
-        // Extract shock indices. There is deliberately no default: the historical
-        // fallbacks (eps_L=3, eps_h=6) belong to a superseded schema in which 3 was
-        // eps_L. In the current export 3 is eps_p, so defaulting would route a scenario's
-        // shock into the wrong slot and scale it by the wrong sigma, with nothing in the
-        // logs to show for it. A bundle that cannot state its own shock layout must not load.
+        // Extract shock indices. There is deliberately no default: a fixed fallback index
+        // only matches one shock order (in the current export, index 3 is eps_p), so
+        // defaulting would route a scenario's shock into the wrong slot and scale it by the
+        // wrong sigma, with nothing in the logs to show for it. A bundle that cannot state
+        // its own shock layout must not load.
         Map<String, Integer> shockIdx = extractJsonIntMap(content, "shock_indices_java");
         if (shockIdx.isEmpty()) {
             throw new IllegalStateException(String.format(
@@ -262,11 +261,9 @@ public class DSGEModel {
         }
 
         // The model is estimated on 100x-log-dev data, which is what makes its deviations,
-        // the cycle wage among them, percent. That fact lived in prose on both sides and was
-        // silently violated by ~100x once (pre-2026-08 attenuation bug). The bundle declares
-        // it as deviation_scale since 2026-11 (as simpaths_input_scale before, when the export
-        // gave the labour-force and hours shocks zero persistence and percent units); refuse
-        // a bundle that does not declare it, or that declares another scale.
+        // the cycle wage among them, percent. The bundle declares that scale as
+        // deviation_scale; refuse a bundle that does not declare it, or that declares
+        // another scale, rather than rescale downstream.
         double declaredScale = MacroJson.number(content, "deviation_scale", 0.0);
         if (declaredScale != PERCENT_PER_LOG_DEV) {
             throw new IllegalStateException(String.format(
@@ -406,7 +403,7 @@ public class DSGEModel {
      * Load shock parameters (stderr and rho) from CSV.
      *
      * <p>Row count and names are validated against the export's own shock layout: a short
-     * file previously left trailing shocks at sigma=0, which silently disables their
+     * file would leave trailing shocks at sigma=0, which silently disables their
      * scaling in {@link #stepQuarterly} instead of failing.</p>
      */
     private void loadShockParams(Path csvPath) throws IOException {
@@ -462,9 +459,9 @@ public class DSGEModel {
 
     // ========== JSON Parsing Helpers ==========
     // Thin delegates to MacroJson, the single reader shared with
-    // RamseyTrendModel and MacroModelManager. Do not re-inline a local parser:
-    // the three copies these replaced disagreed on whitespace after the colon,
-    // so a change of MATLAB writer would have zeroed parameters silently.
+    // RamseyTrendModel and MacroModelManager. Keep the parsing there: a local
+    // parser that disagrees with it on whitespace after the colon would zero
+    // parameters silently when the MATLAB writer changes.
 
     private String extractJsonString(String json, String key) {
         return MacroJson.string(json, key, "");

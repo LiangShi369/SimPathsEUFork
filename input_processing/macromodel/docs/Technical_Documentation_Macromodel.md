@@ -1,4 +1,16 @@
-# Ramsey + DSGE Macro Stack for Microsimulation Coupling: Technical Documentation (v17)
+# Ramsey and DSGE Macro Model: Technical Reference
+
+This document describes the macro model behind SimPaths' macro layer as it is implemented: the Ramsey growth
+model that provides the trend, the estimated New-Keynesian DSGE model that provides the cycle, how the trend
+detrends the DSGE data, and what the MATLAB/Dynare side exports. It quotes no estimated value, moment or impulse
+response; section 1.3 says which file holds each number. Companion documents: `../README.md` (toolchains,
+running and verifying the workflow, country status), `SimPaths_Coupling.md` (the Java runtime: switches, the
+yearly sequence of events, the planner's feedback), `Integration_Contracts.md` (the numbered contracts between
+the stages and between MATLAB and Java, cited here as "contract N"), `MULTI_COUNTRY_WORKFLOW.md` (adding a
+country, data sources and currency conventions), `Estimation_Guide.md` (priors, diagnostics, troubleshooting),
+and the LaTeX model documentation `SimPaths_Macro_Model_Documentation.tex` in the Overleaf project
+(`WELLSIM_SVEC_Overleaf`), whose tables are rendered from the post-estimation summaries in
+`output/documentation_data/`.
 
 ## Document History
 
@@ -17,1448 +29,584 @@
 | v10 | Feb 10, 2026 | Capital extension (Phase 2): added k, inv with reduced-form investment rule; inv as 7th observable |
 | v11 | Feb 13, 2026 | Estimated investment rule parameters (rho_inv, phi_inv_y, phi_inv_r); 11 params, 8 shocks |
 | v11b | Feb 13, 2026 | Dropped phi_inv_y (collinearity 0.9989 with rho_inv); 10 estimated params; log ML = −905.0 |
-| **v12** | **Feb 16, 2026** | **Option C: Smets-Wouters C/I decomposition (consumption Euler + demand aggregation); cost-push shock eps_p; sigma=2.0 calibrated; 8 observables, 9 shocks, 10 params; log MDD = −1042.6** ⭐ |
-| **v13** | **Feb 17, 2026** | **Dropped eps_match/match_shock (no explanatory power in VD); matching equation simplified; 8 observables, 8 shocks, 9 estimated params** ⭐ |
-| **v14** | **Feb 17, 2026** | **Added external habit persistence in consumption (hab=0.5 calibrated) and explicit AR(1) demand state `d_shock`; activated ρ_d propagation; state-space now includes c and d_shock as states (22 endogenous, 12 states, 10 jumps)** ⭐ |
-| **v15** | **Feb 18, 2026** | **Inflation indexation (iota_p=0.35, hybrid NKPC with pi(-1)); restored investment accelerator (phi_inv_y=0.3 calibrated); log ML improved +20.7 (−920.25 → −899.51); σ_p dropped 37% (2.26 → 1.43); investment VD reshaped (95.7% own → 72.4% own + 13.6% cost-push + 9.2% monetary)** ⭐ |
-| **v16** | **Feb 26, 2026** | **Dual-layor macro architecture: Long-run trend component (Ramsey growth model) + business cycle component (DSGE)** ⭐ |
-| **v17** | **Mar 09, 2026** | **Ramsey Model: Endogenous labor supply implementation; `ramsey_labor_supply` switch (defaults to exogenous). Dynare files template-based structure (`Macromodel_[COUNTRY].mod`).** ⭐ |
+| **v12** | **Feb 16, 2026** | **Option C: Smets-Wouters C/I decomposition (consumption Euler + demand aggregation); cost-push shock eps_p; sigma=2.0 calibrated; 8 observables, 9 shocks, 10 params; log MDD = −1042.6** |
+| **v13** | **Feb 17, 2026** | **Dropped eps_match/match_shock (no explanatory power in VD); matching equation simplified; 8 observables, 8 shocks, 9 estimated params** |
+| **v14** | **Feb 17, 2026** | **Added external habit persistence in consumption (hab=0.5 calibrated) and explicit AR(1) demand state `d_shock`; activated ρ_d propagation; state-space now includes c and d_shock as states (22 endogenous, 12 states, 10 jumps)** |
+| **v15** | **Feb 18, 2026** | **Inflation indexation (iota_p=0.35, hybrid NKPC with pi(-1)); restored investment accelerator (phi_inv_y=0.3 calibrated); log ML improved +20.7 (−920.25 → −899.51); σ_p dropped 37% (2.26 → 1.43); investment VD reshaped (95.7% own → 72.4% own + 13.6% cost-push + 9.2% monetary)** |
+| **v16** | **Feb 26, 2026** | **Dual-layer macro architecture: Long-run trend component (Ramsey growth model) + business cycle component (DSGE)** |
+| **v17** | **Mar 09, 2026** | **Ramsey Model: Endogenous labor supply implementation; `ramsey_labor_supply` switch (defaults to exogenous). Dynare files template-based structure (`Macromodel_[COUNTRY].mod`).** |
 | **v18** | **Oct 20, 2026** | **Ramsey Model: endogenous labour supply removed (JuergenWiemers/SimPathsEU#28). The Ramsey layer solves exogenous labour only; SimPaths' realized labour reaches the planner through the yearly re-solve (`mm_ramseyFeedbackMargins`, `SimPaths_Coupling.md` §8.1).** |
 | **v19** | **Nov 6, 2026** | **The DSGE is one-way: it takes no input from SimPaths and runs on scenario shocks only (contract 38). SimPaths' employment and hours reach the planner alone, counted once a year after the labour market; the feedback is always on with one persistence `mm_ramseyFeedbackPersistence` (`mm_ramseyFeedbackMargins` and `mm_ramseyFeedbackHoursPersistence` removed). The labour-force and hours shocks are ordinary shocks: the frozen models and bundles carry the calibrated ρ_L, ρ_h (the `for_simpaths_export` switch is gone), every shock is in σ-units, and the bundle declares `deviation_scale` (contracts 1, 37).** |
+| v20 | Nov 7, 2026 | Rewritten as a current-state reference; estimates, moments and IRFs are read from their sources (frozen model files, bundle, post-estimation output) instead of being copied here. |
 
 ---
 
-## A. Dual-Layer Macro Architecture (Trend + Cycle) ⭐ NEW (Feb 2026)
+## 1. Architecture
 
-### A.1 Conceptual Decomposition
+### 1.1 Trend and cycle
 
-Macroeconomic dynamics are now decomposed into two orthogonal components:
+The macro layer splits the macroeconomy into two components:
 
-1. **Long-run trend component** (structural, low-frequency), generated by a deterministic **Ramsey growth model**
-2. **Business-cycle component** (high-frequency deviations around moving steady state), generated by the **DSGE model**
+- **Trend: a Ramsey growth model.** A deterministic planner chooses consumption and capital along a
+  perfect-foresight path, given exogenous paths for TFP, employees, hours per employee and the government and
+  net-export shares of output. It provides the secular path of output, consumption, investment, capital, the
+  return on capital and the hourly wage. MATLAB (`ramsey_trend.m`) solves it over the estimation sample, where
+  it detrends the DSGE data, and forward from the SimPaths handoff quarter, which fixes the starting state; Java
+  (`RamseyTrendModel`) solves the same forward problem at runtime, where it provides the trend wage.
+- **Cycle: an estimated linear DSGE model.** A New-Keynesian search-and-matching model with staggered wage
+  bargaining, capital and an hours margin, estimated by Bayesian methods on the data's deviations from the trend.
+  It provides the cyclical deviation of the real wage (and of inflation) from the trend.
 
-This replaces the previous HP-filter-based detrending architecture.
+**Moving steady state.** The DSGE is estimated on deviations of the observables from the Ramsey trend (output,
+consumption, investment) and from the labour, inflation and interest-rate trends built in the same step
+(section 2.5). Its steady state is therefore the trend path itself: a zero DSGE state means the economy is on
+the trend, and the cycle wage is a percent deviation around the trend wage. SimPaths applies the sum,
+$w^{total}_t = w^{trend}_t + w^{cycle}_t$, as a wage multiplier $1 + w^{total}_t/100$
+(`SimPaths_Coupling.md` §3).
 
-### A.2 Information Flow and Integration Logic
+**The DSGE is one-way.** It takes no input from SimPaths: its shocks come from a scenario file only, all zero
+without one, and it hands SimPaths the cycle wage (contract 38). SimPaths' labour supply reaches the macro side
+through the planner alone. The reason is that nothing SimPaths produces is a business-cycle movement: its
+workers move with ageing, reforms, alignment and sampling noise, and counting those movements in the cycle wage
+as well as in the trend wage would count them twice (`SimPaths_Coupling.md` §3.1).
+
+**The planner re-solves once a year.** After SimPaths' labour market and population alignment, the realized
+number of workers and their mean hours are compared with the planner's assumed path, and the planner re-solves
+its remaining path from the predetermined capital stock (extended path, persistence
+`mm_ramseyFeedbackPersistence`). The wage of year $t$ comes from the path solved at the end of year $t-1$.
+The mechanism, the persistence semantics and the treatment of hours are in `SimPaths_Coupling.md` §8.1.
+
+### 1.2 Information flow
 
 ```
-┌──────────────────────────────┐
-│ SimPaths population scenario │
-│ (align_popProjections.xlsx)  │
-└──────────────┬───────────────┘
-                    │ (top-down demographic path: N trend)
-                    ▼
-┌──────────────────────────────┐
-│ Ramsey growth model          │
-│ - trend paths: w_trend,      │
-│   Y_trend, C_trend, I_trend  │
-│ - re-solved yearly on the    │  ◄── realized employment, hours ──  SimPaths
-│   labour SimPaths realized   │
-└──────────────┬───────────────┘
-                    │
-                    │ trend component
-                    ▼
-┌──────────────────────────────┐          one-way annual coupling
-│ DSGE cycle model             │  ──────────────────────────────►  SimPaths
-│ - uses Ramsey-detrended data │        (w_cycle, pi; scenario shocks only in)
-│ - outputs cyclical deviations│
-└──────────────┬───────────────┘
-                    │
-                    ▼
-          Total macro wage used in SimPaths:
-          w_total = w_cycle + w_trend
+align_popProjections.xlsx --(growth of the population aged 15-64)--> Ramsey planner (N path)
+SimPaths realized workers and hours (end of year) -----------------> Ramsey re-solve of the remaining path
+Ramsey planner --> w_trend: % change of the hourly wage since the handoff quarter, annual mean
+Scenario shocks (sigma-units) --> DSGE: 4 quarterly steps, annual mean --> w_cycle, pi_cycle
+SimPaths wages <-- w_total = w_trend + w_cycle      (pi_cycle is recorded in MacroPaths.csv, applied to no agent)
 ```
 
-**Key design choices implemented:**
-- Growth model labour input is exogenous (employees `N`); SimPaths' realized employment and hours feed back through the yearly re-solve of the planner's remaining path, always on with a Ramsey layer, with one persistence `mm_ramseyFeedbackPersistence` (`SimPaths_Coupling.md` §8.1).
-- The DSGE-SimPaths channel is **one-way**: the DSGE hands SimPaths the cycle wage and takes no input from SimPaths; its shocks come from a scenario only (contract 38)
-- **Static integration mode is fully removed**; dynamic state-space integration is the only supported mode
+Which layers run is set by `mm_macroModel` (`off | ramsey | dsge | ramsey_dsge`, default `off`;
+`SimPaths_Coupling.md` §6).
 
-### A.3 End-to-End Workflow
+### 1.3 Where the numbers are
 
-The `run_full_workflow.m` pipeline is now:
+| Quantity | File |
+|---|---|
+| Calibrated DSGE parameters, steady-state labour-market shares | `country_params/{Country}_calibration.mod` |
+| Priors, starting values, calibrated std devs (`eps_sep`, measurement errors), datafile | `country_params/{Country}_estimation.mod` |
+| Posterior modes of the estimated parameters and shock std devs | `Macromodel_{Country}_frozen.mod`, lines marked `// ESTIMATED` |
+| σ per shock as SimPaths applies it, and the persistence parameter of the equation each shock enters | `input/{CC}/MacroModel/shock_params.csv` |
+| Policy matrices, variable layout, units | `policy_A.csv`, `policy_Bs.csv`, `policy_C.csv`, `policy_D.csv`, `model_info.json` (bundle) |
+| Impulse responses to one-σ innovations at the posterior mode | `irfs_eps_*.csv` (bundle) |
+| Posterior means and 90% HPD intervals, marginal data density, identification, moments, variance decompositions | `Macromodel_{Country}/Output/postestimation_summary.txt` and `DSGE_Estimation_Report.pdf`; `output/documentation_data/dsge/dsge_postestimation_{Country}.json`; the tables of the LaTeX documentation |
+| Ramsey structural parameters, inflation target, solver settings, terminal growth | `country_params/{Country}_growth_params.json` (source template) |
+| Calibrated base-year levels, expenditure shares, BGP K/Y and r* | `input/{CC}/MacroModel/growth_params_{Country}.json` (`base_year_values`, `expenditure_shares`, `derived`); `output/documentation_data/ramsey/ramsey_summary_{Country}.json` |
+| Trend paths over the sample | `output/ramsey_trends_{country}.csv`; through the handoff quarter, `growth_model_reference_{country}.csv` (bundle) |
+| Handoff state and forward paths | `growth_terminal_state.json`, `population_projection_{Country}.csv`, `hours_projection_{Country}.csv` (bundle) |
 
-- **Step 0a:** `calibrate_growth_model(country)`
-- **Step 0b:** `ramsey_trend(country)`
-- **Step 0c:** `build_population_projection(country, simpaths_pop_file)`
-- **Step 1:** DSGE Bayesian estimation (`dynare Macromodel_{country}.mod`)
-- **Step 2:** `generate_frozen_model(country)`
-- **Step 3:** `export_dynamic_for_simpaths` (A, Bs, C, D)
-- **Step 4:** `postestimation_analysis`
-
-#### Labor Supply
-
-The Ramsey model takes the number of employees (`N`) as an externally provided trend (the HP trend of the data in sample, the SimPaths population projection out of sample) and solves for consumption and capital. SimPaths' realized labour supply reaches the planner through the yearly re-solve described in `SimPaths_Coupling.md` §8.1, not through a participation choice inside the planner: the endogenous-labour variant of v17 was removed on 2026-10-20 (JuergenWiemers/SimPathsEU#28).
-
-The user-maintained source template lives at `country_params/{Country}_growth_params.json`. During calibration the calibrated runtime copy `input/{CC}/MacroModel/growth_params_{COUNTRY}.json` is written, which is the file consumed by the Java integration.
-
-### A.4 Ramsey Calibration Procedure (`calibrate_growth_model.m`)
-
-Calibration is performed on **level data** (`data_for_dynare_levels_{COUNTRY}.csv`). It reads structural inputs from `country_params/{Country}_growth_params.json` and writes the calibrated runtime copy `input/{CC}/MacroModel/growth_params_{COUNTRY}.json`.
-
-Core steps:
-
-1. Load structural parameters from JSON (`alpha_K`, `delta_annual`, `beta_annual`, `sigma`, `tfp_growth_annual`, base year). If a `terminal_growth` block is present and enabled, also load the terminal TFP-growth anchor `g_A_terminal_annual` and convergence parameter `rho_quarterly`.
-2. Extract base-year levels (annual GDP/investment/consumption; average employment `N`, labor force `L`, hours `h`).
-3. Compute expenditure shares (`C/Y`, `I/Y`, optional `G/Y`, `NX/Y`) with unit-consistency checks.
-4. Calibrate initial capital via perpetual inventory:
-    \[
-    K_0 = \frac{I_0}{\delta + g_Y}
-    \]
-5. Cross-check PIM `K/Y` against balanced-growth `K/Y` implied by the modified golden rule. If `terminal_growth.enabled = true`, the BGP comparison uses the terminal growth anchor `g_A_terminal_annual` rather than the historical in-sample `tfp_growth_annual`. When `K_override` is active, the operative diagnostic is `Override/BGP`; a raw `PIM/BGP` gap alone is treated as an informational signal that PIM may understate the capital stock.
-6. Compute implied TFP from Cobb-Douglas identity:
-    \[
-    A_0 = \frac{Y_q}{K_0^{\alpha}(N_0h_0)^{1-\alpha}}
-    \]
-7. Write calibrated base-year values and derived quarterly parameters back to JSON.
-
-### A.5 Trend Construction and Detrending (`ramsey_trend.m`)
-
-The Ramsey trend engine solves the planner's problem.
-
-**In exogenous mode:**
-\[
-\max \sum_t \beta^t N_t u(c_t),\quad
-K_{t+1}=(1-\delta)K_t + Y_t - N_tc_t - G_t - NX_t
-\]
-with open-economy resource constraint (`G_t = g_Y(t)Y_t`, `NX_t = nx_Y(t)Y_t`) and Cobb-Douglas production. Labor input uses an externally provided exogenously growing trend for the number of employees, `N_trend`.
-
-Implementation details:
-
-- Hours trend is log-linear. TFP grows at calibrated in-sample `g_A`; if terminal-growth convergence is enabled, the forward extension lets annual `g_A` decay toward `g_A_terminal_annual` using an AR(1)-style rule with persistence `rho_quarterly`.
-- Government/net-export shares are smoothed and extrapolated; COVID windows are interpolated before smoothing to avoid pulled-down structural trends.
-- Solver uses a stacked-time Newton (LBJ) perfect-foresight solve over the full transition path, with terminal condition `K/Y → K/Y_bgp`, where `K/Y_bgp = alpha / (((1 + g_A^{BGP}/(1-alpha))^sigma / beta) - 1 + delta)` in quarterly units and `g_A^{BGP}` equals the terminal growth anchor when convergence is enabled. The residual system stacks the resource constraint and Euler equation for all periods simultaneously, eliminating the saddle-path instability of the old forward shooter.
-
-For Poland, the current implementation keeps `tfp_growth_annual = 1.5%` during the historical detrending sample but sets `terminal_growth.g_A_terminal_annual = 0.8%` with `rho_quarterly = 0.99` in the extension. This lowers the terminal BGP real rate from the implausible permanent-catch-up value while leaving the in-sample trend essentially unchanged.
-
-Detrending outputs all 8 DSGE observables using Ramsey-consistent trends:
-
-- `y, c, inv, n, L, h`: log-gap vs trend (in percent)
-- `pi`: deviation from inflation trend
-- `R`: deviation from smoothed ex-ante real-rate trend plus inflation target
-
-Resulting detrended sample is exported to `data_for_dynare_{COUNTRY}.csv` for DSGE estimation.
-
-### A.6 Population Projection Consistency (Ramsey ↔ SimPaths)
-
-`build_population_projection.m` reads SimPaths `align_popProjections.xlsx` from the `Population_projections` sheet, aggregates working-age (15–64) population across regions and genders, and produces two consistent demographic artefacts:
-
-1. `population_projection_{COUNTRY}.csv` — quarterly `N` anchored at the Ramsey reference CSV's terminal value, used by the Java SimPaths runtime.
-2. An updated `demographic_L_{country}.csv` — the historical rows up to `projection_start` are preserved, and the post-`projection_start` portion is rewritten using the same SimPaths-aligned demographic growth path. The MATLAB Ramsey solver consumes this file.
-
-Both consumers now see the same demographic story:
-
-- **MATLAB `ramsey_trend.m`** reads `demographic_L_{country}.csv` for the in-sample labor force trend; when the file extends beyond the historical sample, its post-sample tail overrides the default trailing-growth forward extrapolation in both the main LBJ solve and the SimPaths-handoff solve.
-- **Java `MacroModelManager.initializeRamseyTrend()`** reads `population_projection_{COUNTRY}.csv` and uses it to override `RamseyTrendModel`'s default forward `N` extrapolation.
-
-Historical caveat: prior to this wiring, the MATLAB Ramsey solver extrapolated forward `N` from the trailing 20-quarter growth of in-sample data, which could disagree sharply with the SimPaths demographic projection (e.g. positive labor-force growth in Poland's 2005–2023 sample vs. the projected ~−0.9%/yr decline through 2060). Java consumed the SimPaths projection correctly, but MATLAB did not — biasing the in-sample Ramsey K trend via the stacked-time terminal closure. This is now fixed by Option 1 in `build_population_projection.m`.
-
-### A.7 What SimPaths Receives
-
-SimPaths applies the **total wage effect**:
-
-\[
-w_{\text{total},t} = w_{\text{cycle},t} + w_{\text{trend},t}
-\]
-
-where:
-
-- `w_cycle` is DSGE annual-average wage deviation from quarterly state evolution
-- `w_trend` is Ramsey secular wage trend relative to the first simulation year
-
-Inflation feedback remains the DSGE cyclical component.
+`Macromodel_{Country}/`, `output/`, `logs/` and `params_{Country}_estimated.txt` are not tracked;
+`run_full_workflow` regenerates them. The frozen models, the `data/` files, the country parameter files and the
+bundles are tracked.
 
 ---
 
-## 1. High-Level Model Description
+## 2. Ramsey Trend Layer
 
-### 1.1 Purpose
+### 2.1 The planner's problem
 
-The macro block provides **economic guardrails** for SimPaths through a dual-layer design:
+$$\max_{\{c_t,\,K_{t+1}\}} \sum_t \beta^t N_t\, \frac{c_t^{1-\sigma}-1}{1-\sigma}$$
 
-- **Ramsey growth model:** long-run secular trend, re-solved every year on the employment and hours SimPaths realized
-- **DSGE model:** business-cycle deviations around that moving trend (one-way: it hands SimPaths the cycle wage and takes no input from SimPaths)
+subject to
 
-The DSGE returns cyclical wage and inflation deviations driven by scenario shocks alone; SimPaths' labour-supply changes reach the macro side through the Ramsey re-solve. SimPaths then applies the total wage effect (trend + cycle).
+$$K_{t+1} = (1-\delta)K_t + Y_t - N_t c_t - (g_{Y,t} + nx_{Y,t})\,Y_t, \qquad Y_t = A_t K_t^{\alpha}(N_t h_t)^{1-\alpha}.$$
 
-```
-┌─────────────────────┐                      ┌─────────────────────┐
-│   MICROSIMULATION   │                      │        DSGE         │
-│   (SimPaths/Java)   │                      │   (Dynare → Java)   │
-│                     │                      │                     │
-│  Discrete choice    │  ───── L ─────────►  │  Search & Matching  │
-│  labor supply       │  (labor force)       │  NK pricing         │
-│                     │                      │                     │
-│                     │  ───── h ─────────►  │  Hours Adjustment   │  ⭐ NEW
-│                     │  (hours choice)      │  (Intensive Margin) │
-│                     │                      │                     │
-│  Tax-transfer       │  ◄──── w ──────────  │  Staggered Wages    │
-│  system             │  (real wage)         │  (Gertler-Trigari)  │
-│                     │                      │                     │
-│  Individual         │  ◄──── π ──────────  │  Inflation          │
-│  decisions          │  (optional)          │                     │
-└─────────────────────┘                      └─────────────────────┘
-```
+$N_t$ is the number of employees, $h_t$ hours per employee per quarter, $c_t$ private consumption per employee,
+and $g_{Y,t}$, $nx_{Y,t}$ the exogenous government-consumption and net-export shares of output. The shares
+enter the resource constraint only; the Euler equation is the closed-economy one:
 
-### 1.2 Model Structure
+$$\frac{c_{t+1}}{c_t} = \left[\beta(1+r_{t+1})\right]^{1/\sigma}, \qquad r_t = \alpha\frac{Y_t}{K_t} - \delta, \qquad w_t = (1-\alpha)\frac{Y_t}{N_t h_t}.$$
 
-The model is an **Orthodox New Keynesian Search-and-Matching Model** with:
-- Explicit demand-supply separation
-- **Gertler-Trigari (2009) staggered wage bargaining**
-- **Intensive margin (hours per worker)**
-- **Capital stock with reduced-form investment rule** ⭐ v10
-- **Smets-Wouters C/I decomposition** (consumption Euler + demand aggregation) ⭐ v12
-- **External habit persistence in consumption** (Euler with lagged consumption) ⭐ v14
-- **Explicit AR(1) demand shock state** `d_shock` (activates ρ_d) ⭐ v14
-- **Demand/preference shock** for proper shock identification
-- **Cost-push shock** (eps_p) in NKPC ⭐ v12
-- **Inflation indexation** (hybrid NKPC with backward-looking pi(-1) component, iota_p=0.35) ⭐ v15
-- **Investment accelerator restored** (phi_inv_y=0.3 calibrated) ⭐ v15
-- **Bayesian estimation** with country data (current benchmark: Germany 2000Q1-2024Q4), **9 estimated parameters** ⭐ v14
-- **ILO-consistent labor market data**
-- **8 observables, 8 shocks** ⭐ v14
+Labour input is exogenous: the planner takes $N_t$ and $h_t$ as given and SimPaths' realized labour reaches it
+through the yearly re-solve (section 1.1). Aggregate consumption is $C_t = N_t c_t$, and investment is the
+residual $I_t = Y_t - C_t - G_t - NX_t$.
 
-| Block | Function | Key Variables |
-|-------|----------|---------------|
-| **Supply Side** | Production with capital and utilization | y, x, n, h, k, gap |
-| **Demand Side** | Habit-Euler + demand aggregation | **c**, d, R, π, **d_shock**, eps_d ⭐ v14 |
-| **Gap Dynamics** | Demand-supply interaction | gap = d − y, mc |
-| **Labor Market** | Employment and wages | n, u, v, w, w*, θ |
-| **Hours** | Intensive margin adjustment | h, eps_h |
-| **Wage Setting** | Calvo-style staggered bargaining | w, w_star, λ_w |
-| **Capital** | Capital accumulation and investment | k, inv, eps_inv |
-| **Pricing** | NKPC with cost-push shock + indexation | pi, mc, **eps_p**, **iota_p** ⭐ v12/v15 |
+The model is quarterly. The JSON holds annual values, which both solvers convert:
+$\beta = \beta_a^{1/4}$, $\delta = 1-(1-\delta_a)^{1/4}$, $g_A = (1+g_{A,a})^{1/4}-1$.
 
-**Key Innovations:**
-1. **Variable labor force** `L` as input from microsimulation (extensive margin) — observed (v9)
-2. **Variable hours** `h` as intensive margin adjustment — pure AR(1) (v9)
-3. **Explicit demand-supply gap** driving inflation and hiring
-4. **Staggered wage bargaining** (Gertler-Trigari 2009) addressing the Shimer puzzle
-5. **Demand shock (eps_d)** enabling positive output-inflation correlation
-6. **Full Bayesian estimation** with identification verification — **10/10 rank** ⭐ v12
-7. **ILO-consistent unemployment data** for internal consistency
-8. **Direct labor force → wage channel** (ψ_wL) for meaningful microsim feedback
-9. **Persistence parameters calibrated** (ρ_h, ρ_L) to resolve collinearity (v9)
-10. **Capital stock with reduced-form investment rule** (k, inv) ⭐ v10
-11. **Consumption as separate variable** with Euler equation and demand aggregation ⭐ v12
-12. **Cost-push shock** (eps_p) in NKPC for clean inflation identification ⭐ v12
-13. **8 observables** including consumption (c) ⭐ v12
-14. **Habit persistence in consumption** via `hab` (external habits) ⭐ v14
-15. **Demand AR(1) state variable** `d_shock` for persistent preference shocks ⭐ v14
-16. **Inflation indexation** in NKPC (iota_p=0.35, Smets-Wouters 2003) — adds intrinsic persistence, reduces σ_p by 37% ⭐ v15
-17. **Investment accelerator restored** (phi_inv_y=0.3) — ensures demand co-movement of investment ⭐ v15
+**Terminal condition.** The transversality condition is approximated by requiring capital-output to reach its
+balanced-growth value at the end of a long terminal tail:
 
-### 1.3 Variable Definitions
+$$\frac{K_T}{Y_T} = \kappa^{BGP} = \frac{\alpha}{r^* + \delta}, \qquad 1 + r^* = \frac{(1+g_c)^{\sigma}}{\beta}, \qquad g_c = \frac{g_A^{BGP}}{1-\alpha},$$
 
-All variables are in **log-deviations from steady state** (i.e., $\hat{x}_t = \ln(X_t) - \ln(X_{ss})$).
+with $g_A^{BGP}$ the terminal TFP growth rate when terminal growth is enabled (section 2.3), and
+`tfp_growth_annual` otherwise.
 
-#### Endogenous Variables
+### 2.2 Calibration (`calibrate_growth_model.m`)
 
-| Variable | Description | Role |
-|----------|-------------|------|
-| `y` | Output (production + utilization) | Supply-determined + utilization |
-| `d` | Aggregate demand | Demand-determined |
-| **`c`** | **Consumption (habit-Euler equation)** | **State/jump (lag + lead in v14)** ⭐ v14 |
-| `gap` | Demand-supply gap ($d - y$) | Drives inflation & hiring |
-| `R` | Nominal interest rate | Policy instrument |
-| `π` | Inflation rate | **Output to microsim** |
-| `w` | Aggregate real wage | **Output to microsim** |
-| `w_star` | Reset wage (newly negotiated) | Gertler-Trigari |
-| `n` | Employment (extensive margin) | State variable |
-| **`h`** | **Hours per worker (intensive margin)** | **State variable** ⭐ NEW |
-| `u` | Unemployment level (log-deviation) | Internal dynamics |
-| `u_rate` | Unemployment rate gap (pp) | **Implied by identity** (v9: not observed) |
-| `v` | Vacancies | Hiring activity |
-| `m` | Matches (new hires) | Flow variable |
-| `θ` | Labor market tightness ($v/u$) | Wage pressure |
-| `mc` | Marginal cost | Inflation driver |
-| `x` | Technology (TFP) | Productivity |
-| `L` | Labor force (participation) | **OBSERVED** (v9: was latent) |
-| `d_shock` | Demand/preference AR(1) state | **State variable** ⭐ v14 |
-| `ψ_wL` | Direct L→w elasticity | **Bypasses slow θ channel** |
-| **`k`** | **Capital stock (predetermined)** | **State variable** ⭐ v10 |
-| **`inv`** | **Investment (reduced-form rule)** | **OBSERVED** ⭐ v10 |
+The structural parameters (`alpha_K`, `delta_annual`, `beta_annual`, `sigma`, `tfp_growth_annual`, the
+optional `K_override`, `base_year`, the `inflation_target` block, the `solver` block and the optional
+`terminal_growth` block) are set by hand in `country_params/{Country}_growth_params.json`, whose `x_comments`
+give the reasons. `calibrate_growth_model` reads that template and the levels file
+`data/data_for_dynare_levels_{Country}.csv`, and writes the calibrated copy
+`input/{CC}/MacroModel/growth_params_{Country}.json` that both the MATLAB solve and Java read:
 
-#### Shock Processes
+1. Drop trailing quarters without production data; take the base year's four quarters (all four must exist).
+2. Base-year levels: annual GDP, consumption, investment, government consumption and net exports (sums of the
+   four quarters); employees $N_0$, labour force $L_0$ and hours per employee $h_0$ (averages). Check the
+   expenditure shares $C/Y$ and $I/Y$ for unit errors.
+3. Capital by perpetual inventory, $K_0 = I_0/(\delta_a + g_Y)$, with $g_Y$ the average annual GDP growth
+   between the first and last four-quarter windows of the sample. A positive `K_override` replaces it.
+4. Compare the PIM (or override) $K/Y$ with the balanced-growth $K/Y$ of section 2.1 and warn if they differ by
+   more than 20%. With an override, the override's ratio is the operative check.
+5. Implied TFP from the production function in quarterly terms,
+   $A_0 = Y_{q,0} / \left(K_0^{\alpha}(N_0 h_0)^{1-\alpha}\right)$ with $Y_{q,0}$ a quarter of base-year GDP.
+6. Write placeholders where missing or stale: `data/nawru_{country}.csv` (HP trend, $\lambda = 160{,}000$,
+   of the ILO unemployment rate; diagnostics only) and `data/demographic_L_{country}.csv` (HP trend of the log
+   labour force, same $\lambda$).
+7. Write `base_year_values`, `expenditure_shares`, `derived` (quarterly β and δ, terminal TFP growth, BGP $K/Y$
+   and $r^*$) and the normalised `solver` block into the calibrated JSON, and mark the bundle unverified until
+   the next export verifies it (contract 36). A summary goes to
+   `output/documentation_data/ramsey/ramsey_summary_{Country}.json`.
 
-| Variable | Description | Persistence |
-|----------|-------------|-------------|
-| `sep_shock` | Separation shock process | AR(1) with $\rho_{sep}$ |
-| `d_shock` | Demand/preference shock process | AR(1) with $\rho_{d}$ ⭐ v14 |
+$K_0$ and $A_0$ are anchored at the first row of the data file, which must be the base year's first quarter
+(contract 13). The Ramsey depreciation rate and the DSGE's `delta_k` differ on purpose: the Ramsey rate applies
+to total gross fixed capital formation, structures included, and sets the long-run $K/Y$; `delta_k` governs
+the cyclical capital law of motion only. Parameters of the same name in the two layers (σ, the capital share,
+depreciation) are set separately, in their own files.
 
-#### Exogenous Shocks (Innovations)
+### 2.3 Exogenous paths
 
-| Shock | Description | Role in Identification |
-|-------|-------------|------------------------|
-| `ε_a` | Technology shock | Supply: y↑, π↓ |
-| `ε_d` | Demand/preference shock | Demand: y↑, c↑ |
-| `ε_r` | Monetary policy shock | Policy: y↓, π↓ |
-| **`ε_p`** | **Cost-push shock** | **Inflation: π↑, y↓** ⭐ v12 |
-| `ε_h` | Hours shock (Kurzarbeit, policy) | Hours adjustment |
-| `ε_L` | Labor force shock (**from microsim**) | Labor supply |
-| `ε_sep` | Separation rate shock | Labor market (FIXED, not estimated) |
-| `ε_inv` | Investment shock | Capital dynamics |
+| Path | Construction (`ramsey_trend.m`) |
+|---|---|
+| Employees $N_t$ | HP trend ($\lambda = 160{,}000$) of log employees (`n_level`). Employees, not total employment, because $A_0$ is calibrated on employees and hours per employee |
+| Demographic labour force $L^{demo}_t$ | `data/demographic_L_{country}.csv`: through the handoff quarter, the HP trend of the log labour force; after it, the growth of the projected population aged 15-64 (section 2.6) |
+| Hours per employee $h_t$ | Log-linear trend fitted to log hours per employee |
+| $g_{Y,t}$, $nx_{Y,t}$ | HP trends ($\lambda = 160{,}000$) of the observed shares, with 2020Q1-2021Q2 interpolated first; constant at the last value beyond the sample |
+| TFP $A_t$ | $A_0$ grown at `tfp_growth_annual` in sample |
 
----
+**Terminal TFP growth.** With `terminal_growth.enabled`, annual TFP growth converges quarter by quarter towards
+`g_A_terminal_annual`: $g_t = g^{term} + \rho_q\,(g_{t-1} - g^{term})$, with $\rho_q$ = `rho_quarterly`
+(0.99 when absent) and quarterly growth $(1+g_t)^{1/4}-1$. In the in-sample solve the convergence starts after
+the last data quarter; in the forward solve SimPaths uses (section 2.7) it starts at the handoff quarter, and a
+re-solve continues the same convergence phase. The balanced-growth target uses $g^{term}$.
 
-## 2. Key Innovation in v8: Direct Labor Force → Wage Channel ⭐ NEW
+**Beyond the sample.** $N$ follows the growth of $L^{demo}$, chained at the last data quarter, for as long as
+the population projection runs; without a projection it continues at its trailing 20-quarter growth. After the
+end of the projection, and for hours after the end of the data, the growth rate tapers geometrically to zero
+with a half-life of 20 quarters. The tail is a device for the terminal condition, not a forecast: on a balanced
+growth path labour input per worker must settle, and an undamped decline would contradict the condition the
+solve imposes. Java builds the tail with the same rule (`RamseyTrendModel.extendWithTaperedGrowth`).
 
-### 2.1 The Problem: Muted Wage Response
+### 2.4 Solution method
 
-In v7, the labor force shock (ε_L) had minimal impact on wages:
-- **Observed:** 1% ↑L → only ~0.01% ↓w (near-zero elasticity)
-- **Target:** 1% ↑L → ~0.25% ↓w (Borjas/Dustmann literature: 0.2-0.4)
+The Euler equation and the resource constraint of every quarter, with $K_1 = K_0$ fixed and the terminal
+condition of section 2.1, form one stacked system in the unknowns $(c_1, K_2, c_2, \dots, c_T)$. A damped
+Newton iteration solves it (stacked-time, LBJ): the finite-difference Jacobian is tridiagonal because each
+residual couples adjacent quarters only, it is factorised as a sparse matrix, and an Armijo backtracking line
+search keeps every iterate feasible. Tolerance, iteration limit and the length of the terminal tail are in the
+JSON's `solver` block. On the first iteration the solver probes the off-band derivatives and fails if a
+residual depends on an unknown outside the band (contract 14). Because the solve is global, anticipated and
+delayed permanent changes need no saddle-path shooting. `RamseyTrendModel.java` implements the same algorithm;
+`RamseyTrendModelTest` checks MATLAB-Java parity at a relative tolerance of $10^{-9}$ against fixtures refreshed
+only by `refresh_java_parity_fixtures` (contract 19).
 
-**Root cause:** The standard search-and-matching wage channel is too slow:
-```
-L ↑ → u ↑ → θ ↓ (very slowly) → w* ↓ (even slower) → w ↓ (λ_w=0.75 friction)
-```
-With high wage rigidity (λ_w=0.75), it takes 10+ quarters for L shocks to meaningfully affect wages—too slow for microsimulation feedback.
+### 2.5 Detrending the DSGE observables
 
-### 2.2 The Solution: Direct L→w Channel (ψ_wL)
+`ramsey_trend.m` turns the levels file into the Dynare datafile `data/data_for_dynare_{Country}.csv`, its only
+writer (contract 12):
 
-Added a **direct labor force term** to the aggregate wage equation:
+| Observable | Gap |
+|---|---|
+| `y` | $100(\ln Y^{obs} - \ln Y^{trend})$, Ramsey output |
+| `c` | $100(\ln C^{obs} - \ln C^{trend})$, Ramsey private consumption $N_t c_t$ |
+| `inv` | $100(\ln I^{obs} - \ln I^{trend})$, Ramsey residual investment |
+| `pi` | $\pi^{obs} - \pi^*_t$, with $\pi^*$ converging from the mean of the first five quarters to the inflation target: $\pi^*_t = \rho\,\pi^*_{t-1} + (1-\rho)\,\pi^{target}$ (`inflation_target` block) |
+| `R` | $R^{obs} - (r^{smooth}_t + \pi^*_t)$, with $r^{smooth}$ the HP trend ($\lambda = 160{,}000$) of the ex-ante real rate $R - \bar\pi^{(4)}$, $\bar\pi^{(4)}$ the backward four-quarter mean of inflation |
+| `n` | $100(\ln N^{obs} - \ln N^{trend})$, employees |
+| `L` | $100(\ln L^{obs} - \ln L^{demo})$, labour force |
+| `h` | $100(\ln h^{obs} - \ln h^{trend})$, hours per employee |
 
-$$w_t = \lambda_w \cdot w_{t-1} + (1 - \lambda_w) \cdot w^*_t + \psi_{wL} \cdot L_t$$
+The interest-rate trend uses a smoothed ex-ante real rate rather than the Ramsey return on capital so that slow
+movements in the policy-rate environment do not appear as a persistent monetary shock. Missing values of
+$R - \bar\pi^{(4)}$ inside the sample are interpolated; missing values at either end are extrapolated with a
+warning, because the HP trend follows the extrapolation across the whole sample. Each series is demeaned, and
+2020Q1-2021Q2 is set to missing for every observable except `R` (the Kalman filter skips missing values). The
+real gaps are 100 × log deviations, the scale the bundle declares (`deviation_scale = 100`, section 4).
 
-| Parameter | Value | Interpretation |
-|-----------|------:|----------------|
-| **ψ_wL** | **-0.05** | 1% ↑L → 0.05% ↓w (direct effect) |
+`ramsey_trend` also writes `output/ramsey_trends_{country}.csv` (all trend paths), the reference
+`output/growth_model_reference_{country}.csv` (section 2.7), the workspace `output/ramsey_trend_{country}.mat`
+the exporters read, a diagnostic figure, and a sanity check of the investment trend and the expenditure shares
+that warns loudly on failure.
 
-**Economic interpretation:** This captures "wage drift"—the observed pattern that wages respond to labor market slack beyond formal bargaining. With unemployment pressure (↑L → ↑u), firms:
-- Offer lower starting wages to new hires
-- Reduce discretionary bonuses
-- Slow merit increases
+### 2.6 Population and hours projections
 
-### 2.3 Validation: Wage Elasticity Now Matches Literature
+`build_population_projection.m` reads `input/{CC}/align_popProjections.xlsx`, the projection SimPaths'
+population alignment uses (sheet `Population_projections`, or the sheet named by the country code), sums the
+population aged 15-64 over genders and regions for each year, and spreads each year's growth evenly over its
+quarters. It writes two files from that one growth path:
 
-| Metric | v7 (no ψ_wL) | v8 (ψ_wL only) | v12+ (ψ_wL + capital) | Target |
-|--------|-------------:|----------------:|----------------------:|--------|
-| Wage elasticity to L | ~0.008 | ~0.21 | **~0.40** | 0.2-0.4 |
-| L→w variance share | 0.002% | 0.02% | **0.02%** | Higher |
-| Log marginal likelihood | -712.88 | -709.18 | **-1042.44** | Improved |
+1. `population_projection_{Country}.csv` (`time,N`): employees from the handoff quarter on, anchored at $N$ in
+   the last row of the reference CSV. Java reads it as the planner's forward $N$, located by date
+   (contract 21).
+2. The rows of `data/demographic_L_{country}.csv` after the handoff quarter, anchored at $L^{demo}$ at the
+   handoff. `ramsey_trend` reads them for the in-sample $L$ trend after the handoff and for the forward $N$.
 
-**Notes:**
-- The v8 figure (~0.21) only reflected ψ_wL/(1−λ_w), before the capital extension. The v12+ total (~0.40) includes capital deepening and full GE feedback (see Section 9.7 for channel decomposition).
-- Log marginal likelihoods are not comparable across versions due to different observables and model structure.
+The two files are in different units (employees and labour force) but must imply the same log growth after the
+handoff; `verify_export_bundle` checks this. Because the rewritten rows of `demographic_L` start inside the
+estimation sample and the stacked solve is global, the projection reaches the in-sample trend and the
+detrended data. `run_full_workflow` therefore runs `ramsey_trend` a second time when step 0c changed
+`demographic_L`, and reports how far the anchor moved (`MULTI_COUNTRY_WORKFLOW.md`, "The population
+workbook's growth reaches the estimation sample").
 
-### 2.4 Literature Support for ψ_wL
+With the same projection on both sides, the planner's assumed $N$ and SimPaths' workers are comparable, and the
+yearly feedback measures a genuine labour-market gap. The planner's $N$ counts employees, SimPaths counts all
+workers; the feedback's level factor holds the employee share fixed (contract 16, `SimPaths_Coupling.md` §8.1).
 
-- **Borjas (2003):** Immigration elasticity -0.3 to -0.4 (US)
-- **Dustmann et al. (2017):** Immigration elasticity -0.13 to -0.25 (Germany)
-- **Calibration approach:** Standard in microsimulation coupling (Gomme 2012, Alarid-Escudero 2022)
+`hours_projection_{Country}.csv` (`time,h`, `projection_quarters + 1` rows from the handoff) is the forward
+solve's hours path, the log-linear trend, written by `internal/write_hours_projection.m` for both export paths.
+Java reads it and does not extend hours itself; a missing file fails the run.
+
+### 2.7 The SimPaths handoff
+
+SimPaths does not continue the in-sample solve. `ramsey_trend` solves a second, forward problem from the
+handoff quarter `projection_start` (default `2023q1`, `internal/resolve_projection_start.m`), which must be a
+quarter of the data file: capital and TFP at the handoff come from the in-sample solve, $N$ from its trend
+through the handoff and the population projection's growth after it, hours from the log-linear trend, the
+shares are held at their handoff values, and TFP growth converges from the handoff on. The horizon is
+`projection_quarters` (320, exported, contract 9) plus the terminal tail. The last row of
+`growth_model_reference_{country}.csv` is replaced by quarter 0 of this forward solve, so the reference ends
+exactly where Java's projection starts, and `growth_terminal_state.json` carries capital and TFP at the handoff,
+`handoff_time` and `projection_quarters`. Java solves the same forward problem from that state; the simulation
+start year must match the handoff quarter (contract 10).
+
+At runtime the trend wage of a simulated year is the percent change of the planner's annual-average hourly
+wage $(1-\alpha)Y/(Nh)$ relative to quarter 0 (`MacroModelManager.advanceRamseyTrend`).
 
 ---
 
-## 3. Intensive Margin (Hours) — from v7
+## 3. DSGE Cycle Layer
 
-### 3.1 Motivation
+### 3.1 Structure
 
-Previous versions (v1-v6) only modeled the **extensive margin** (employment n). However, German labor market adjustment happens significantly through hours:
+A linear (log-linearised) quarterly model with eight blocks:
 
-- **Kurzarbeit** (short-time work): Firms reduce hours instead of laying off workers
-- **Working time accounts**: Hours vary over the business cycle
-- **Part-time flexibility**: Hours respond to demand conditions
+| Block | Content | Variables |
+|---|---|---|
+| Supply | Production with capital, employment, hours and utilisation | `y`, `x`, `k`, `n`, `h` |
+| Demand | Consumption Euler equation with external habits; demand as consumption plus investment (Smets-Wouters 2003 decomposition) | `c`, `d`, `d_shock` |
+| Gap | Demand minus supply; enters production, marginal cost, vacancies and investment | `gap` |
+| Pricing | Hybrid New-Keynesian Phillips curve with indexation and a cost-push shock | `pi`, `mc` |
+| Policy | Taylor rule with smoothing | `R` |
+| Labour market | Search and matching: matches, tightness, employment, unemployment, vacancy posting | `m`, `theta`, `n`, `u`, `u_rate`, `v`, `L`, `sep_shock` |
+| Wages | Gertler-Trigari (2009) staggered Nash bargaining plus a direct labour-force term | `w_star`, `w` |
+| Capital | Capital accumulation and a reduced-form investment rule | `k`, `inv` |
 
-Adding hours allows the model to capture:
-1. How firms trade off between employment and hours adjustments
-2. The role of hours as a "shock absorber" in the German labor market
-3. More realistic dynamics of total labor input
+All variables are deviations from the trend (section 1.1). `y`, `c`, `inv`, `n`, `L`, `h` and the model-implied
+`w` are percent deviations; `pi` and `R` are annualised rates, in percentage points from their trends. The
+real wage is not an observable: `w` is what the model infers.
 
-### 3.2 Hours Equation Specification
+**States and jumps.** Dynare classifies a variable as a state when it appears with a lag. For the current
+template the states are `c`, `R`, `pi`, `w`, `v`, `n`, `h`, `x`, `L`, `k`, `inv`, `sep_shock`, `d_shock`, and the
+jumps `y`, `d`, `gap`, `w_star`, `u`, `u_rate`, `m`, `mc`, `theta` (`state_names` and `jump_names` in
+`model_info.json` are authoritative). Habits make `c` a state, indexation `pi`, wage stickiness `w`.
 
-The hours equation is a **pure AR(1) process** — hours are exogenous labour supply, moved by their own shock (at runtime only a scenario sets it; SimPaths sends nothing):
+### 3.2 Equations
 
-$$h_t = \rho_h \cdot h_{t-1} + \varepsilon^h_t$$
+As in `Macromodel_template.mod`, with its equation labels. Define the log marginal product of labour (written
+out in full in the model file wherever it appears)
 
-| Component | Parameter | Interpretation |
-|-----------|-----------|----------------|
-| **Persistence** | $\rho_h$ = 0.85 | Hours are sticky (adjustment costs, Kurzarbeit ~6 months) |
-| **Hours shock** | $\varepsilon^h_t$ | Kurzarbeit, policy changes, SimPaths labor supply |
+$$mpl_t \equiv x_t + \alpha_k k_{t-1} + (\alpha_n - 1)\,n_t + \alpha_n\omega_h h_t .$$
 
-**v9 Change:** Removed $\psi_{hy}$ (gap→h) and $\psi_{hw}$ (w→h) channels. SimPaths determines household labor supply via discrete choice; the DSGE takes h as given and computes equilibrium wages.
+Supply and hours:
 
-### 3.3 Production Function with Hours and Capital
+$$(1)\quad y_t = x_t + \alpha_k k_{t-1} + \alpha_n (n_t + \omega_h h_t) + \phi_{mc}\,gap_t$$
 
-Output now depends on capital (k), extensive (n) and intensive (h) margins:
+$$(2)\quad h_t = \rho_h h_{t-1} + \varepsilon^h_t$$
 
-$$y_t = x_t + \alpha_k \cdot k_{t-1} + \alpha_n \cdot (n_t + \omega_h \cdot h_t) + \phi_{mc} \cdot \text{gap}_t$$
+Demand:
 
-Where $\alpha_k$ = 0.35 (capital share), $\alpha_n$ = 0.65 (labor share), $\omega_h$ = 0.35 (hours contribution to output), and $\alpha_k + \alpha_n = 1.0$ (CRS).
+$$(2a)\quad c_t - hab\cdot c_{t-1} = (E_t c_{t+1} - hab\cdot c_t) - \frac{1}{\sigma}(R_t - E_t\pi_{t+1}) + d^{shock}_t$$
 
-### 3.4 Key Finding: Technology → Hours Negative Response
+$$(2b)\quad d_t = (1-s_{inv})\,c_t + s_{inv}\, inv_t \qquad (3)\quad gap_t = d_t - y_t$$
 
-**Observed behavior:** Technology shock causes hours to **fall** slightly (-0.05%).
+Pricing and policy:
 
-**Mechanism:**
-1. Technology ↑ → Productivity ↑ → Wages ↑ (strongly)
-2. Higher wages → Substitution toward leisure → Hours ↓
-3. But: Employment absorbs most adjustment (+2.7%)
-4. **Total labor input (n + h) still rises** ✓
+$$(4)\quad mc_t = (w_t - mpl_t) + \phi_{mc}\,gap_t$$
 
-**Interpretation for Germany:**
-- Productivity gains translate to **wage increases**, not more hours
-- Strong unions negotiate wage gains, not longer hours
-- Workers value leisure when wages rise (work-life balance culture)
-- Firms expand employment rather than extending hours
+$$(5)\quad \pi_t = \frac{\iota_p}{1+\iota_p\beta}\pi_{t-1} + \frac{\beta}{1+\iota_p\beta}E_t\pi_{t+1} + \frac{\lambda_p}{1+\iota_p\beta}\,mc_t + \varepsilon^p_t$$
 
-**This is economically sensible for the German labor market.**
+$$(6)\quad R_t = \rho_r R_{t-1} + (1-\rho_r)(\phi_\pi\pi_t + \phi_y y_t) + \varepsilon^r_t$$
 
-### 3.5 Hours Variance Decomposition
+Labour market:
 
-| Driver | Contribution | Interpretation |
-|--------|--------------|----------------|
-| **Hours shock (ε_h)** | **100%** | By design: h is pure AR(1) |
+$$(7)\quad m_t = \alpha_m u_t + (1-\alpha_m)\,v_t \qquad (8)\quad \theta_t = v_t - u_t$$
 
-**Key insight (v11b):** Hours are entirely driven by the hours-specific shock. This is by design — in the microsimulation coupling, SimPaths determines hours via household discrete choice, and the DSGE takes h as given.
+$$(9)\quad n_t = (1-\delta)\,n_{t-1} + \delta\, m_t - sep_t$$
 
----
+$$(10)\quad u_t = \frac{\chi_L}{\chi_u}L_t - \frac{\chi_n}{\chi_u}n_t \qquad (10b)\quad u^{rate}_t = \frac{\chi_n}{\chi_L}(L_t - n_t)$$
 
-## 3b. Capital Extension (Phase 2) ⭐ NEW in v10
+$$(11)\quad v_t = \rho_v v_{t-1} + (1-\rho_v)\left[(mpl_t - w_t) + \beta\lambda_w E_t(mpl_{t+1} - w_{t+1}) + \phi_{v,y}\,gap_t\right]$$
 
-### 3b.1 Motivation
+Wages:
 
-Previous versions (v1–v9) had no capital stock. This omitted a critical mechanism for long-run microsimulation coupling:
+$$(12a)\quad w^*_t = (1-\beta\lambda_w)\left[\eta\, mpl_t + (1-\eta)\,\kappa\,\theta_t\right] + \beta\lambda_w E_t w^*_{t+1}$$
 
-- **Capital deepening:** When labor force L declines over decades (demographic change), capital K adjusts only partially. The K/L ratio rises, boosting marginal product of labor (MPL) and wages.
-- **Investment dynamics:** Interest rate changes (monetary policy) affect capital formation, creating an additional transmission channel.
-- **Wage puzzle resolution:** Without capital, the model predicted near-zero wage response to labor supply changes. Capital deepening amplifies the wage effect.
+$$(12b)\quad w_t = \lambda_w w_{t-1} + (1-\lambda_w)\,w^*_t + \psi_{wL} L_t$$
 
-### 3b.2 Investment Rule
+Exogenous processes:
 
-Investment follows a **reduced-form rule** (not micro-founded via Tobin’s Q):
+$$(13)\quad x_t = \rho_a x_{t-1} + \varepsilon^a_t \qquad (14)\quad L_t = \rho_L L_{t-1} + \varepsilon^L_t$$
 
-$$\text{inv}_t = \rho_{inv} \cdot \text{inv}_{t-1} - \phi_{inv,r} \cdot R_t + \varepsilon^{inv}_t$$
+$$(14b)\quad d^{shock}_t = \rho_d d^{shock}_{t-1} + \varepsilon^d_t \qquad (15)\quad sep_t = \rho_{sep}\, sep_{t-1} + \varepsilon^{sep}_t$$
 
-| Component | Parameter | Posterior (v11b) | Interpretation |
-|-----------|-----------|:----------------:|----------------|
-| **Persistence** | $\rho_{inv}$ | 0.84 | Planning lags, adjustment costs |
-| **Cost of capital** | $\phi_{inv,r}$ | 0.21 | Higher R → lower investment |
-| ~~Accelerator~~ | ~~$\phi_{inv,y}$~~ | **DROPPED** | Data rejects (cosn = 0.9989 with ρ_inv) |
-| **Investment shock** | $\varepsilon^{inv}_t$ | σ = 3.32 | Construction, equipment cycles |
+Capital:
 
-**v11b Simplification:** The accelerator channel ($\phi_{inv,y} \cdot \text{gap}$) was dropped after estimation showed the posterior (0.085) collapsed relative to the prior (1.5), and it was near-perfectly collinear with $\rho_{inv}$ (cosn = 0.9989). The investment rule effectively becomes AR(1) + cost-of-capital.
+$$(K1)\quad k_t = (1-\delta_k)\,k_{t-1} + \delta_k\, inv_t$$
 
-### 3b.3 Capital Accumulation
+$$(K2)\quad inv_t = \rho_{inv}\, inv_{t-1} + \phi_{inv,y}\,gap_t - \phi_{inv,r} R_t + \varepsilon^{inv}_t$$
 
-$$k_t = (1 - \delta_k) \cdot k_{t-1} + \delta_k \cdot \text{inv}_t$$
+Equation (10) is the exact linearisation of $U = L - N$, whose coefficients are $\bar L/\bar U$ and
+$\bar N/\bar U$. It needs $\chi_u$ to be the unemployment-to-population share, $\chi_u = \chi_L - \chi_n$, not
+the U/L rate (contract 4). Equation (10b) gives the unemployment-rate gap, which is reported but not observed.
 
-With $\delta_k = 0.025$ (quarterly), capital has a half-life of ~7 years — appropriate for demographic transitions over 35 years.
+### 3.3 Shocks
 
-### 3b.4 Capital Deepening Mechanism
+| Innovation | Enters | Persistence |
+|---|---|---|
+| $\varepsilon^a$ technology | TFP $x$, eq. (13) | $\rho_a$ |
+| $\varepsilon^d$ demand/preference | $d^{shock}$, which shifts the Euler equation (2a) | $\rho_d$ |
+| $\varepsilon^r$ monetary policy | Taylor rule (6), i.i.d. | through the smoothing $\rho_r$ |
+| $\varepsilon^p$ cost-push | Phillips curve (5), i.i.d. | through indexation |
+| $\varepsilon^L$ labour force | $L$, eq. (14) | $\rho_L$ |
+| $\varepsilon^{sep}$ separation | $sep$, which lowers employment in (9) | $\rho_{sep}$ |
+| $\varepsilon^h$ hours | $h$, eq. (2) | $\rho_h$ |
+| $\varepsilon^{inv}$ investment | investment rule (K2), i.i.d. | through $\rho_{inv}$ |
 
-The key mechanism for the microsimulation interface:
-
-```
-L↓ → demand↓ → gap<0 → inv↓ → K↓ (slowly, via depreciation)
-But K falls LESS than L → K/L↑ → MPL↑ → w*↑ → w↑
-```
-
-Capital enters the production function ($\alpha_k \cdot k_{t-1}$), marginal cost, vacancy posting, and Nash bargaining — all channels through which K/L affects equilibrium wages.
-
-### 3b.5 Variance Decomposition for Investment ⭐ UPDATED in v15
-
-| Driver | Contribution |
-|--------|--------------|
-| **Investment shock (ε_inv)** | **72.4%** |
-| Cost-push (ε_p) | 13.6% |
-| Monetary (R channel) | 9.2% |
-| Demand | 3.3% |
-| Technology | 1.2% |
-
-**v15 Change:** Restoring the investment accelerator ($\phi_{inv,y} = 0.3$) dramatically reshapes investment variance decomposition. Investment is no longer 95.7% driven by its own shock — demand, monetary, and cost-push channels now explain 26.1% collectively. This reflects more realistic investment dynamics where aggregate conditions matter.
-
----
-
-## 4. Key Problem Solved in v6: Data Consistency
-
-### 4.1 The Problem
-
-In v5, labor market observables came from **inconsistent sources**:
-- `employees` (N) = Destatis domestic concept (ILO-consistent)
-- `pop_active` (L) = Destatis economically active population (ILO)
-- `u_rate` = **Bundesbank registered unemployment** ❌
-
-### 4.2 The Fix
-
-Switched to **ILO unemployment rate** calculated from Destatis components:
-
-```stata
-gen ur_ilo = (unemp_pers_ilo / pop_active) * 100
-```
-
-### 4.3 Model Fit Improvement (v5 → v6)
-
-| Metric | v5 (Registered UR) | v6 (ILO UR) | Change |
-|:-------|-------------------:|------------:|:-------|
-| Log Marginal Likelihood | -603.08 | -580.61 | **+22.5** |
-
----
-
-## 5. Key Problem Solved in v4: Output-Inflation Correlation
-
-### 5.1 The Problem
-
-Standard NK-DSGE models produce a **negative** output-inflation correlation:
-- Technology shock ↑ → output ↑, but marginal cost ↓ → inflation ↓
-- German data shows: corr(y, π) = **+0.18** (positive!)
-
-### 5.2 Structural Solution
-
-1. **Option C: Smets-Wouters C/I decomposition** ⭐ v12
-   - Consumption Euler: $c_t = E_t[c_{t+1}] - \frac{1}{\sigma}(R_t - E_t[\pi_{t+1}]) + \varepsilon^d_t$
-   - Demand aggregation: $d_t = (1 - s_{inv}) \cdot c_t + s_{inv} \cdot \text{inv}_t$
-   - This separates the interest rate channel on C vs I
-2. Added **cost-push shock** (eps_p) to NKPC directly ⭐ v12
-3. **Utilization channel**: `y = x + α_k·k(-1) + α_n·(n + ω_h·h) + φ_mc·gap`
-4. High vacancy sensitivity to demand gap: **φ_v_y = 5.0**
-
-**Result:** Model produces corr(y, π) = **+0.21** (positive, matching data +0.27) ✅
-
-**v12 Key Benefit:** Monetary shock share in output variance dropped from 56.3% (v11b) to **25.7%** — more realistic demand-driven dynamics. Cost-push shock now drives 77.4% of inflation variance (clean identification).
-
----
-
-## 6. Key Equations
-
-### 6.1 Supply Side
-
-**1. Production Function with Capital, Hours, and Utilization**
-
-$$y_t = x_t + \alpha_k \cdot k_{t-1} + \alpha_n \cdot (n_t + \omega_h \cdot h_t) + \phi_{mc} \cdot \text{gap}_t$$
-
-Capital enters as predetermined state $k_{t-1}$ (installed last period). $\alpha_k + \alpha_n = 1.0$ (CRS).
-
-### 6.2 Demand Side ⭐ RESTRUCTURED in v12 + Habit Extension in v14
-
-**2a. Consumption Euler Equation with External Habits** ⭐ v14
-
-$$c_t - hab \cdot c_{t-1} = (E_t[c_{t+1}] - hab \cdot c_t) - \frac{1}{\sigma}(R_t - E_t[\pi_{t+1}]) + d\_shock_t$$
-
-With $\sigma = 2.0$ and $hab=0.5$ (calibrated). For $hab=0$, this nests the v12 Euler equation. In v14, demand innovations enter via the AR(1) state `d_shock` rather than directly as white noise in Euler.
-
-**2b. Demand Aggregation** ⭐ v12
-
-$$d_t = (1 - s_{inv}) \cdot c_t + s_{inv} \cdot \text{inv}_t$$
-
-With $s_{inv} = 0.20$ (investment share of GDP). This Smets-Wouters-style C/I decomposition separates consumption and investment dynamics. Consumption is determined by the Euler equation; investment by the reduced-form investment rule.
-
-**3. Demand-Supply Gap**
-
-$$\text{gap}_t = d_t - y_t$$
-
-### 6.3 Pricing
-
-**4. Marginal Cost**
-
-$$mc_t = (w_t - MPL_t) + \phi_{mc} \cdot \text{gap}_t$$
-
-where $MPL_t = x_t + \alpha_k \cdot k_{t-1} + (\alpha_n - 1) \cdot n_t + \alpha_n \cdot \omega_h \cdot h_t$
-
-Capital deepening ($\uparrow k$) raises MPL, reducing marginal cost and putting downward pressure on inflation.
-
-**5. New Keynesian Phillips Curve with Cost-Push Shock and Inflation Indexation** ⭐ v12/v15
-
-$$\pi_t = \frac{\iota_p}{1+\iota_p \beta} \pi_{t-1} + \frac{\beta}{1+\iota_p \beta} E_t[\pi_{t+1}] + \frac{\lambda_p}{1+\iota_p \beta} \cdot mc_t + \varepsilon^p_t$$
-
-**v15 Change:** The NKPC now includes **backward-looking indexation** ($\iota_p = 0.35$, Smets-Wouters 2003). Firms that do not re-optimize their prices index them to last period's inflation rate. This introduces intrinsic inflation persistence through the $\pi_{t-1}$ term.
-
-**Key effects:**
-1. Dampens initial π response to cost-push shocks by factor $1/(1+\iota_p \beta) \approx 0.74$ (≈26% smaller on impact)
-2. Adds a backward-looking component that sustains inflation after shocks
-3. Reduces the estimated σ_p by 37% (2.26 → 1.43) — indexation provides intrinsic persistence that the pure forward-looking model attributed to shock volatility
-
-When $\iota_p = 0$ this nests the v14 purely forward-looking NKPC. When $\iota_p = 1$ it gives full indexation (Christiano et al. 2005).
-
-**v12 Change:** The cost-push shock $\varepsilon^p_t$ replaces the direct demand term ($0.40 \cdot \varepsilon^d_t$) used in v11b. This provides cleaner identification: demand shocks $\varepsilon^d_t$ now affect inflation only indirectly (through the consumption Euler → demand → gap → marginal cost channel), while $\varepsilon^p_t$ captures exogenous supply-side cost pressures (energy prices, imported inflation, cost markups).
-
-**6. Taylor Rule**
-
-$$R_t = \rho_r R_{t-1} + (1-\rho_r)(\phi_\pi \pi_t + \phi_y y_t) + \varepsilon^r_t$$
-
-### 6.4 Hours (Intensive Margin) ⭐ SIMPLIFIED in v9
-
-**7. Hours Equation (Pure AR(1))**
-
-$$h_t = \rho_h \cdot h_{t-1} + \varepsilon^h_t$$
-
-**v9 Change:** Hours are now **exogenous labor supply from SimPaths**. The ψ_hy (gap→h) and ψ_hw (w→h) channels were removed:
-- SimPaths determines household labor supply (discrete choice over hours)
-- DSGE takes h as given and computes equilibrium wages
-- Gap→h was a business cycle mechanism inappropriate for annual policy analysis
-
-### 6.5 Labor Market: Search and Matching
-
-**8. Matching Function (Cobb-Douglas)**
-
-$$m_t = \alpha_m u_t + (1-\alpha_m) v_t$$
-
-**9. Labor Market Tightness**
-
-$$\theta_t = v_t - u_t$$
-
-**10. Employment Dynamics**
-
-$$n_t = (1-\delta) n_{t-1} + \delta \cdot m_t - \text{sep\_shock}_t$$
-
-**11. Unemployment Identity**
-
-$$u_t = \frac{\chi_L}{\chi_u} L_t - \frac{\chi_n}{\chi_u} n_t$$
-
-This is the exact log-linearisation of $U = L - N$, whose coefficients are
-$\bar{L}/\bar{U}$ and $\bar{N}/\bar{U}$. It therefore requires $\chi_u$ to be the
-unemployment-to-*population* share, i.e. $\chi_u = \chi_L - \chi_n$, and **not**
-the U/L unemployment rate. The calibration files derive it accordingly.
-
-**11b. Unemployment Rate Gap (for observation)**
-
-$$u\_rate_t = \frac{\chi_n}{\chi_L} (L_t - n_t)$$
-
-**12. Vacancy Posting with High Demand Sensitivity**
-
-$$v_t = \rho_v v_{t-1} + (1 - \rho_v) \Big[(MPL_t - w_t) + \beta \lambda_w (MPL_{t+1} - w_{t+1}) + \phi_{v,y} \cdot \text{gap}_t\Big]$$
-
-where $MPL_t = x_t + \alpha_k \cdot k_{t-1} + (\alpha_n - 1) \cdot n_t + \alpha_n \cdot \omega_h \cdot h_t$. Capital deepening raises MPL, increasing expected profitability and encouraging vacancy posting.
-
-### 6.6 Wage Setting: Gertler-Trigari (2009) + Direct L Channel
-
-**13a. Reset Wage (Forward-Looking Nash Bargaining)**
-
-$$w^*_t = (1 - \beta \lambda_w) \cdot [\eta \cdot MPL_t + (1-\eta) \kappa \cdot \theta_t] + \beta \lambda_w \cdot E_t[w^*_{t+1}]$$
-
-Workers bargain over MPL including capital deepening: when K/L rises (demographic decline), MPL rises, pushing up the reset wage.
-
-**13b. Aggregate Wage with Direct Labor Force Effect** (v8)
-
-$$w_t = \lambda_w \cdot w_{t-1} + (1 - \lambda_w) \cdot w^*_t + \psi_{wL} \cdot L_t$$
-
-The **ψ_wL term** captures wage drift responding to labor market slack, bypassing the slow θ channel.
-
-### 6.7 Capital Equations ⭐ NEW in v10
-
-**K1. Capital Accumulation (Law of Motion)**
-
-$$k_t = (1 - \delta_k) \cdot k_{t-1} + \delta_k \cdot \text{inv}_t$$
-
-With $I/K = \delta_k$ in steady state, $\delta_k = 0.025$ quarterly (≈10% annual).
-
-**K2. Investment Rule (Reduced-Form)** ⭐ UPDATED in v15
-
-$$\text{inv}_t = \rho_{inv} \cdot \text{inv}_{t-1} + \phi_{inv,y} \cdot \text{gap}_t - \phi_{inv,r} \cdot R_t + \varepsilon^{inv}_t$$
-
-**v15 Change:** The accelerator term ($\phi_{inv,y} \cdot \text{gap}$) is **restored** at 0.3 (calibrated). While the data rejected this channel when estimated (v11b: cosn 0.9989 with $\rho_{inv}$), setting $\phi_{inv,y} = 0$ produced implausible results — investment would rise during negative demand shocks because the cost-of-capital channel (lower R from Taylor rule) dominated. Setting $\phi_{inv,y} = 0.3$ as a structural floor ensures investment co-moves with demand while keeping it small enough to avoid identification issues (calibrated, not estimated).
-
-### 6.8 Shock Processes
-
-**14. Technology (AR(1))** — FIXED at ρ_a = 0.95 (was hitting unit root in estimation)
-
-$$x_t = \rho_a x_{t-1} + \varepsilon^a_t$$
-
-**15. Labor Force (AR(1)) — INPUT FROM MICROSIMULATION**
-
-$$L_t = \rho_L L_{t-1} + \varepsilon^L_t$$
-
-**16. Demand/Preference Shock State (AR(1))** ⭐ v14
-
-$$d\_shock_t = \rho_d d\_shock_{t-1} + \varepsilon^d_t$$
-
-**17. Separation Shock (AR(1))**
-
-$$\text{sep\_shock}_t = \rho_{sep} \cdot \text{sep\_shock}_{t-1} + \varepsilon^{sep}_t$$
-
----
-
-## 7. Parameter Calibration (Current Germany Benchmark)
-
-### 7.1 Preferences & Technology
-
-| Parameter | Value | Description | Source/Rationale |
-|:----------|------:|:------------|:-----------------|
-| β (beta) | 0.99 | Quarterly discount factor | Standard; ~4% annual real rate |
-| **σ (sigma)** | **2.0** | **Inverse IES (calibrated)** | **NOT IDENTIFIED in estimation (mode drifts to boundary); calibrated to standard macro value** ⭐ v12 |
-| **hab** | **0.5** | **External habit persistence (calibrated)** | **Smets-Wouters range (0.5-0.7); kept fixed to avoid collinearity with demand shock scale** ⭐ v14 |
-| α_n (alpha_n) | 0.65 | Labor share in production | Destatis VGR: 60-65% |
-| **α_k (alpha_k)** | **0.35** | **Capital share in production** | **Destatis VGR; α_k + α_n = 1.0 (CRS)** |
-| **ω_h (omega_h)** | **0.43** | **Hours contribution to output** | **Estimated** ⭐ v12 |
-| **s_inv (s_inv)** | **0.20** | **Investment share of GDP** | **National accounts identity (Destatis VGR)** ⭐ v12 |
-
-### 7.2 Labor Market Structure
-
-| Parameter | Value | Description | Source/Rationale |
-|:----------|------:|:------------|:-----------------|
-| α_m (alpha_m) | 0.5 | Matching function elasticity | Petrongolo & Pissarides (2001) |
-| η (eta) | 0.5 | Worker bargaining power | Hosios efficiency condition |
-| **κ (kappa)** | **0.20** | Vacancy posting cost | **Shimer (2005): 0.20-0.50** ⭐ UPDATED |
-| δ (delta) | 0.025 | Quarterly separation rate | Current Germany benchmark: low turnover vs US (~0.10) |
-
-### 7.3 Hours Parameters (v9)
-
-| Parameter | Value | Status | Description |
-|:----------|------:|:-------|:------------|
-| **ρ_h** | **0.85** | **CALIBRATED** | Hours persistence (Kurzarbeit ~6 months) |
-| ~~ψ_hy~~ | — | **REMOVED** | ~~Hours response to output gap~~ |
-| ~~ψ_hw~~ | — | **REMOVED** | ~~Hours response to wages~~ |
-| **ω_h** | 0.36 | Estimated | Hours contribution to output |
-
-**v9 Rationale:** Hours are now pure AR(1) — SimPaths determines labor supply, DSGE computes equilibrium. The gap→h and w→h channels were business cycle mechanisms inappropriate for annual policy analysis where household discrete choice governs hours.
-
-### 7.4 Wage Response Parameter ⭐ NEW in v8
-
-| Parameter | Value | Description | Source/Rationale |
-|:----------|------:|:------------|:-----------------|
-| **ψ_wL** | **-0.05** | Direct L→w elasticity | Calibrated to match Borjas/Dustmann |
-
-**Calibration target:** Total GE wage elasticity ~0.40 (literature: 0.2-0.4; see Section 9.7 for decomposition)
-
-### 7.5 Monetary Policy (ECB)
-
-| Parameter | Value | Description | Source/Rationale |
-|:----------|------:|:------------|:-----------------|
-| φ_π (phi_pi) | 1.5 | Taylor rule inflation response | Standard Taylor principle |
-| φ_y (phi_y) | 0.125 | Taylor rule output response | Standard value |
-| ρ_r (rho_r) | 0.85 | Interest rate smoothing | ECB is quite persistent |
-
-### 7.6 Shock Persistence (v9–v11)
-
-| Parameter | Value | Description | Status |
-|:----------|------:|:------------|:-------|
-| **ρ_a (rho_a)** | **0.95** | Technology shock persistence | **CALIBRATED** (was hitting unit root) |
-| **ρ_L (rho_L)** | **0.95** | Labor force persistence | **CALIBRATED** (v9: collinear with σ_L) |
-| **ρ_h (rho_h)** | **0.85** | Hours persistence | **CALIBRATED** (v9: collinear with σ_h) |
-| ρ_v (rho_v) | 0.9 | Vacancy persistence | Fixed |
-| ρ_sep (rho_sep) | 0.8 | Separation shock persistence | Fixed |
-| ρ_d (rho_d) | 0.8 | Demand shock persistence | Fixed |
-| **ρ_inv (rho_inv)** | **0.85** | **Investment persistence** | **CALIBRATED (fixed at v11b posterior mode)** ⭐ v12 |
-
-**v9 Collinearity Fix:** ρ_h and ρ_L were perfectly collinear with their shock std devs (cosn > 0.99). Following Smets-Wouters (2007), persistence parameters with clear institutional interpretation are calibrated while shock variances are estimated.
-
-### 7.7 New Keynesian Parameters
-
-| Parameter | Value | Description | Source/Rationale |
-|:----------|------:|:------------|:-----------------|
-| **λ_p (lambda_p)** | **0.02** | Phillips curve slope | Pytlarczyk (2005), Hristov (2016) — very flat Germany benchmark |
-| **φ_mc (phi_mc)** | **1.0** | Gap sensitivity of marginal cost | Strengthens demand→π channel |
-| **φ_v_y (phi_v_y)** | **5.0** | Vacancy response to demand gap | Amplifies demand→n channel |
-| **ι_p (iota_p)** | **0.35** | **Inflation indexation** | **Smets-Wouters (2003) Euro area range; partial backward-looking NKPC** ⭐ v15 |
-
-### 7.8 Wage Rigidity (Gertler-Trigari 2009)
-
-| Parameter | Value | Description | Source/Rationale |
-|:----------|------:|:------------|:-----------------|
-| λ_w (lambda_w) | 0.75 | Calvo wage stickiness | Average duration = 4 quarters (1 year); Germany benchmark collective agreements |
-
-### 7.9 Steady State Labor Market (Current Germany Benchmark, 2023-2024)
-
-| Parameter | Value | Description | Source |
-|:----------|------:|:------------|:-------|
-| χ_L (chi_L) | 0.77 | Labor force share, L/pop | Destatis 2024 |
-| χ_n (chi_n) | 0.73 | Employment share, N/pop | Destatis 2024 |
-| χ_u (chi_u) | 0.04 | Unemployment **share**, U/pop — derived as χ_L − χ_n | Identity (see eq. 11) |
-
-The implied U/L unemployment rate is χ_u/χ_L = 5.2%. χ_u is *not* the ILO
-unemployment rate; entering that value here breaks eq. 11.
-
-### 7.10 Capital Extension Parameters ⭐ NEW in v10
-
-| Parameter | Value | Status | Description | Source/Rationale |
-|:----------|------:|:-------|:------------|:-----------------|
-| α_k (alpha_k) | 0.35 | Calibrated | Capital share in production | Destatis VGR; CRS with α_n |
-| δ_k (delta_k) | 0.025 | Calibrated | Quarterly depreciation (≈10% annual) | Standard |
-| **ρ_inv (rho_inv)** | **0.85** | **Calibrated** | Investment persistence | v12: fixed at v11b posterior mode; freed DOF for eps_p |
-| ~~φ_inv,y (phi_inv_y)~~ | **0.3** | **CALIBRATED** | **Accelerator channel (restored)** | **v15: Structural floor ensures demand co-movement; not estimated (cosn 0.9989 with ρ_inv)** ⭐ v15 |
-| **φ_inv,r (phi_inv_r)** | **0.23** | **Estimated** | Cost-of-capital channel | Higher R → lower investment |
-
----
-
-## 8. Estimated Parameters ⭐ UPDATED IN V15
-
-### 8.1 Bayesian Estimation Results
-
-The current benchmark model was estimated using Bayesian methods with 20,000 MCMC draws per chain (2 chains) on Germany data from 2000Q1 to 2024Q4, using **8 observables**: y, inv, c, π, R, n, L, h.
-
-**Shock Standard Deviations:**
-
-| Shock | Prior Mean | Prior Dist. | **Posterior Mean** | 90% HPD Interval |
-|:------|:----------:|:-----------:|-------------------:|:----------------:|
-| **σ_a (eps_a)** | 0.50 | Inv. Gamma | **0.94** | [0.77, 1.09] |
-| **σ_d (eps_d)** | 0.50 | Inv. Gamma | **0.37** | [0.32, 0.41] |
-| **σ_r (eps_r)** | 0.25 | Inv. Gamma | **0.53** | [0.46, 0.60] |
-| **σ_p (eps_p)** | 0.50 | Inv. Gamma | **1.43** | [1.27, 1.58] | ⭐ v15: ↓37% |
-| **σ_h (eps_h)** | 0.35 | Inv. Gamma | **0.41** | [0.35, 0.47] |
-| **σ_L (eps_L)** | 0.12 | Inv. Gamma | **0.13** | [0.10, 0.15] |
-| **σ_inv (eps_inv)** | 0.50 | Inv. Gamma | **3.26** | [2.85, 3.64] |
-
-**Structural Parameters:**
-
-| Parameter | Prior Mean | Prior Dist. | **Posterior Mean** | 90% HPD Interval |
-|:----------|:----------:|:-----------:|-------------------:|:----------------:|
-| **ω_h** | 0.35 | Beta | **0.43** | [0.26, 0.61] |
-| **φ_inv,r** | 0.50 | Gamma | **0.21** | [0.06, 0.34] |
-
-**v15 Key Changes:**
-- **Inflation indexation added** — Hybrid NKPC with $\iota_p = 0.35$ (calibrated, Smets-Wouters 2003); adds backward-looking $\pi_{t-1}$ component
-- **Investment accelerator restored** — $\phi_{inv,y} = 0.3$ (calibrated); ensures investment co-moves with demand gap
-- **σ_p dropped 37%** (2.26 → 1.43) — indexation provides intrinsic inflation persistence that previously required high shock volatility
-- **Log marginal likelihood improved +20.7** (−920.25 → −899.51; Bayes factor ~10⁹, overwhelming evidence for v15)
-- **Investment VD reshaped** — own shock drops from 95.7% to 72.4%; cost-push (13.6%), monetary (9.2%), demand (3.3%) gain shares via accelerator channel
-- **All other parameters virtually unchanged** — structural changes are additive, not disruptive
-- **Maximum collinearity 0.9785** — slight increase from v14's 0.93 (σ_r↔σ_p pair); still below 0.99 concern threshold
-
-### 8.2 Fixed Shock Standard Deviations
-
-| Shock | Value | Rationale |
-|:------|------:|:----------|
-| eps_sep | 0.08 | Separation (fixed at calibration) |
-
-### 8.3 Fixed Structural Parameters
-
-| Parameter | Value | Rationale |
-|:----------|------:|:----------|
-| ρ_a | 0.95 | Was hitting 0.9995 (unit root), causing singular Hessian |
-| **ρ_h** | **0.85** | **CALIBRATED**: Kurzarbeit ~6 months (collinear with σ_h) |
-| **ρ_L** | **0.95** | **CALIBRATED**: Demographic trends persistent (collinear with σ_L) |
-| **ρ_inv** | **0.85** | **CALIBRATED** (v12): Fixed at v11b posterior mode; freed DOF for eps_p estimation |
-| **σ (sigma)** | **2.0** | **CALIBRATED** (v12): Inverse IES / risk aversion. NOT IDENTIFIED — flat likelihood ridge along σ–ε_d direction. Two estimation attempts (prior modes 1.0, 2.0) both produced singular Hessians |
-| **s_inv** | **0.20** | **CALIBRATED** (v12): Investment share of GDP from German national accounts |
-| ψ_wL | -0.05 | Calibrated for microsim interface (Borjas/Dustmann target) |
-| **φ_inv,y** | **0.3** | **CALIBRATED** (v15): Restored as structural floor; ensures demand co-movement of investment. Not estimated (cosn 0.9989 with ρ_inv) |
-| **ι_p (iota_p)** | **0.35** | **CALIBRATED** (v15): Inflation indexation (Smets-Wouters 2003 Euro area range). Adds backward-looking NKPC component |
-
----
-
-## 9. Model Fit and Validation ⭐ UPDATED IN V15
-
-### 9.1 Model Fit Statistics
-
-| Statistic | v9 (6 obs) | v11b (7 obs, 10 params) | v14 (8 obs, 9 params) | **v15 (8 obs, 9 params)** |
-|:----------|----------:|-----------------------:|----------------------:|----------------------------:|
-| Log Marginal Likelihood (Laplace) | -641.18 | -904.97 | -920.25 | **-899.51** |
-| Log Marginal Likelihood (MHM) | -641.05 | -904.90 | -920.32 | **-899.53** |
-
-**Interpretation:** 
-- **v14 → v15: Log ML improved by +20.7** (Laplace). This corresponds to a Bayes factor of ~10⁹ — overwhelming evidence in favor of v15. The two structural changes (inflation indexation + investment accelerator) dramatically improve fit.
-- The improvement comes primarily from indexation: the backward-looking NKPC component provides intrinsic inflation persistence, allowing σ_p to drop 37% and reducing the model's reliance on large cost-push shocks to match inflation dynamics.
-- v11b → v13/v14: Log ML not directly comparable (different observable sets: 7 vs 8 variables)
-- All posterior diagnostics (convergence, identification) pass
-
-### 9.2 Identification Analysis ⭐ v15: 9/9 FULL
-
-All parameters pass identification tests:
-
-| Test | Rank | Status |
-|:-----|:----:|:-------|
-| **Moments (Iskrev 2010)** | 9/9 | ✅ FULL |
-| **Spectrum (Qu-Tkachenko 2012)** | 9/9 | ✅ FULL |
-| **Reduced-form (Tau)** | 9/9 | ✅ FULL |
-
-**Collinearity Patterns (v15):**
-
-| Parameter | Max cosn | Most Collinear With | Status |
-|:----------|:--------:|:--------------------|:-------|
-| σ_a | 0.810 | σ_p | ✅ OK |
-| σ_d | 0.804 | σ_a | ✅ OK |
-| σ_r | 0.979 | σ_p | ⚠️ Moderate |
-| σ_p | 0.979 | σ_r | ⚠️ Moderate |
-| σ_h | 0.201 | ω_h | ✅ OK |
-| σ_L | 0.207 | σ_a | ✅ OK |
-| σ_inv | 0.829 | φ_inv,r | ✅ OK |
-| ω_h | 0.201 | σ_h | ✅ OK |
-| φ_inv,r | 0.875 | σ_p | ✅ OK |
-
-**v15 Assessment:** **No problematic parameters detected.** Maximum cosn is 0.9785 (σ_r↔σ_p), which is moderate but below the 0.99 concern threshold. The slight increase from v14's maximum cosn of 0.93 is expected: indexation makes inflation more persistent, tightening the relationship between monetary and cost-push shock variances. Both remain well-identified.
-
-**Key improvement over v11b:**
-- The ρ_inv ↔ φ_inv,r near-singular collinearity (cosn = 0.9973 in v11b) is **resolved** by calibrating ρ_inv at its posterior mode (0.85)
-- Adding consumption data + cost-push shock provides cleaner separation of demand vs inflation dynamics
-
-**Collinearity resolution history:**
-- v9: cosn(ρ_h, σ_h) = 0.996, cosn(ρ_L, σ_L) = 0.991 → resolved by calibrating ρ_h, ρ_L
-- v11: cosn(ρ_inv, φ_inv,y) = 0.9989 → resolved by dropping φ_inv,y
-- v11b: cosn(ρ_inv, φ_inv,r) = 0.9973 → accepted (both identified)
-- v12/v14: max cosn 0.85–0.93 ✅
-- **v15: max cosn 0.9785** (σ_r↔σ_p) — moderate, economically interpretable, not problematic ✅
-
-### 9.3 Output-Inflation Correlation
-
-| Source | corr(y, π) |
-|:-------|:----------:|
-| **Model** | **+0.246** |
-| **Data** | **+0.272** |
-
-✅ Model produces positive correlation, matching data well (v15: slight improvement over v14's 0.247).
-
-### 9.4 IRF Sign Checks ⭐ ALL 13 PASS in v15
-
-| Check | IRF(0) | Status |
-|:------|-------:|:-------|
-| Technology: y should rise | +0.48 | ✅ PASS |
-| Technology: π should fall | −0.20 | ✅ PASS |
-| Technology: h should rise | 0.00 | ✅ PASS (h is exogenous) |
-| Demand: y should rise | +0.58 | ✅ PASS |
-| Demand: π should rise | +0.09 | ✅ PASS |
-| Monetary: y should fall | −0.52 | ✅ PASS |
-| Monetary: R should rise | +0.49 | ✅ PASS |
-| Hours: h should rise | +0.41 | ✅ PASS |
-| Hours: y should rise | +0.06 | ✅ PASS |
-| Separation: n should fall | −0.065 | ✅ PASS |
-| Separation: u_rate should rise | +0.062 | ✅ PASS |
-| **Cost-push: π should rise** | **+1.80** | ✅ PASS | ⭐ v15: ↓16% from v14 (2.16) due to indexation dampening |
-| **Cost-push: y should fall** | **−0.43** | ✅ PASS |
-
-**v15 Note:** The cost-push inflation impact response dropped from +2.16 to +1.80 (≈16% reduction). This is the expected 1/(1+iota_p×beta) ≈ 0.74 dampening factor from indexation. Demand shock π response also decreased slightly (+0.10 → +0.09). All signs remain correct.
-
-### 9.5 Variance Decomposition (Posterior) ⭐ UPDATED in v15
-
-| Variable | eps_a (tech) | eps_d (demand) | eps_r (monetary) | eps_p (cost-push) | eps_L (labor) | eps_sep | eps_h (hours) | eps_inv (invest) |
-|:---------|-------------:|---------------:|-----------------:|------------------:|--------------:|--------:|--------------:|-----------------:|
-| y | **42.8%** | 13.1% | 14.4% | 20.3% | 0.2% | 0.1% | 0.1% | 9.1% |
-| inv | 1.2% | 3.3% | 9.2% | 13.6% | 0.0% | 0.3% | 0.0% | **72.4%** |
-| **c** | 19.5% | **24.6%** | 22.3% | 30.8% | 0.1% | 0.2% | 0.0% | 2.7% |
-| π | 12.1% | 1.1% | 1.6% | **83.6%** | 0.1% | 0.1% | 0.0% | 1.5% |
-| R | 21.4% | 5.8% | **31.2%** | 38.5% | 0.1% | 0.1% | 0.0% | 2.8% |
-| n | 0.8% | 5.5% | 6.7% | 10.0% | **38.0%** | **37.5%** | 0.0% | 1.4% |
-| L | 0.0% | 0.0% | 0.0% | 0.0% | **100%** | 0.0% | 0.0% | 0.0% |
-| **h** | 0.0% | 0.0% | 0.0% | 0.0% | 0.0% | 0.0% | **100%** | 0.0% |
-
-**v15 Key Findings:**
-- **Output (y): 42.8% technology, 20.3% cost-push** — v15 reshuffles output drivers: technology recovers primacy (was 8.3% in v12, now 42.8%), while cost-push gains a major share (20.3%). Demand drops from 64.4% to 13.1%, reflecting more balanced attribution
-- **Investment (inv): 72.4% from eps_inv** — down from 95.7% (v14) due to restored accelerator ($\phi_{inv,y}=0.3$). Cost-push (13.6%), monetary (9.2%), and demand (3.3%) now contribute meaningfully — investment co-moves with aggregate conditions
-- **Consumption (c): More diversified** — technology (19.5%), cost-push (30.8%), demand (24.6%), monetary (22.3%). Broader driver base than v14's demand-dominated 71.7%
-- **Inflation (π): 83.6% cost-push** — remains clearly cost-push driven (up from 77.4% in v14); indexation provides persistence without altering primary driver
-- **Employment (n): Balanced** — labor force (38.0%) and separation (37.5%) are co-dominant, with cost-push (10.0%) gaining a meaningful share via the accelerator channel
-- **Hours (h): 100% from eps_h** — by design, h is pure AR(1) (exogenous)
-- **Labor force (L): 100% from eps_L** — by design, L is pure AR(1) (exogenous)
-
-### 9.6 Moment Comparison ⭐ UPDATED IN V15
-
-| Variable | Data Std | Model Std | Data AC1 | Model AC1 |
-|:---------|:--------:|:---------:|:--------:|:---------:|
-| y | 1.55% | 1.45% | 0.87 | 0.91 |
-| **inv** | **5.11%** | **4.92%** | **0.76** | **0.77** |
-| **c** | **1.01%** | **1.07%** | **0.79** | **0.88** |
-| π | 2.25% | 2.16% | 0.62 | 0.63 |
-| R | 1.81% | 1.78% | 0.98 | 0.98 |
-| n | 0.67% | 0.57% | 0.93 | 0.98 |
-| L | 0.30% | 0.25% | 0.82 | 0.95 |
-| h | 0.81% | 0.71% | 0.78 | 0.90 |
-
-**v15 Fit Assessment:**
-- Output volatility: σ(y) = 1.45% vs data 1.55% ✓ (excellent)
-- Investment volatility: σ(inv) = 4.92% vs data 5.11% ✓ (excellent)
-- **Consumption volatility: σ(c) = 1.07% vs data 1.01%** ✓ (**dramatically improved** from v14's 1.66% — indexation + accelerator redirect variance away from consumption)
-- Inflation: σ(π) = 2.16% vs data 2.25% ✓; AC1 = 0.63 vs data 0.62 ✓ (indexation slightly improves autocorrelation match)
-- Employment: σ(n) = 0.57% vs data 0.67% ✓ (good)
-- Hours: σ(h) = 0.71% vs data 0.81% ✓ (good)
-- Output-inflation correlation: 0.246 vs data 0.272 ✓ (positive, close)
-
-### 9.7 Wage Elasticity to Labor Force ⭐ UPDATED in V13
-
-| Metric | v7 (no ψ_wL) | v8 (ψ_wL only) | v12+ (ψ_wL + capital) | Target |
-|--------|-------------:|----------------:|----------------------:|--------|
-| Total long-run elasticity | ~0.008 | ~0.21 | **~0.40** | 0.2-0.4 |
-| 1% ↑L → Δw (long run) | ~0.01% | ~0.21% | **~0.40%** | 0.20-0.40% |
-
-**Channel decomposition** (permanent 1% L increase, full GE steady state):
-
-| Channel | Elasticity | Share |
-|---------|-----------|-------|
-| Structural (MPL + bargaining) | −0.31 | ~77% |
-| — Diminishing returns to labor (net of K adjustment) | −0.13 | |
-| — Tightness θ → w* | −0.01 | |
-| Direct ψ_wL (GE-adjusted) | −0.09 | ~23% |
-| **Total** | **−0.40** | 100% |
-
-**Key insights:**
-- The v8 estimate of "~0.21" only reflected ψ_wL/(1−λ_w) = −0.05/0.25 = −0.20, before the capital extension was added.
-- Capital deepening **moderates** (not amplifies) the wage decline: when L↑, K also rises via y↑ → R↓ → inv↑, partially offsetting diminishing returns. Without K, the structural channel would be ~−0.35 instead of ~−0.31.
-- GE feedback shrinks the ψ_wL effect from −0.20 (partial equilibrium) to −0.09: lower wages boost firm profits → more vacancies → more employment → partially counteracts wage decline.
-- The −0.40 total sits at the upper end of the Borjas (2003) range (−0.3 to −0.4) and above the Dustmann et al. (2017) Germany-specific estimate (−0.13 to −0.25). This is a conservative choice — better to slightly overshoot than have near-zero response as in v7.
-- In dynamic yearly operation, short-run impact elasticities are smaller than long-run values because of wage stickiness and capital adjustment frictions.
-- Verification script: `check_wage_elasticity.m` (run after estimation with `oo_` in workspace).
-
----
-
-## 10. Estimation Setup
-
-### 10.1 Observable Variables (8 observables) ⭐ UPDATED in v13
+The `varexo` block of the template fixes the shock order (`eps_a`, `eps_r`, `eps_d`, `eps_p`, `eps_L`,
+`eps_sep`, `eps_h`, `eps_inv`); nothing downstream indexes shocks by position, Java reads
+`shock_indices_java` from `model_info.json` (contract 22). In `shock_params.csv` the `rho` column holds, for
+each shock, the persistence parameter of the equation it enters (`rho_r` for `eps_r`, `rho_inv` for `eps_inv`,
+0 for `eps_p`); the runtime dynamics come from `policy_A.csv` alone.
+
+### 3.4 Parameters
+
+| Parameter | Role | Status |
+|---|---|---|
+| $\beta$, $\sigma$, $hab$ | Discount factor, inverse IES, external habit | calibrated |
+| $\alpha_n$, $\alpha_k$ | Labour and capital elasticities of output | calibrated |
+| $\omega_h$ | Weight of hours in labour input | **estimated** |
+| $\phi_{mc}$ | Gap in production (utilisation) and in marginal cost | calibrated |
+| $s_{inv}$ | Investment share of demand | calibrated |
+| $\lambda_p$, $\iota_p$ | Phillips-curve slope, price indexation | calibrated |
+| $\phi_\pi$, $\phi_y$, $\rho_r$ | Taylor rule | calibrated |
+| $\alpha_m$, $\eta$, $\kappa$, $\delta$ | Matching elasticity, worker bargaining power, vacancy cost, separation rate | calibrated |
+| $\rho_v$, $\phi_{v,y}$ | Vacancy persistence, vacancy response to the gap | calibrated |
+| $\lambda_w$ | Share of wages not renegotiated in a quarter | calibrated |
+| $\psi_{wL}$ | Direct labour-force effect on the wage | calibrated |
+| $\chi_L$, $\chi_u$, $\chi_n$ | Labour-force, unemployment and employment shares of working-age population; $\chi_n = \chi_L - \chi_u$ | calibrated, $\chi_n$ derived |
+| $\delta_k$, $\rho_{inv}$, $\phi_{inv,y}$ | Depreciation, investment persistence, accelerator | calibrated |
+| $\phi_{inv,r}$ | Cost-of-capital effect on investment | **estimated** |
+| $\rho_a$, $\rho_d$, $\rho_L$, $\rho_h$, $\rho_{sep}$ | Persistence of the exogenous processes | calibrated |
+| $\sigma_a$, $\sigma_d$, $\sigma_r$, $\sigma_p$, $\sigma_L$, $\sigma_h$, $\sigma_{inv}$ | Shock standard deviations | **estimated** |
+| $\sigma_{sep}$ | Separation-shock standard deviation | calibrated |
+
+Calibrated values are in `country_params/{Country}_calibration.mod`, with the source of each value in its
+comment; the estimation file also lists, next to each prior that is commented out, why that parameter is
+calibrated (not identified, mode at a bound). The estimated set is the same in all five countries. Posterior
+modes are in the frozen model, the shock standard deviations also in `shock_params.csv` (section 1.3).
+
+### 3.5 Design choices
+
+- **Staggered wages.** Each quarter only a share $1-\lambda_w$ of wages is renegotiated, at the forward-looking
+  reset wage (12a), so the aggregate wage responds sluggishly to productivity and tightness and employment and
+  vacancies move more: the mechanism Gertler and Trigari (2009) propose for the volatility puzzle of Shimer
+  (2005).
+- **Direct labour-force effect on the wage ($\psi_{wL}$).** In the search-and-matching block a change in the
+  labour force reaches the wage only through $u \to \theta \to w^* \to w$, and wage stickiness slows the last
+  step further. $\psi_{wL}$ gives an immediate response, read as wage drift: entry wages, bonuses and merit
+  increases respond to slack outside formal bargaining. It is calibrated with the literature on the wage
+  effects of labour-supply shocks in mind (Borjas 2003; Dustmann et al. 2017; see `Germany_calibration.mod`).
+  Since the DSGE takes no input from SimPaths, at runtime it acts only on labour-force shocks a scenario sets.
+- **Hours are a pure AR(1).** Hours respond to no other variable of the model; only $\varepsilon^h$ moves
+  them, and they enter production and, through $mpl$, marginal cost, vacancy posting and bargaining. The DSGE
+  has no hours choice; on the micro side SimPaths' household choice sets hours.
+- **Calibrated persistence of the labour force and hours.** With $L$ and $h$ observed AR(1) processes,
+  $\rho_L$ and $\rho_h$ are collinear with their innovation standard deviations, so the persistence is
+  calibrated and the standard deviation estimated. The frozen model and the bundle carry these calibrated
+  values (contract 37).
+- **Investment accelerator ($\phi_{inv,y}$).** Without it, a negative demand shock lowers $R$ through the
+  Taylor rule and investment rises in a downturn. A small calibrated accelerator makes investment co-move with
+  demand. It is not estimated because it is collinear with $\rho_{inv}$, which is calibrated for the same
+  reason with respect to $\phi_{inv,r}$.
+- **Indexation and habits.** $\iota_p$ adds a backward-looking term to the Phillips curve and $hab$ to the
+  Euler equation, giving inflation and consumption intrinsic persistence (Smets and Wouters 2003).
+- **Unemployment shares.** $\chi_L$ and $\chi_u$ (the sample-mean ILO rate times $\chi_L$) are calibrated and
+  $\chi_n$ derived, because $\chi_L$ and $\chi_n$ are two large, similar numbers whose difference amplifies
+  rounding (`Poland_calibration.mod`; `test_calibration_identities.m`). $\chi_n$ is total employment while the
+  observable `n` counts employees; the calibration assumes self-employment moves with employees (contract 16).
+
+### 3.6 Observables and estimation
 
 ```dynare
-varobs y inv c pi R n L h;  // v12: added c (8th observable)
+varobs y inv c pi R n L h;
 ```
 
-| Observable | Description | Data Source | Transformation |
-|:-----------|:------------|:------------|:---------------|
-| y | Output gap | Destatis GDP | Ramsey detrended (log gap) |
-| **inv** | **Investment gap** | **Destatis VGR** | **Ramsey detrended (log gap)** |
-| **c** | **Consumption gap** | **Destatis VGR** | **Ramsey detrended (log gap)** ⭐ v12 |
-| pi | Inflation | Eurostat HICP | QoQ annualized: `400 * (P_t / P_{t-1} - 1)` |
-| R | Interest rate | ECB 3m Euribor | Level (%) |
-| n | Employment gap | Destatis (domestic concept) | Ramsey-consistent structural trend gap |
-| L | Labor force gap | Destatis (ILO) | Demographic-trend gap (Ramsey pipeline) |
-| h | Hours per worker gap | Destatis | Trend gap (log-linear hours trend) |
+Eight observables (section 2.5) from `data/data_for_dynare_{Country}.csv`, the datafile named by `@#define
+datafile` in the country estimation file. Eight structural shocks plus a measurement error on each observable,
+whose standard deviations are calibrated in the estimation file.
 
-**v12 Change:** Added **c** as 8th observable:
-- **Rationale:** Consumption data identifies the Euler equation parameters and pins down the demand-side decomposition (c vs inv)
-- **System:** 8 observables, 8 shocks → just-identified without measurement errors
-- **Note:** σ (inverse IES) is NOT identified from consumption data alone — flat likelihood ridge along σ–ε_d direction requires calibration
+The template's estimation setup, the same for every country: `identification(advanced=1, max_dim_cova_group=3)`
+(rank tests of Iskrev 2010 and Qu and Tkachenko 2012), then `estimation` with `prefilter=1`, `mode_compute=4`,
+`mode_check`, `diffuse_filter`, `lyapunov=doubling`, two Metropolis-Hastings chains of 20,000 draws with the
+first half dropped, Bayesian IRFs, the smoother and `moments_varendo`. Priors: beta for $\omega_h$, gamma for
+$\phi_{inv,r}$, inverse gamma for the seven shock standard deviations, with country-specific means and standard
+deviations in `{Country}_estimation.mod`.
 
-### 10.2 Estimated vs Fixed Parameters ⭐ UPDATED in v15
+`generate_frozen_model.m` turns the estimate into `Macromodel_{Country}_frozen.mod`: it inlines the wrapper,
+the template and the two country files, switches estimation off, and replaces each estimated parameter and
+shock standard deviation by its posterior mode (`oo_.posterior_mode`). Every substitution must match exactly
+once or the script fails (contract 7). The frozen model is generated, never edited, and is the model the bundle
+is exported from.
 
-**Estimated (9 parameters):**
-
-| Parameter | Prior | Distribution | Posterior |
-|:----------|:-----:|:-------------|:---------:|
-| σ_a | 0.50 | Inv. Gamma(0.5, 0.2) | **0.94** |
-| σ_d | 0.50 | Inv. Gamma(0.5, 0.2) | **0.37** |
-| σ_r | 0.25 | Inv. Gamma(0.25, 0.1) | **0.53** |
-| **σ_p** | **0.50** | **Inv. Gamma(0.5, 0.2)** | **1.43** | ⭐ v15: ↓37% |
-| σ_h | 0.35 | Inv. Gamma(0.35, 0.1) | **0.41** |
-| σ_L | 0.12 | Inv. Gamma(0.12, 0.05) | **0.13** |
-| σ_inv | 0.50 | Inv. Gamma(0.5, 0.2) | **3.26** |
-| ω_h | 0.35 | Beta(0.35, 0.1) | **0.43** |
-| φ_inv,r | 0.50 | Gamma(0.5, 0.25) | **0.21** |
-
-**v12 Changes to estimation set:**
-- **Added σ_p** — cost-push shock std dev (replaces rho_inv's slot)
-- **Removed ρ_inv** — calibrated at 0.85 (v11b posterior mode); freed degree of freedom for σ_p
-
-**Fixed at calibration:**
-- ρ_a = 0.95 (was hitting unit root at 0.9995)
-- ρ_h = 0.85 (Kurzarbeit ~6 months; collinear with σ_h)
-- ρ_L = 0.95 (demographic persistence; collinear with σ_L)
-- **ρ_inv = 0.85** (v12: calibrated at v11b posterior mode; freed DOF for σ_p)
-- σ_sep = 0.08 (fixed at calibration)
-- **σ = 2.0** (v12: inverse IES, NOT IDENTIFIED — flat likelihood ridge)
-- **s_inv = 0.20** (v12: investment share from national accounts)
-- ψ_wL = -0.05 (calibrated for microsim interface)
-- κ = 0.20 (Shimer 2005 literature)
-- **φ_inv,y = 0.3** (v15: restored as structural floor for demand co-movement; not estimated due to cosn 0.9989 with ρ_inv)
-- **ι_p = 0.35** (v15: inflation indexation, Smets-Wouters 2003)
-- All other structural parameters
-
-**v12 Simplification:** Calibrated ρ_inv from estimation:
-- Fixed at v11b posterior mode 0.85 (was estimated at 0.84 ± [0.77, 0.93])
-- This resolved the near-singular cosn(ρ_inv, φ_inv,r) = 0.9973 collinearity
-- Freed one degree of freedom → used for σ_p (cost-push shock) estimation
-- Investment rule becomes: `inv = 0.85 * inv(-1) + 0.3 * gap - φ_inv,r * R + eps_inv` (v15: with restored accelerator)
-
-### 10.3 Data File
-
-Real country data: `data_for_dynare_{COUNTRY}.csv`
-- Sample: 2000Q1-2024Q4 (101 observations, 6 censored for COVID)
-- COVID period (2020Q1-2021Q2) censored as NaN
-- `data_for_dynare_{COUNTRY}.csv` is generated by `ramsey_trend.m` from level inputs (`data_for_dynare_levels_{COUNTRY}.csv`)
-- **inv: Investment** (Ramsey-detrended log gap, gross fixed capital formation) ⭐ v10
-- L: Labor force gap relative to demographic trend (ILO definition)
-- u_rate: Implied by identity, not directly observed
-- Hours: Destatis hours worked per employed person
+`postestimation_analysis.m` writes posterior means and 90% HPD intervals, the marginal data density, the
+identification results, variance decompositions, IRFs, simulated against observed moments and the output-
+inflation correlation to `Macromodel_{Country}/Output/postestimation_summary.txt`,
+`Macromodel_{Country}/Output/DSGE_Estimation_Report.pdf` and `Macromodel_{Country}/graphs/Fig*.png`, and a
+summary to `output/documentation_data/dsge/dsge_postestimation_{Country}.json`, from which the LaTeX
+documentation's tables are rendered.
 
 ---
 
-## 11. Impulse Response Analysis
+## 4. Shock Units and the Annual Step
 
-### 11.1 Technology Shock (ε_a)
+One rule for every shock (contract 3):
 
-| Variable | Response | Mechanism |
-|----------|----------|-----------|
-| Output (y) | ↑↑ (+0.48) | Supply expansion + utilization |
-| Inflation (π) | ↓ (−0.20) | Lower marginal costs (dampened by indexation) |
-| Interest Rate (R) | ↓ | Taylor rule responds to low inflation |
-| Employment (n) | ↑↑ | Stronger due to wage rigidity |
-| Hours (h) | 0 | Exogenous (pure AR(1)) |
-| Investment (inv) | ↑ | Higher MPL → more profitable investment |
-| Wages (w) | ↑ slowly | Only 25% renegotiate per quarter |
+- A scenario sets innovations in **standard-deviation units**: 1.0 is a one-σ shock, for `eps_L` and `eps_h` as
+  for the others. SimPaths sends none.
+- `DSGEModel.stepQuarterly` multiplies each by its σ from `shock_params.csv` exactly once, then applies the
+  policy matrices: $s_t = A s_{t-1} + B_s\varepsilon_t$, $y_t = C s_{t-1} + D\varepsilon_t$, with $s$ the
+  states and $y$ the jumps.
+- `policy_Bs.csv` and `policy_D.csv` hold Dynare's raw `ghu` derivatives; no σ is built into them. This
+  matches Dynare's impulse responses, $IRF(y,\varepsilon_j,0) = ghu(y,\varepsilon_j)\,\sigma_j$; the exported
+  `irfs_eps_*.csv` are one-σ responses, and `DSGEIrfParityTest` and `CommittedBundlesTest` replay them through
+  the Java model.
+- The labour force and hours follow their AR(1) at the calibrated $\rho_L$, $\rho_h$, carried in `policy_A.csv`
+  like every other exogenous process. A shock repeated every quarter accumulates towards $1/(1-\rho)$ times its
+  one-quarter effect and can trip the stability bound `mm_dsgeMaxStateDeviation` (default 10, in the model's
+  units).
+- `model_info.json` declares `deviation_scale = 100`: the model is in 100 × log-deviation units, so the wage
+  deviation is a percent. The exporter checks the datafile's scale before writing anything, and Java refuses a
+  bundle that lacks the key or declares another value (contract 1).
 
-### 11.2 Demand Shock (ε_d) ⭐ UPDATED in v15
+**Scenario files.** `_macroScenario_*.csv` in the bundle folder, named by `mm_dsgeShockScenario`, with columns
+`year`, `quarter` and any of the shock names (matched case-insensitively). Missing columns and quarters are
+zero, a duplicated quarter is an error, and each row applies in its own quarter only; persistence then works
+through the state dynamics. They are written by hand; no exporter writes them.
 
-| Variable | Response | Mechanism |
-|----------|----------|-----------|
-| Output (y) | ↑↑ (+0.58) | Demand expansion via consumption Euler equation |
-| Consumption (c) | ↑↑ | Direct shock to Euler equation |
-| Inflation (π) | ↑ small (+0.09) | **Indirect only**: via marginal cost → NKPC (dampened by indexation) |
-| Interest Rate (R) | ↑ | Taylor rule responds to y↑ and π↑ |
-| Employment (n) | ↑ | Via vacancy channel (high φ_v_y) |
-| Hours (h) | 0 | Exogenous |
-| Investment (inv) | ↓ | R rises → cost of capital increases (partially offset by φ_inv,y accelerator) |
-| Wages (w) | ↑ gradually | Tight market, but sticky adjustment |
-
-**v12 Change:** Demand shock now enters only the consumption Euler equation (not the NKPC). The inflation response is small (+0.09) because demand only affects prices indirectly through the output gap → marginal cost channel. **v15:** Indexation slightly dampens the inflation impact but the sign and channel remain the same.
-
-### 11.3 Monetary Policy Shock (ε_r)
-
-| Variable | Response | Mechanism |
-|----------|----------|-----------|
-| Output (y) | ↓↓ (−0.52) | Demand contraction via IS curve |
-| Inflation (π) | ↓ | Output gap reduces cost pressure |
-| Interest Rate (R) | ↑ (+0.49) | Direct shock effect |
-| Employment (n) | ↓ | Firms reduce hiring (sticky wages = costly) |
-| Hours (h) | 0 | Exogenous |
-| Investment (inv) | ↓↓ | Cost of capital rises (φ_inv,r channel) |
-| Wages (w) | Small ↓ | Wage rigidity limits adjustment |
-
-### 11.4 Hours Shock (ε_h)
-
-| Variable | Response | Mechanism |
-|----------|----------|-----------|
-| Hours (h) | ↑↑ (+0.41) | Direct shock effect |
-| Output (y) | ↑ (+0.06) | More hours → more output |
-| Employment (n) | − small | Some substitution with hours |
-| Wages (w) | − small | Slightly higher labor supply |
-| Inflation (π) | ↑ small | Demand effect |
-
-### 11.5 Investment Shock (ε_inv) ⭐ NEW in v10
-
-| Variable | Response | Mechanism |
-|----------|----------|-----------|
-| Investment (inv) | ↑↑ | Direct shock effect |
-| Capital (k) | ↑ gradual | Capital accumulates via law of motion |
-| Output (y) | ↑ | Higher capital → higher production |
-| Employment (n) | ↑ small | Complementarity with capital |
-| Wages (w) | ↑ small | Higher MPL from capital deepening |
-| Inflation (π) | Small | Limited price effect |
-
-### 11.6 Cost-Push Shock (ε_p) ⭐ UPDATED in v15
-
-| Variable | Response | Mechanism |
-|----------|----------|-----------|
-| Inflation (π) | ↑↑ (+1.80) | Direct entry in NKPC (dampened by 1/(1+ι_p×β) ≈ 0.74 from indexation) |
-| Output (y) | ↓ (−0.43) | Taylor rule tightens → IS contraction |
-| Consumption (c) | ↓ | R rises → Euler equation drives c down |
-| Interest Rate (R) | ↑ | Taylor rule responds to π↑ |
-| Employment (n) | ↓ small | Reduced output → less hiring |
-| Hours (h) | 0 | Exogenous |
-| Investment (inv) | ↓ | Higher R → cost of capital (amplified by negative gap via φ_inv,y) |
-| Wages (w) | ↓ small | Reduced labor demand |
-
-**Interpretation:** The cost-push shock creates a classic supply-side inflation scenario: prices rise while output falls (stagflation). This cleanly separates from demand-driven inflation where both y and π rise together. In v15, eps_p explains 83.6% of inflation variance — the dominant inflation driver.
-
-**v15 Change:** The inflation impact response decreased from +2.16 (v14) to +1.80 (≈16% reduction), consistent with the theoretical $1/(1+\iota_p \beta)$ dampening factor. However, the backward-looking component sustains inflation persistence after the shock, so cumulative effects are similar. The lower σ_p (1.43 vs 2.26) means a 1σ shock is smaller in absolute terms.
-
-### 11.7 Labor Force Shock (ε_L) — **KEY MICROSIM INTERFACE**
-
-| Variable | Response | Mechanism |
-|----------|----------|-----------|
-| Labor Force (L) | ↑ | Exogenous input from microsim |
-| Unemployment (u) | ↑↑ | More seekers than jobs initially |
-| Employment (n) | ↑ (gradual) | Matching takes time |
-| **Hours (h)** | Small response | Limited interaction |
-| **Wages (w)** | **↓ immediately** | **ψ_wL channel + θ channel** ⭐ ENHANCED |
-| Output (y) | ↑ | More workers → more production |
-
-**v8 Enhancement:** The ψ_wL term provides **immediate wage response** to labor force shocks, bypassing the slow θ channel. Combined with capital deepening (v10+), total long-run elasticity is **~0.40** (vs ~0.008 in v7). See Section 9.7 for channel decomposition.
-
-### 11.8 Summary Table: Shock Responses ⭐ UPDATED in v15
-
-| Shock | y | c | π | R | n | h | u | v | w | inv | k |
-|-------|---|---|---|---|---|---|---|---|---|-----|---|
-| **Technology** ↑ | ↑ | ↑ | ↓ | ↓ | ↑↑ | 0 | ↓ | ↑↑ | ↑ slow | ↑ | ↑ |
-| **Demand** ↑ | ↑↑ | ↑↑ | ↑ small | ↑ | ↑ | 0 | ↓ | ↑ | ↑ gradual | ↓ | ↓ |
-| **Monetary** ↑ | ↓ | ↓ | ↓ | ↑ | ↓ | 0 | ↑ | ↓↓ | ↓ small | ↓↓ | ↓ |
-| **Cost-Push** ↑ | ↓ | ↓ | ↑↑ | ↑ | ↓ small | 0 | ↑ | ↓ | ↓ small | ↓↓ | ↓ | ⭐ v15: inv↓↓ amplified by φ_inv,y |
-| **Hours** ↑ | ↑ | ↑ | ↑ | ↑ | − | ↑↑ | − | − | ↓ small | − | − |
-| **Investment** ↑ | ↑ | ↑ | − | − | ↑ small | 0 | ↓ | ↑ | ↑ small | ↑↑ | ↑ |
-| **Labor Force** ↑ | ↑ | ↑ | ↑ | ↑ | ↑ | 0 | ↑↑ | ↓ | ↓ gradual | − | − |
-| **Separation** ↑ | ↓ | ↓ | ↑ | ↓ | ↓↓ | 0 | ↑↑↑ | ↑ | ↓ gradual | − | − |
-
-**Note:** Hours (h) respond **only** to eps_h; investment (inv) responds to eps_inv, R (φ_inv,r channel), and now also the demand gap (φ_inv,y=0.3 accelerator, v15). All other shocks have zero effect on h because hours are exogenous (pure AR(1)). Consumption (c) responds to all demand-side shocks via the Euler equation.
+**Annual step.** In each simulated year, before SimPaths' labour market, `DSGEModel.stepAnnual` runs four
+quarterly steps on that year's scenario shocks and returns the mean of the four quarterly values of every state
+and jump. The state carries over from year to year and starts at zero (the steady state). The cycle wage is the
+annual mean of `w`; the inflation deviation is the annual mean of `pi`.
 
 ---
 
-## 12. SimPaths Interface: The Microsimulation Handshake
+## 5. Implementation
 
-### 12.1 Purpose
+### 5.1 Workflow
 
-The integration now combines:
+`run_full_workflow('{Country}')`, run from `input_processing/macromodel/`:
 
-- **Ramsey trend layer** (secular macro path, top-down), and
-- **DSGE cycle layer** (one-way: scenario shocks in, cycle wage out; no input from SimPaths).
+| Step | Function | Writes |
+|---|---|---|
+| 0a | `calibrate_growth_model` | calibrated `growth_params_{Country}.json`, placeholder trend files |
+| 0b | `ramsey_trend` | Dynare datafile, trend paths, reference CSV, `ramsey_trend_{country}.mat` |
+| 0c | `build_population_projection` | `population_projection_{Country}.csv`, post-handoff `demographic_L` rows; 0b again if those changed |
+| 0d | `ramsey_projection_plot` | diagnostic plot of the forward projection |
+| 1 | `dynare Macromodel_{Country} use_dll` | estimation results in `Macromodel_{Country}/Output/` |
+| 2 | `generate_frozen_model` | `Macromodel_{Country}_frozen.mod`, `params_{Country}_estimated.txt` |
+| 3 | `dynare Macromodel_{Country}_frozen noclearall nograph`, then `export_dynamic_for_simpaths` | the bundle |
+| 4 | `postestimation_analysis` | report, figures, documentation summary |
 
-Without the cycle feedback, SimPaths can overstate short-run macro consistency; without the trend layer, SimPaths misses structural wage drift.
+Each step can be skipped by a name-value option. `export_ramsey_for_simpaths('{Country}')` refreshes only the
+Ramsey half of a bundle. Toolchains, run times, the smoke test and which re-export a changed input needs are in
+`../README.md`.
 
-### 12.2 Interface Specification
+### 5.2 Dynare files
 
 ```
-
-**Ramsey trend input contract for Java**
-
-Alongside the DSGE state-space files, SimPaths reads the Ramsey trend inputs
-`growth_params_{COUNTRY}.json`, `growth_terminal_state.json`,
-`growth_model_reference_{country}.csv`, and optionally `population_projection_{COUNTRY}.csv`.
-
-For TFP growth, the Java runtime supports two baseline contracts:
-
-- **Legacy contract:** only `tfp_growth_annual` is present. In this case the forward Ramsey baseline uses a constant TFP growth rate.
-- **Current contract:** `growth_params_{COUNTRY}.json` may include an enabled `terminal_growth` block with
-    `g_A_terminal_annual` and `rho_quarterly`. In this case Java interprets `tfp_growth_annual` as the in-sample calibration growth rate and lets annual TFP growth converge quarter by quarter toward the terminal anchor during forward projection.
-
-This remains backward compatible: if the `terminal_growth` block is absent, SimPaths falls back to the legacy constant-growth interpretation.
-┌──────────────────────────────────────────────────────────────────────┐
-│             MICROSIMULATION–MACRO HANDSHAKE (dynamic-only)          │
-├──────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  INPUT (DSGE cycle): scenario shocks only, in σ-units               │
-│    • nothing from SimPaths (one-way, contract 38)                   │
-│                                                                      │
-│  INPUT (Ramsey trend):                                              │
-│    • w_trend,t from forward-solved Ramsey path                      │
-│    • re-solved yearly on SimPaths' realized employment and hours    │
-│                                                                      │
-│  DSGE processing (quarterly, annual aggregation):                   │
-│    • s_t = A s_{t-1} + Bs ε_t                                       │
-│    • y_t = C s_{t-1} + D  ε_t                                       │
-│    • Annual cycle outputs: w_cycle,t and π_cycle,t                  │
-│                                                                      │
-│  OUTPUT (macro → SimPaths):                                         │
-│    • Δw_total,t = Δw_cycle,t + Δw_trend,t                           │
-│    • Δπ_t = Δπ_cycle,t                                               │
-│                                                                      │
-│  Application in microsimulation wage equations:                     │
-│    • wageMultiplier_t = 1 + Δw_total,t / 100                        │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
+Macromodel_{Country}.mod                        wrapper: @#define country = "{Country}" and @#include the template
+  Macromodel_template.mod                       variables, parameters, the model block, varobs, estimation commands
+    country_params/{Country}_calibration.mod    parameter values, steady-state labour-market shares
+    country_params/{Country}_estimation.mod     datafile, calibrated shock and measurement-error std devs, priors
+Macromodel_{Country}_frozen.mod                 generated: all of the above inlined, posterior modes, no estimation
 ```
 
-### 12.3 Runtime Sequence (Annual Loop)
+Structural changes go into the template, parameter values into the calibration file, priors and the
+estimation setup into the estimation file; a new country needs the wrapper and the two country files
+(`MULTI_COUNTRY_WORKFLOW.md`). The template, the calibration file and the frozen model are hashed in
+`BUNDLE_PROVENANCE.txt`, so any edit to them, a comment included, needs a re-export (contract 18,
+`../README.md`).
 
-At `DSGEMacroUpdate`, before the labour market (`MacroModelManager.updateEquilibrium`):
+### 5.3 The bundle (`input/{CC}/MacroModel/`)
 
-1. The Ramsey trend advances one year along the path solved at the end of the previous year. From the third
-   simulated year on, the run stops if the previous year's end-of-year feedback did not run.
-2. The DSGE executes four quarterly steps on the scenario's shocks for the year (zero without a scenario) and
-   returns annual-average cyclical deviations (`runDsgePass` ↔ `DSGEModel.stepAnnual`). It takes no input from
-   SimPaths.
-3. The manager composes the total wage effect `w_total = w_cycle + w_trend`, and SimPaths applies the wage
-   multiplier before its labour market runs.
+| File | Content | Read at runtime |
+|---|---|---|
+| `policy_A.csv`, `policy_Bs.csv`, `policy_C.csv`, `policy_D.csv` | State transition, shock-to-state, state-to-jump, shock-to-jump matrices; rows and columns named | yes |
+| `model_info.json` | Dimensions, state and jump names and indices, `shock_indices_java`, `deviation_scale` | yes |
+| `shock_params.csv` | σ and persistence per shock | yes |
+| `growth_params_{Country}.json` | Calibrated Ramsey parameters and solver settings | yes |
+| `growth_terminal_state.json` | Capital and TFP at the handoff, `handoff_time`, `projection_quarters` | yes |
+| `growth_model_reference_{country}.csv` | In-sample trend through the handoff quarter | yes |
+| `population_projection_{Country}.csv`, `hours_projection_{Country}.csv` | Forward employees and hours from the handoff | yes |
+| `irfs_eps_*.csv` | One-σ IRFs of `w`, `n`, `pi`, `u_rate`, `y`, `R`, `L`, `h`, `k`, `inv` to `eps_L`, `eps_a`, `eps_d`, `eps_r`, `eps_h`, `eps_inv`, 40 quarters | tests only |
+| `policy_full_ghx.csv`, `policy_full_ghu.csv` | Dynare's full decision rules in declaration order | no (reference) |
+| `steady_state.csv` | All zeros (linear model) | no |
+| `SIMPATHS_INTERFACE.md` | Generated summary of the export | no |
+| `BUNDLE_PROVENANCE.txt` | SHA-256 of the tracked inputs and of the bundle files, Dynare and MATLAB versions | tests only (`BundleProvenanceTest`) |
+| `_macroScenario_*.csv` | Hand-written scenarios | when named in the config |
 
-At `MacroEndYearCapture`, after the labour market and the population alignment:
+The export starts by writing `BUNDLE_NOT_VERIFIED.txt` and ends with `verify_export_bundle`, which removes it
+only if every file is present, the reference CSV and the population projection are byte-identical to their
+sources in `output/` (a source missing from `output/` is skipped), and the population projection and
+`demographic_L` agree (contracts 35, 36). SimPaths refuses a bundle that carries the
+marker. Java checks the matrix headers against `model_info.json` on load (contract 8).
 
-4. SimPaths' realized employment and hours are counted once (`computeRawAggregates`) and, in a Ramsey mode, fed
-   back into the planner, which re-solves its remaining path with persistence `mm_ramseyFeedbackPersistence`
-   for both margins (`SimPaths_Coupling.md` §8.1).
+### 5.4 Data preparation
 
-### 12.4 Dynamic-Only Integration and Static Mode Removal
+`stata/make_datasets.do` (stage 1, Stata) writes `data/data_for_dynare_levels_{Country}.csv` and
+`data/PROVENANCE_{Country}.txt`. The levels file holds GDP, private consumption, gross fixed capital
+formation, government consumption and net exports (chain-linked volumes), the seasonally adjusted consumer
+price index and its quarter-on-quarter annualised inflation $400(P_t/P_{t-1}-1)$, a three-month money-market
+rate, the real wage per employee, employees (national concept), the ILO unemployment rate, the labour force and
+hours per employee per quarter. Hours per employee come from Destatis directly for Germany; for Poland, Spain,
+Sweden and the UK they are total hours worked by employees divided by employees, both domestic concept
+(Eurostat `namq_10_a10_e`, the OECD quarterly national accounts for the UK). The script stops if hours per
+employee leave [200, 700] per quarter. The HP-filtered cycles it also writes
+(`data/data_for_dynare_hp_{Country}.csv`) serve only as a benchmark (`diagnostics/run_detrending_benchmark.m`);
+the Dynare datafile comes from `ramsey_trend.m`. Series codes per country and the currency conventions are in
+`make_datasets.do` and `MULTI_COUNTRY_WORKFLOW.md`.
 
-The previous static equilibrium integration path has been fully removed from export scripts, model files, Java classes, tests, and documentation surfaces.
+### 5.5 Frequency
 
-Implications:
-
-- Only dynamic policy files (`policy_A`, `policy_Bs`, `policy_C`, `policy_D`) are used.
-- Path recorder output is maintained as `MacroPaths.csv`.
-- Convergence controls tied to static iteration are no longer part of the active interface.
-
-This aligns implementation with conceptual design: secular trend from Ramsey + cyclical deviations from DSGE state evolution.
+Both layers are quarterly. The Ramsey JSON is annual and converted on load (section 2.1). At runtime a simulated
+year is four quarters in both layers: the DSGE returns the mean of four quarterly steps (section 4), and the
+planner's `stepYear` the mean of four quarters of its solved path. No other frequency conversion takes place.
 
 ---
 
-## 13. Development Roadmap
+## 6. References
 
-### 13.1 Completed ✓
-
-| Feature | Status | Impact |
-|---------|--------|--------|
-| Gertler-Trigari staggered wages | ✅ Complete | Addresses Shimer puzzle |
-| Demand shock (eps_d) | ✅ Complete | Positive y-π correlation |
-| Variable labor force | ✅ Complete | Key microsim interface (extensive) |
-| Explicit demand-supply gap | ✅ Complete | Orthodox NK structure |
-| German calibration | ✅ Complete | 15 iterations refined |
-| Bayesian estimation | ✅ Complete | 9 posterior parameters (v13: 7σ + ω_h + φ_inv,r) |
-| Identification verification | ✅ Complete | 10/10 FULL rank |
-| ILO-consistent data | ✅ Complete | +22.5 log-likelihood gain |
-| Hours (intensive margin) | ✅ Complete | Captures German labor hoarding |
-| Direct L→w channel (ψ_wL) | ✅ Complete | Total GE wage elasticity ~0.40 |
-| Option B: Observe L | ✅ Complete | L identified, u_rate implied |
-| Hours pure AR(1) | ✅ Complete | SimPaths determines h |
-| Collinearity resolved | ✅ Complete | ρ_h, ρ_L calibrated; φ_inv,y dropped |
-| **Capital extension (Phase 2)** | ✅ **Complete** | **k, inv with investment rule** ⭐ v10 |
-| **Investment estimation** | ✅ **Complete** | **ρ_inv, φ_inv,r estimated** ⭐ v11 |
-| **Export for SimPaths** | ✅ **Complete** | **Dynamic state-space policy matrices (A, Bs, C, D)** |
-| **Option C demand side** | ✅ **Complete** | **Consumption Euler + demand aggregation** ⭐ v12 |
-| **Cost-push shock (ε_p)** | ✅ **Complete** | **Clean inflation identification (77.4%)** ⭐ v12 |
-| **Consumption observable** | ✅ **Complete** | **8th observable pins demand decomposition** ⭐ v12 |
-| **Full identification** | ✅ **Complete** | **9/9 FULL** ⭐ v13 |
-| **Inflation indexation** | ✅ **Complete** | **Hybrid NKPC with ι_p=0.35 (Smets-Wouters 2003); reduces σ_p 37%** ⭐ v15 |
-| **Investment accelerator** | ✅ **Complete** | **φ_inv,y=0.3 restored; ensures demand co-movement** ⭐ v15 |
-| **Ramsey structural detrending** | ✅ **Complete** | **Replaces HP filter for DSGE observables** ⭐ Feb 2026 |
-| **Population projection bridge** | ✅ **Complete** | **SimPaths demographic path reused by Ramsey forward N** ⭐ Feb 2026 |
-| **Dynamic-only integration** | ✅ **Complete** | **Static mode and static artifacts fully excised** ⭐ Feb 2026 |
-
-### 13.2 Priority 1: Near-Term
-
-| Feature | Priority | Rationale |
-|---------|----------|----------|
-| Full SimPaths integration test | High | End-to-end validation with microsim |
-| Model comparison (BVAR benchmark) | Medium | Assess fit relative to atheoretical model |
-
-### 13.3 Priority 2: Medium-Term
-
-| Feature | Priority | Rationale |
-|---------|----------|-----------|
-| Endogenous separation | Medium | Adds realism but complex |
-| Government sector | Low | Fiscal policy channels |
-
-### 13.4 Priority 3: Long-Term
-
-| Feature | Priority | Rationale |
-|---------|----------|-----------|
-| Multi-country extension | Future | DE, UK, SE, ES, PL versions |
-| Two-way microsim iteration | If needed | Start with one-way feedback |
-
----
-
-## 14. Technical Implementation Notes
-
-### 14.1 Hours Data Preparation
-
-In `make_datasets.do`:
-
-```stata
-// Hours per worker (Destatis: total hours / employment)
-dbnomics import, provider(Destatis) dataset(81000-0017) sdmx(Q.H.H.WZ08-A) clear
-rename value hours_total
-merge 1:1 time using `data', nogen
-
-gen hours_per_worker = hours_total / employees
-tsfilter hp hours_cycle = hours_per_worker, smooth(1600)
-```
-
-### 14.2 Dynare File Structure (Template Architecture)
-
-The DSGE model uses a **template + wrapper** architecture to maintain a single structural codebase across multiple countries:
-
-```
-Macromodel_{COUNTRY}.mod                 ← Thin wrapper (@#define country + @#include template)
-  └─ Macromodel_template.mod             ← Shared structural equations, variables, and logic
-       ├─ @#include country_params/{Country}_calibration.mod  ← (Fixed parameters, steady state)
-       └─ @#include country_params/{Country}_estimation.mod   ← (Priors, shocks, data block)
-```
-
-**Workflow Rules:**
-- **Structural changes** (adding variables, modifying the 22 equations, changing blocks): Always edit `Macromodel_template.mod`.
-- **Parameter values**: Edit `country_params/{Country}_calibration.mod` (e.g. preferences, technology, matching, capital).
-- **Estimation setup**: Edit `country_params/{Country}_estimation.mod` (e.g. priors for 9 parameters, 8 observables, shock specifications).
-- **New Country setup**: Create a new wrapper `Macromodel_{Country}.mod` and two parameter files in `country_params/`.
-
-### 14.3 Output Files
-
-| File | Location | Contents |
-|:-----|:---------|:---------|
-| `Macromodel_{COUNTRY}_results.mat` | Macromodel_{COUNTRY}/Output/ | All estimation results |
-| `DSGE_Estimation_Report.pdf` | Macromodel_{COUNTRY}/Output/ | Comprehensive PDF report |
-| `postestimation_summary.txt` | Macromodel_{COUNTRY}/Output/ | Text summary |
-| `Fig01-09_*.png` | Macromodel_{COUNTRY}/graphs/ | Individual figures |
-| `input/{CC}/MacroModel/policy_*.csv` | input/{CC}/MacroModel/ | Dynamic state-space matrices for Java |
-| `country_params/{Country}_growth_params.json` | input_processing/macromodel/country_params/ | User-maintained Ramsey source template with structural growth parameters; may include optional `terminal_growth` block for forward TFP-growth convergence |
-| `growth_params_{COUNTRY}.json` | input/{CC}/MacroModel/ | Calibrated runtime copy exported to Java after `calibrate_growth_model.m` |
-| `growth_model_reference_{country}.csv` | input_processing/macromodel/output/ and input/{CC}/MacroModel/ | Ramsey cross-validation reference path |
-| `growth_terminal_state.json` | input/{CC}/MacroModel/ | Terminal `K`, `A` for Java forward projection |
-| `population_projection_{COUNTRY}.csv` | input_processing/macromodel/output/ and input/{CC}/MacroModel/ | SimPaths-consistent forward demographic path (`time,N`) |
-| `ramsey_trends_{country}.csv` | input_processing/macromodel/output/ | Full trend paths used for detrending diagnostics |
-
-### 14.4 Frequency Conversion for Microsim
-
-| Parameter Type | Conversion |
-|----------------|------------|
-| Persistence | $\rho_{annual} = \rho_{quarterly}^4$ |
-| Discount | $\beta_{annual} = \beta_{quarterly}^4$ |
-| Separation | $\delta_{annual} = 1 - (1-\delta_{quarterly})^4$ |
-| Wage rigidity | λ_w = 0.75 quarterly → average duration = 1 year |
-| **Hours persistence** | **$\rho_{h,annual} = \rho_{h,quarterly}^4$ = 0.53** |
-| **Depreciation** | **$\delta_{k,annual} = 1 - (1-0.025)^4 \approx 9.6\%$** |
-| **Investment persistence** | **$\rho_{inv,annual} = \rho_{inv,quarterly}^4 = 0.84^4 \approx 0.50$** |
-
-### 14.5 Java Integration Notes ⭐ UPDATED Feb 2026
-
-**Total wage passed to SimPaths**
-
-`DSGEModelManager` composes wage feedback as:
-
-\[
-\Delta w_{total,t} = \Delta w_{cycle,t} + \Delta w_{trend,t}
-\]
-
-where `Δw_cycle` is from DSGE annual aggregation and `Δw_trend` is the Ramsey secular component. Individual wages use:
-
-\[
-	ext{wageMultiplier}_t = 1 + \frac{\Delta w_{total,t}}{100}
-\]
-
-Inflation feedback remains cyclical (`Δπ_t = Δπ_cycle,t`).
-
-**Trend information flow is top-down**
-
-Ramsey trend is solved from macro files and demographic projections, then injected into SimPaths. No SimPaths feedback is sent back into Ramsey.
-
-**Terminal-growth support in the Java runtime**
-
-When `growth_params_{COUNTRY}.json` includes `terminal_growth.enabled = true`, the Java Ramsey runtime no longer assumes permanently constant TFP growth. Instead, it lets the baseline growth rate decay from the in-sample `tfp_growth_annual` toward `terminal_growth.g_A_terminal_annual` using `terminal_growth.rho_quarterly`, and it computes the terminal balanced-growth-path target from that long-run anchor rather than from a zero-growth shortcut.
-
-**Dynamic-only runtime**
-
-Static integration classes/files were removed. Runtime and exports use only dynamic state-space components.
-
-**Critical: Shock Unit Convention (one rule for every shock)**
-
-Dynare's ghu matrix (`policy_Bs.csv`, `policy_D.csv`) contains **raw derivatives** mapping unit-variance innovations to variable responses. Standard deviations σ are stored separately in `shock_params.csv`. **No σ-scaling is baked into the matrices.**
-
-- **Every shock (ε_a, ε_r, ε_d, ε_p, ε_L, ε_sep, ε_h, ε_inv):** Scenario inputs are in **σ-units**. A 1-σ technology shock → eps_a = 1.0; a 1-σ labour-force shock → eps_L = 1.0. These are converted to raw innovations by **multiplying by σ**. SimPaths sends none of them (contract 38).
-- **Persistence:** the labour force and hours follow their own AR(1) at the calibrated ρ_L and ρ_h, carried in the exported state transition like every other exogenous process. Until 2026-11 the export set ρ_L = ρ_h = 0 and took ε_L, ε_h as percent levels, because SimPaths wrote levels into them; the bundle field `deviation_scale` (which replaced `simpaths_input_scale`) makes Java refuse a bundle exported that way.
-
-```java
-// In DSGEModel.java stepQuarterly():
-double[] processedShocks = new double[N_EXO];
-for (int j = 0; j < N_EXO; j++) {
-    // Every shock: σ-unit input → multiply by σ to get the raw innovation
-    processedShocks[j] = shocks[j] * shockStdDev[j];
-}
-// Then: newState = A * state + Bs * processedShocks
-//        jumps   = C * state + D  * processedShocks
-```
-
-**Cross-validation:** `ghu(π, eps_d) × σ_d = 0.2704 × 0.3641 = 0.0984 = Dynare IRF(π, eps_d, t=0)` ✓
-
-| Shock | Convention | Example |
-|-------|------------|---------|
-| eps_L | σ-units | 1-σ shock → raw = 1.0 × σ_L (multiply by σ) |
-| eps_h | σ-units | 1-σ shock → raw = 1.0 × σ_h (multiply by σ) |
-| eps_a | σ-units | 1-σ shock → raw = 1.0 × σ_a (multiply by σ) |
-| eps_inv | σ-units | 1-σ shock → raw = 1.0 × σ_inv (multiply by σ) |
-
-**Common mistake:** Dividing by σ instead of multiplying. This produces results off by σ² (e.g., ~5× for eps_p where σ=2.24 in v14, or ~2× for v15's σ_p=1.43). The policy matrices expect raw innovations, and σ-unit inputs must be multiplied by σ to get raw innovations.
-
-**Bug History:** Previous implementation normalized ALL shocks by σ, causing ~8× amplification for eps_L (dividing by σ_L=0.12 effectively multiplied the shock). This produced unrealistically large wage/employment responses (e.g., 35% labor force deviations instead of ~2%).
-
----
-
-## 15. References
-
-**Core Papers:**
-
-- Gertler, M. & Trigari, A. (2009). "Unemployment Fluctuations with Staggered Nash Wage Bargaining." *Journal of Political Economy*, 117(1), 38-86.
-- Lubik, T.A. (2009). "Estimating a Search and Matching Model of the Aggregate Labor Market." *Economic Quarterly*, 95(2), 101-120.
-- Shimer, R. (2005). "The Cyclical Behavior of Equilibrium Unemployment and Vacancies." *American Economic Review*, 95(1), 25-49.
-
-**Hours/Intensive Margin:**
-
-- Burda, M.C. & Hunt, J. (2011). "What Explains the German Labor Market Miracle in the Great Recession?" *Brookings Papers on Economic Activity*, 2011(1), 273-319.
-- Balleer, A., Gehrke, B., Lechthaler, W. & Merkl, C. (2016). "Does Short-time Work Save Jobs? A Business Cycle Analysis." *European Economic Review*, 84, 99-122.
-
-**Identification:**
-
+- Borjas, G.J. (2003). "The Labor Demand Curve Is Downward Sloping." *Quarterly Journal of Economics*, 118(4),
+  1335-1374.
+- Dustmann, C., Schönberg, U. & Stuhler, J. (2017). "Labor Supply Shocks, Native Wages, and the Adjustment of
+  Local Employment." *Quarterly Journal of Economics*, 132(1), 435-483.
+- Gertler, M. & Trigari, A. (2009). "Unemployment Fluctuations with Staggered Nash Wage Bargaining." *Journal of
+  Political Economy*, 117(1), 38-86.
 - Iskrev, N. (2010). "Local Identification in DSGE Models." *Journal of Monetary Economics*, 57(2), 189-202.
-- Qu, Z. & Tkachenko, D. (2012). "Identification and Frequency Domain Quasi-Maximum Likelihood Estimation of Linearized DSGE Models." *Quantitative Economics*, 3(1), 95-132.
-
-**Germany-specific benchmark references:**
-
-- Pytlarczyk, E. (2005). "An Estimated DSGE Model for the German Economy within the Euro Area." *Deutsche Bundesbank Discussion Paper*, 33/2005.
-- Hristov, N. (2016). "The Ifo DSGE Model for the German Economy." *Ifo Working Paper*, 210.
-- Jung, P. & Kuhn, M. (2014). "Labor Market Institutions and Worker Flows: Comparing Germany and the U.S." *Economic Journal*, 124(581), 1317-1342.
-
-**Labor Force → Wage Literature:**
-
-- Borjas, G.J. (2003). "The Labor Demand Curve Is Downward Sloping." *Quarterly Journal of Economics*, 118(4), 1335-1374.
-- Dustmann, C., Schönberg, U. & Stuhler, J. (2017). "Labor Supply Shocks, Native Wages, and the Adjustment of Local Employment." *Quarterly Journal of Economics*, 132(1), 435-483.
-
----
-
-*Document version: 15*  
-*Last updated: February 18, 2026*
+- Qu, Z. & Tkachenko, D. (2012). "Identification and Frequency Domain Quasi-Maximum Likelihood Estimation of
+  Linearized DSGE Models." *Quantitative Economics*, 3(1), 95-132.
+- Shimer, R. (2005). "The Cyclical Behavior of Equilibrium Unemployment and Vacancies." *American Economic
+  Review*, 95(1), 25-49.
+- Smets, F. & Wouters, R. (2003). "An Estimated Dynamic Stochastic General Equilibrium Model of the Euro Area."
+  *Journal of the European Economic Association*, 1(5), 1123-1175.

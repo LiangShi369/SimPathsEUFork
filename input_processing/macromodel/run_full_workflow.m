@@ -14,12 +14,13 @@
 %   0d. Render Ramsey forward-projection diagnostic plot
 %   1. Run Bayesian estimation (if not already done)
 %   2. Generate frozen model with estimated parameters
-%   3. Export DYNAMIC model (A,B,C,D matrices for quarterly approach)
+%   3. Export the dynamic model's policy matrices (A, Bs, C, D) for SimPaths
 %   4. Run postestimation_analysis (diagnostics + summary report)
 %
-% INTEGRATION APPROACH:
-%   DYNAMIC: DSGE runs quarterly, feeds back w,π to SimPaths annually
-%            → ../../input/{CC}/MacroModel/policy_A.csv, policy_Bs.csv, etc.
+% INTEGRATION:
+%   The DSGE runs quarterly inside SimPaths from the exported policy matrices
+%   (../../input/{CC}/MacroModel/policy_A.csv, policy_Bs.csv, etc.); once a
+%   year its cycle wage reaches SimPaths' wages, and its inflation is reported.
 %
 % Prerequisites:
 %   - Macromodel_[COUNTRY].mod exists
@@ -125,8 +126,8 @@ function run_full_workflow(country, options)
             % tail of demographic_L_*.csv that 0c writes and injects it into a GLOBAL
             % stacked-time solve - so the demographic tail shapes the in-sample trend,
             % the detrended estimation data and the handoff contract, not just the
-            % projection. Running 0b once before 0c therefore built every run on the
-            % PREVIOUS run's demographics.
+            % projection. Running 0b only once, before 0c, would build every run on
+            % the PREVIOUS run's demographics.
             %
             % The dependency is strongly asymmetric: 0c consumes a single in-sample
             % terminal level, 0b consumes ~140 quarters of forward path. So one extra
@@ -159,7 +160,7 @@ function run_full_workflow(country, options)
                 end
 
                 % Second-order residual: 0c anchored on the FIRST pass's reference, so
-                % the refreshed reference no longer matches it exactly. Report the gap
+                % the refreshed reference does not match it exactly. Report the gap
                 % so this stays a measured quantity.
                 anchor_after = reference_terminal_anchor(country);
                 report_anchor_drift(anchor_before, anchor_after);
@@ -249,11 +250,11 @@ function run_full_workflow(country, options)
     end
     
     % -------------------------------------------------------------------------
-    % Step 3: Export DYNAMIC Model for SimPaths (quarterly approach)
+    % Step 3: Export the dynamic model's policy matrices for SimPaths
     % -------------------------------------------------------------------------
     if ~options.skip_dynamic_export
         fprintf('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-        fprintf('  STEP 3: Exporting DYNAMIC Model for SimPaths\n');
+        fprintf('  STEP 3: Exporting the DSGE bundle for SimPaths\n');
         fprintf('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
         
         % Run the frozen model to get policy functions
@@ -330,7 +331,7 @@ function run_full_workflow(country, options)
     print_box_line(sprintf('    • Macromodel_%s_frozen.mod', country), box_width);
     print_box_line(sprintf('    • params_%s_estimated.txt', country), box_width);
     print_box_line(sprintf('    • Macromodel_%s/Output/postestimation_summary.txt', country), box_width);
-    print_box_line('  DYNAMIC integration (quarterly):', box_width);
+    print_box_line('  DSGE policy matrices (quarterly):', box_width);
     print_box_line(sprintf('    • %s/policy_A.csv (state transition)', bundle_dir), box_width);
     print_box_line(sprintf('    • %s/policy_Bs.csv (shock→states)', bundle_dir), box_width);
     print_box_line(sprintf('    • %s/policy_C.csv (states→jumps)', bundle_dir), box_width);
@@ -351,11 +352,10 @@ function run_full_workflow(country, options)
     fprintf('Verification steps:\n');
     fprintf('  1. Check estimation diagnostics in Macromodel_%s/Output/\n', country);
     fprintf('  2. Compare params_%s_estimated.txt with literature values\n', country);
-    fprintf('  3. DYNAMIC: Check IRFs in %s/irfs_eps_L.csv\n', bundle_dir);
-    fprintf('  4. Run SimPaths dynamic-integration smoke test\n');
+    fprintf('  3. Check the IRF signs in %s/irfs_eps_L.csv and irfs_eps_h.csv (MULTI_COUNTRY_WORKFLOW.md)\n', bundle_dir);
+    fprintf('  4. Run smoke_test.ps1 and the macro tests: mvn -q test -Dtest=''simpaths.model.macro.*Test''\n');
     fprintf('\n');
-    fprintf('Integration approach:\n');
-    fprintf('  DYNAMIC: Use policy_*.csv for quarterly DSGE with annual feedback\n');
+    fprintf('SimPaths steps the quarterly policy matrices four times per simulated year and averages them.\n');
     fprintf('\n');
 end
 

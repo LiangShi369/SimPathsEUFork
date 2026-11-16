@@ -19,7 +19,6 @@ import java.util.*;
  * current exported SimPaths DSGE schema are used if not explicitly set.
  *
  * @author DSGE-SimPaths Integration
- * @version 2.0 (dynamic variable names from model_info.json)
  */
 public class MacroPathRecorder {
 
@@ -91,12 +90,13 @@ public class MacroPathRecorder {
      * anchor is mode-dependent and therefore not comparable across run modes —
      * see {@code MacroModelManager.startYearAtRiskWage} before reading an
      * early-year level difference as a treatment effect.
-     * n_realized_gap / w_trend_revision: the recursive Ramsey feedback's diagnostics
-     * (realized-vs-assumed headcount gap: SimPaths' workers with positive hours, scaled by
-     * lambda, against the planner's employees path, so it includes shifts in the employee
-     * share of workers; % change in next year's trend wage from the
-     * re-solve); see {@code MacroModelManager.applyRamseyFeedbackWithRealized}. Zero for
-     * every run where the feedback is disabled or has not yet latched its lambda.
+     * n_realized_gap / h_realized_gap / w_trend_revision: the recursive Ramsey feedback's
+     * diagnostics (realized-vs-assumed headcount gap: SimPaths' workers with positive hours,
+     * scaled by lambda, against the planner's employees path, so it includes shifts in the
+     * employee share of workers; hours gap against SimPaths' own latch-year hours; % change
+     * in next year's trend wage from the re-solve); see
+     * {@code MacroModelManager.applyRamseyFeedbackWithRealized}. Zero in runs without a
+     * Ramsey layer and until the feedback has latched its lambda.
      */
     private static final String[] EXTRA_COLUMN_VARS = {
         "l_level", "h_level", "n_ramsey", "participation_rate", "workers_over_atRiskPool",
@@ -248,8 +248,7 @@ public class MacroPathRecorder {
      *
      * <p>Needed when a trend column has to be measured after the quarterly records
      * for a year have already been written — e.g. the realized-wage index, which
-     * depends on labWageHrly values that are only updated after the DSGE step in
-     * the dynamic path.</p>
+     * depends on labWageHrly values that are only updated after the DSGE step.</p>
      *
      * @param year   Simulation year whose records should be updated
      * @param key    Trend map key (must match an entry in {@code EXTRA_COLUMN_VARS}
@@ -392,7 +391,7 @@ public class MacroPathRecorder {
                 try {
                     lastRun = Integer.parseInt(line.substring(0, firstComma).trim());
                 } catch (NumberFormatException ignored) {
-                    // Ignore malformed legacy rows and keep scanning for the last valid run id.
+                    // Skip rows without a numeric run id and keep scanning for the last valid one.
                 }
             }
         }

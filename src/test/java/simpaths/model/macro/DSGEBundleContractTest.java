@@ -11,10 +11,9 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Contract guards on the exported DSGE bundle: conventions that used to live in
- * prose (2026-08-19 boundary audit, findings C1/C2) and are now refused at load
- * time when a bundle violates them. Tampers a copy of the live PL bundle so the
- * guards are exercised against the exact files production reads.
+ * Contract guards on the exported DSGE bundle: conventions that the loader refuses
+ * at load time when a bundle violates them. Tampers a copy of the live PL bundle so
+ * the guards are exercised against the exact files production reads.
  */
 class DSGEBundleContractTest {
 
@@ -75,15 +74,16 @@ class DSGEBundleContractTest {
     }
 
     /**
-     * A bundle exported before 2026-11 carries the old unit field and zero persistence for the
-     * labour shocks; it must be refused with a message that says to re-export.
+     * A bundle that declares its units under {@code simpaths_input_scale} instead of
+     * {@code deviation_scale} (an export that gives the labour shocks zero persistence) must
+     * be refused with a message that says to re-export.
      */
     @Test
     void testBundleWithTheOldUnitFieldIsRefused(@TempDir Path dir) throws IOException {
         assumeBundle();
         copyBundle(dir);
         String json = Files.readString(dir.resolve("model_info.json"));
-        String old = json.replace("\"deviation_scale\"", "\"simpaths_input_scale\"");   // as exported before 2026-11
+        String old = json.replace("\"deviation_scale\"", "\"simpaths_input_scale\"");
         assertNotEquals(json, old, "live bundle should declare deviation_scale");
         Files.writeString(dir.resolve("model_info.json"), old);
 

@@ -4,12 +4,11 @@
 %% This script exports the linearized policy function matrices from Dynare
 %% to CSV/JSON format for import into SimPaths (Java).
 %%
-%% VERSION: v12 (February 2026)
-%%   - Option C: Smets-Wouters C/I decomposition (c as jump variable)
-%%   - Cost-push shock: eps_p added (8 shocks total, eps_match dropped V13)
-%%   - New parameters: sigma (inverse IES), s_inv (investment share)
-%%   - Capital extension: k (capital stock), inv (investment) added
-%%   - Hours and L are pure AR(1) at their calibrated persistence (rho_h, rho_L)
+%% The model (Macromodel_template.mod):
+%%   - Smets-Wouters consumption/investment decomposition, with habit in c
+%%   - 8 shocks, including the cost-push shock eps_p
+%%   - capital k and investment inv; sigma (inverse IES), s_inv (investment share)
+%%   - hours and L are pure AR(1) at their calibrated persistence (rho_h, rho_L)
 %%   - 9 estimated params: sigma_a, sigma_d, sigma_r, sigma_p, sigma_h, sigma_L, sigma_inv, omega_h, phi_inv_r
 %%
 %% The bundle is the estimated model for every shock. The DSGE takes no input from
@@ -29,8 +28,9 @@
 %%   y_t = C * s_{t-1} + D   * ε_t     (jump variables)
 %%
 %% Where:
-%%   s_t  = state variables (declaration order): R, w, v, n, h, x, L, k, inv, sep_shock
-%%   y_t  = jump variables (declaration order): y, c, d, gap, pi, w_star, u, u_rate, m, mc, theta
+%%   s_t  = state variables, the predetermined ones in oo_.dr (for the current
+%%          template: c, R, pi, w, v, n, h, x, L, k, inv, sep_shock, d_shock)
+%%   y_t  = jump variables, the others (y, d, gap, w_star, u, u_rate, m, mc, theta)
 %%   ε_t  = shock innovations (8×1), in the template's varexo declaration order:
 %%          eps_a, eps_r, eps_d, eps_p, eps_L, eps_sep, eps_h, eps_inv
 %%
@@ -44,12 +44,12 @@
 %%       The script reads dynamically from oo_.dr — no hardcoded sizes.
 %%
 %% Exports:
-%%   1. policy_A.csv        - State transition matrix A (11×11)
-%%   2. policy_Bs.csv       - Shock impact on states B_s (11×8)
-%%   3. policy_C.csv        - Jump response to lagged states C (10×11)
-%%   4. policy_D.csv        - Jump response to shocks D (10×8)
-%%   5. policy_full_ghx.csv - Full response matrix (21×11) (reference only - no reader in SimPaths, production or tests)
-%%   6. policy_full_ghu.csv - Full shock matrix (21×8) (reference only - no reader in SimPaths, production or tests)
+%%   1. policy_A.csv        - State transition matrix A (n_state × n_state)
+%%   2. policy_Bs.csv       - Shock impact on states B_s (n_state × n_shock)
+%%   3. policy_C.csv        - Jump response to lagged states C (n_jump × n_state)
+%%   4. policy_D.csv        - Jump response to shocks D (n_jump × n_shock)
+%%   5. policy_full_ghx.csv - Full response matrix (reference only - no reader in SimPaths, production or tests)
+%%   6. policy_full_ghu.csv - Full shock matrix (reference only - no reader in SimPaths, production or tests)
 %%   7. steady_state.csv    - Steady state values
 %%   8. shock_params.csv    - AR(1) coefficients and std devs
 %%   9. model_info.json     - Variable names, ordering, metadata
@@ -64,11 +64,10 @@
 %%   
 %%   // Extract outputs for microsim
 %%   w  = s_new[IDX_W];    // wage is a state variable
-%%   pi = s_new[IDX_PI];   // inflation is ALSO a state since V15 (iota_p
+%%   pi = s_new[IDX_PI];   // inflation is a state too (iota_p
 %%                         // indexation puts pi(-1) in the NKPC)
 %%
-%% Author: Generated for SimPaths coupling
-%% Date: January 29, 2026 (updated for separate state/jump export)
+%% The Java implementation is simpaths.model.macro.DSGEModel.
 %% =========================================================================
 
 fprintf('\n');
@@ -104,10 +103,9 @@ export_country = country_from_fname{1};
 % The model is estimated on 100x-log-deviation data (the detrending scale in
 % ramsey_trend.m), which is what makes its deviations, the cycle wage among them,
 % percent. Declared in metadata.deviation_scale (section 7) so the Java side can
-% refuse a bundle whose units moved; this convention lived only in prose until
-% 2026-08 and was silently violated by ~100x once. Checked here, before sections
-% 4-6 write anything, so a trip is a clean refusal rather than an abort that
-% leaves a mixed-vintage bundle behind.
+% refuse a bundle in other units. Checked here, before sections 4-6 write
+% anything, so a trip is a clean refusal rather than an abort that leaves a
+% mixed-vintage bundle behind.
 est_data_file = artifact_path('data', sprintf('data_for_dynare_%s.csv', export_country));
 if ~exist(est_data_file, 'file')
     error('Estimation datafile %s not found; cannot verify deviation_scale.', est_data_file);
@@ -376,7 +374,7 @@ shock_stderr = sqrt(builtin('diag', M_.Sigma_e));
 param_names = M_.param_names;
 param_values = M_.params;
 
-% Find rho parameters (v9: rho_h and rho_L are now CALIBRATED, not estimated)
+% Find rho parameters (rho_h and rho_L are calibrated, not estimated)
 rho_params = {'rho_a', 'rho_d', 'rho_r', 'rho_L', 'rho_sep', 'rho_h'};
 rho_values = zeros(length(rho_params), 1);
 for i = 1:length(rho_params)
@@ -390,8 +388,8 @@ end
 
 % Build shock parameters table
 % Map shocks to their AR coefficients
-% v11b: eps_inv added for investment shock. eps_L and eps_h follow AR(1) at the
-% country's calibrated rho_L and rho_h, in the estimation and the frozen model alike.
+% eps_L and eps_h follow AR(1) at the country's calibrated rho_L and rho_h, in the
+% estimation and the frozen model alike.
 shock_rho_map = containers.Map(...
     {'eps_a', 'eps_d', 'eps_r', 'eps_L', 'eps_sep', 'eps_h', 'eps_inv'}, ...
     {'rho_a', 'rho_d', 'rho_r', 'rho_L', 'rho_sep', 'rho_h', 'rho_inv'});
@@ -403,7 +401,7 @@ for i = 1:M_.exo_nbr
     shock_data{i, 2} = shock_stderr(i);
     
     % Find corresponding rho (if shock follows AR(1) through state equation)
-    % V14: eps_d now has explicit AR(1) state via d_shock = rho_d*d_shock(-1) + eps_d
+    % eps_d has an explicit AR(1) state: d_shock = rho_d*d_shock(-1) + eps_d
     if isKey(shock_rho_map, shock_name)
         rho_name = shock_rho_map(shock_name);
         idx = find(strcmp(param_names, rho_name));
@@ -434,10 +432,10 @@ fprintf('\n>>> Exporting impulse response functions...\n');
 % Check if IRFs exist
 if isfield(oo_, 'irfs') && ~isempty(fieldnames(oo_.irfs))
     
-    % Key variables for SimPaths (v11b: includes k, inv for capital)
+    % Key variables for SimPaths
     key_vars = {'w', 'n', 'pi', 'u_rate', 'y', 'R', 'L', 'h', 'k', 'inv'};
 
-    % Key shocks (v11b: includes eps_inv for investment)
+    % Key shocks
     key_shocks = {'eps_L', 'eps_a', 'eps_d', 'eps_r', 'eps_h', 'eps_inv'};
     
     for s = 1:length(key_shocks)
@@ -505,12 +503,10 @@ for i = 1:M_.endo_nbr
 end
 metadata.var_indices = key_vars_idx;
 
-% var_indices_java is deliberately NOT exported. It indexed the FULL declaration
-% vector, but Java consumes the split state/jump layout via state_idx_in_s and
-% jump_idx_in_y below, and never read this field. Exporting an unread index map
-% invites someone to edit it expecting a runtime effect - which is exactly what
-% the 2026-08 audit flagged. Keep model_info.json to what the consumer actually
-% reads; the full-vector ordering is already recoverable from endo_names.
+% model_info.json carries only what Java reads: the split state/jump layout
+% (state_idx_in_s and jump_idx_in_y below). There is deliberately no Java index
+% map of the full declaration vector: an unread map invites edits that have no
+% runtime effect, and the full-vector ordering is recoverable from endo_names.
 
 % Key shock indices - Java 0-based
 shock_idx_java = struct();
@@ -586,7 +582,7 @@ fprintf(fid, '- `ε_t` = shock innovations (%d×1)\n\n', M_.exo_nbr);
 
 fprintf(fid, '**Key insight for SimPaths:**\n');
 fprintf(fid, '- Wage `w` is a **state variable** → extract from `s_t` directly\n');
-fprintf(fid, '- Inflation `π` is **also a state variable** since V15 (inflation\n');
+fprintf(fid, '- Inflation `π` is **also a state variable** (inflation\n');
 fprintf(fid, '  indexation puts `pi(-1)` in the NKPC) → extract from `s_t`, NOT `y_t`\n');
 fprintf(fid, '- Every shock, eps_L and eps_h included, is an innovation in **standard-deviation\n');
 fprintf(fid, '  units**: 1.0 is a one-σ shock, multiplied by its std dev before the policy matrices\n');
@@ -605,7 +601,7 @@ fprintf(fid, '| `policy_full_ghu.csv` | %d×%d | Full shock matrix (reference on
 fprintf(fid, '| `steady_state.csv` | %d×1 | Steady state values |\n', M_.endo_nbr);
 fprintf(fid, '| `shock_params.csv` | %d×4 | Shock AR(1) coefficients and std devs |\n', M_.exo_nbr);
 fprintf(fid, '| `model_info.json` | - | Variable names and indices |\n');
-fprintf(fid, '| `irfs_eps_L.csv` | - | IRFs for labor force shock |\n\n');
+fprintf(fid, '| `irfs_eps_*.csv` | - | Dynare responses to one-σ shocks, one file per exported shock |\n\n');
 
 fprintf(fid, '### Ramsey trend handoff\n\n');
 fprintf(fid, 'The files above are the DSGE half of the bundle. The Ramsey trend layer\n');
@@ -622,13 +618,12 @@ fprintf(fid, '| `hours_projection_%s.csv` | Planner hours per worker, `time,h`, 
 fprintf(fid, '**Alignment.** Each projection is located by DATE, not by row position: find the\n');
 fprintf(fid, 'row whose label equals the handoff quarter and read forward from there. A\n');
 fprintf(fid, 'projection may legitimately begin earlier than the handoff.\n\n');
-fprintf(fid, '**Hours.** `hours_projection_*.csv` exists because SimPaths used to extend the\n');
-fprintf(fid, 'reference CSV''s `h` column itself, with a different trailing-growth window (20)\n');
-fprintf(fid, 'than this side uses (1). That divergence was invisible only because\n');
-fprintf(fid, '`hours_trend_method` is `log_linear`, which makes `h` a pure exponential so every\n');
-fprintf(fid, 'window recovers the same rate. Do not reintroduce a local fallback: a missing\n');
-fprintf(fid, 'file must fail the run.\n\n');
-fprintf(fid, '**What is still built on both sides.** The terminal tail appended past the\n');
+fprintf(fid, '**Hours.** SimPaths reads the forward hours path from `hours_projection_*.csv`\n');
+fprintf(fid, 'and fails the run if the file is missing. It does not extend the reference CSV''s\n');
+fprintf(fid, '`h` column itself: with a trailing-growth window of its own the two sides would\n');
+fprintf(fid, 'drift apart, which `hours_trend_method = log_linear` (a pure exponential `h`)\n');
+fprintf(fid, 'would hide.\n\n');
+fprintf(fid, '**What is built on both sides.** The terminal tail appended past the\n');
 fprintf(fid, 'SimPaths horizon is not exported. Both sides construct it with the same rule\n');
 fprintf(fid, '(trailing-growth window 20 for the demographic path, 1 for hours), enforced only\n');
 fprintf(fid, 'by convention and a downstream tripwire test.\n\n');
@@ -684,7 +679,10 @@ for i = 1:M_.exo_nbr
 end
 fprintf(fid, '\n');
 
-fprintf(fid, '## 4. Java Implementation\n\n');
+fprintf(fid, '## 4. Java Sketch\n\n');
+fprintf(fid, 'A sketch of the state-space step. The implementation is\n');
+fprintf(fid, '`simpaths.model.macro.DSGEModel`, which multiplies each σ-unit shock by its σ\n');
+fprintf(fid, 'before `eps` enters the matrices.\n\n');
 fprintf(fid, '**IMPORTANT:** All indices in this documentation are **0-based** (Java convention).\n\n');
 fprintf(fid, '```java\n');
 fprintf(fid, 'public class DSGEPolicyFunction {\n');
@@ -749,16 +747,16 @@ fprintf(fid, '        return y;\n');
 fprintf(fid, '    }\n');
 fprintf(fid, '    \n');
 fprintf(fid, '    /**\n');
-fprintf(fid, '     * Get wage and inflation — both STATE variables since V15 —\n');
-fprintf(fid, '     * for feedback to microsimulation.\n');
+fprintf(fid, '     * Get wage and inflation, both state variables, for the\n');
+fprintf(fid, '     * microsimulation.\n');
 fprintf(fid, '     */\n');
 fprintf(fid, '    public double[] getMicrosimFeedback(double[] sOld, double[] eps) {\n');
 fprintf(fid, '        double[] sNew = updateStates(sOld, eps);\n');
 fprintf(fid, '        \n');
 fprintf(fid, '        double w = sNew[S_W];    // wage is a state\n');
-fprintf(fid, '        double pi = sNew[S_PI];  // inflation is ALSO a state (V15+ indexation)\n');
+fprintf(fid, '        double pi = sNew[S_PI];  // inflation is a state too (indexation)\n');
 fprintf(fid, '        \n');
-fprintf(fid, '        return new double[]{w, pi};  // feedback to the microsim\n');
+fprintf(fid, '        return new double[]{w, pi};  // to the microsimulation\n');
 fprintf(fid, '    }\n');
 fprintf(fid, '}\n');
 fprintf(fid, '```\n\n');
@@ -902,11 +900,10 @@ fprintf('\n');
 fprintf('\n');
 fprintf('Key for SimPaths:\n');
 fprintf('  - Wage (w) is a STATE → extract from s_t directly\n');
-fprintf('  - Inflation (π) is a STATE since V15 → extract from s_t\n');
+fprintf('  - Inflation (π) is a STATE too → extract from s_t\n');
 fprintf('\n');
 fprintf('Next steps:\n');
 fprintf('  1. Bundle written to %s/, which SimPaths reads directly\n', strrep(output_dir, '\', '/'));
-fprintf('  2. Implement DSGEPolicyFunction.java (see SIMPATHS_INTERFACE.md)\n');
-fprintf('  3. Load A, Bs, C, D matrices at SimPaths startup\n');
-fprintf('  4. Each period: s_new = A*s + Bs*eps; y = C*s + D*eps\n');
+fprintf('  2. Run the macro tests: mvn -q test -Dtest=''simpaths.model.macro.*Test''\n');
+fprintf('  3. Commit the bundle with the inputs it was built from (BundleProvenanceTest)\n');
 fprintf('\n');

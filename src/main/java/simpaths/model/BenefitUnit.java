@@ -1591,7 +1591,7 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
             try {
                 MultiKeyMap<Labour, Double> labourSupplyUtilityRegressionProbabilitiesByLabourPairs = convertRegressionScoresToProbabilities(labourSupplyUtilityRegressionScoresByLabourPairs);
                 
-                // Log labor supply decision details if DSGE logging enabled
+                // Log labor supply decision details if macro logging is on (any macro mode)
                 if (model.getMm_macroLogging().logsState() && model.getMm_macroModel().isOn()) {
                     model.trackLaborSupplyDecision(this, disposableIncomeMonthlyByLabourPairs, 
                         labourSupplyUtilityRegressionProbabilitiesByLabourPairs);

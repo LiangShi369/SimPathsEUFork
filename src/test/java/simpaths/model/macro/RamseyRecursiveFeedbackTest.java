@@ -359,7 +359,7 @@ public class RamseyRecursiveFeedbackTest {
         MacroModelManager m = newFeedbackManager(1.0);
         // The planner's own hours path really does decline, or the test proves nothing.
         assertTrue(assumedMeanH(m, START_YEAR + 2) < assumedMeanH(m, START_YEAR + 1),
-                "fixture no longer has a declining hours projection; this test is vacuous");
+                "the fixture's hours projection does not decline, so this test is vacuous");
 
         m.applyRamseyFeedbackWithRealized(START_YEAR + 1, 1000.0, 40.0);
         double neutralN = 1000.0 * assumedMeanN(m, START_YEAR + 2) / assumedMeanN(m, START_YEAR + 1);
@@ -391,7 +391,7 @@ public class RamseyRecursiveFeedbackTest {
         assertTrue(revisionPct > -1.20, "implausibly large dip: " + revisionPct + "%");
     }
 
-    /** The two-argument overload must behave exactly like the old employment-only call. */
+    /** The two-argument overload feeds employment only: it never latches an hours base. */
     @Test
     public void testTwoArgOverloadIsEmploymentOnly() throws Exception {
         MacroModelManager m = newFeedbackManager(1.0);

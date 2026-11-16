@@ -14,8 +14,9 @@ function build_population_projection(dsge_country, simpaths_pop_file, options)
 %       what SimPaths agents experience in the chosen country
 %   (2) All other model structure remains from the estimation country
 %
-% The output file is read by DSGEModelManager.initializeRamseyTrend() in
-% SimPaths to override the default forward extrapolation of N.
+% The exporters copy the output file into the bundle, where
+% MacroModelManager.initializeRamseyTrend() in SimPaths requires it and takes
+% the forward N path from it.
 %
 % Usage:
 %   build_population_projection('Spain', '../../input/ES/align_popProjections.xlsx')
@@ -26,8 +27,7 @@ function build_population_projection(dsge_country, simpaths_pop_file, options)
 %   simpaths_pop_file  - Full path to align_popProjections.xlsx
 %
 % Output:
-%   population_projection_[COUNTRY].csv in the current directory, columns
-%   time, N.
+%   population_projection_[COUNTRY].csv in output/, columns time, N.
 %
 % The CSV starts at projection_start (default: shared SimPaths integration
 % handoff quarter) and extends through the final projection
@@ -190,8 +190,8 @@ function build_population_projection(dsge_country, simpaths_pop_file, options)
         wap_annual(i) = sum(col_data, 'omitnan');
     end
     
-    % %,.0f is not a valid MATLAB format (no thousands-separator flag); it printed
-    % the year and silently dropped the value.
+    % %,.0f is not a valid MATLAB format (no thousands-separator flag); it prints
+    % the year and silently drops the value.
     fprintf('\n  Working-age population (15-64):\n');
     fprintf('    %d: %.0f\n', years(1), wap_annual(1));
     fprintf('    %d: %.0f\n', years(end), wap_annual(end));

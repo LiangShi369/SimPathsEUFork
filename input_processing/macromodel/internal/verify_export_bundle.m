@@ -5,16 +5,12 @@ function verify_export_bundle(output_dir, country, options)
 %   verify_export_bundle(dir, 'Poland', 'dsge', true)    also the DSGE files
 %
 % WHY THIS EXISTS
-%   The exporters copy the Ramsey artefacts into the bundle behind
-%   `if exist(src,'file') ... else warn`. A missing source therefore produced a
-%   WARNING and an incomplete bundle, and an exporter that died partway through
-%   left a bundle whose halves came from different runs. Both shipped.
-%
-%   That is what happened on 2026-08-14: export_dynamic_for_simpaths errored on
-%   the copy step after it had already written the policy matrices, so the
-%   bundle ended up holding DSGE matrices from a 16:30 estimation next to Ramsey
-%   files from 12:51 -- a cross-layer inconsistency with nothing to announce it,
-%   because each file individually looked fine.
+%   An exporter copies some artefacts into the bundle only when their source
+%   exists (the population projection, for one), so a missing source leaves an
+%   incomplete bundle. An exporter that dies partway through leaves a bundle
+%   whose halves come from different runs: DSGE matrices from one estimation
+%   next to Ramsey files from an earlier one. Each file individually looks fine,
+%   so nothing else announces either inconsistency.
 %
 %   Two things are checked, and both are failures rather than warnings:
 %     completeness  every file the bundle is supposed to contain is there

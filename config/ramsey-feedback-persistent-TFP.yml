@@ -1,6 +1,4 @@
-# Recursive Ramsey feedback experiment - arm 2 with the high-g_A scenario: feedback for headcount and hours, persistent belief (rho=1.0, default)
-# "persistent" in the file name is historical: the planner's feedback is always on with a
-# Ramsey layer, and rho (mm_ramseyFeedbackPersistence) is 1 here.
+# Recursive Ramsey feedback experiment - as ramsey-feedback-persistent.yml, with the high-g_A scenario: feedback for headcount and hours, persistent belief (rho=1.0, default)
 countryString: "Poland"
 maxNumberOfRuns: 8
 executeWithGui: false

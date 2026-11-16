@@ -1,6 +1,6 @@
 # DSGE Policy Function Export for SimPaths
 
-**Generated:** 06-Nov-2026 17:04:41
+**Generated:** 07-Nov-2026 17:50:14
 **Model:** Macromodel_UK_frozen
 
 ## 1. State-Space Representation
@@ -23,7 +23,7 @@ Where:
 
 **Key insight for SimPaths:**
 - Wage `w` is a **state variable** → extract from `s_t` directly
-- Inflation `π` is **also a state variable** since V15 (inflation
+- Inflation `π` is **also a state variable** (inflation
   indexation puts `pi(-1)` in the NKPC) → extract from `s_t`, NOT `y_t`
 - Every shock, eps_L and eps_h included, is an innovation in **standard-deviation
   units**: 1.0 is a one-σ shock, multiplied by its std dev before the policy matrices
@@ -43,7 +43,7 @@ Where:
 | `steady_state.csv` | 22×1 | Steady state values |
 | `shock_params.csv` | 8×4 | Shock AR(1) coefficients and std devs |
 | `model_info.json` | - | Variable names and indices |
-| `irfs_eps_L.csv` | - | IRFs for labor force shock |
+| `irfs_eps_*.csv` | - | Dynare responses to one-σ shocks, one file per exported shock |
 
 ### Ramsey trend handoff
 
@@ -64,14 +64,13 @@ downstream is how the two sides drift apart without any error surfacing.
 row whose label equals the handoff quarter and read forward from there. A
 projection may legitimately begin earlier than the handoff.
 
-**Hours.** `hours_projection_*.csv` exists because SimPaths used to extend the
-reference CSV's `h` column itself, with a different trailing-growth window (20)
-than this side uses (1). That divergence was invisible only because
-`hours_trend_method` is `log_linear`, which makes `h` a pure exponential so every
-window recovers the same rate. Do not reintroduce a local fallback: a missing
-file must fail the run.
+**Hours.** SimPaths reads the forward hours path from `hours_projection_*.csv`
+and fails the run if the file is missing. It does not extend the reference CSV's
+`h` column itself: with a trailing-growth window of its own the two sides would
+drift apart, which `hours_trend_method = log_linear` (a pure exponential `h`)
+would hide.
 
-**What is still built on both sides.** The terminal tail appended past the
+**What is built on both sides.** The terminal tail appended past the
 SimPaths horizon is not exported. Both sides construct it with the same rule
 (trailing-growth window 20 for the demographic path, 1 for hours), enforced only
 by convention and a downstream tripwire test.
@@ -123,7 +122,11 @@ by convention and a downstream tripwire test.
 | 6 | `eps_h` | hours worked | 0.800 | 0.3925 |
 | 7 | `eps_inv` | investment-specific | 0.850 | 2.5426 |
 
-## 4. Java Implementation
+## 4. Java Sketch
+
+A sketch of the state-space step. The implementation is
+`simpaths.model.macro.DSGEModel`, which multiplies each σ-unit shock by its σ
+before `eps` enters the matrices.
 
 **IMPORTANT:** All indices in this documentation are **0-based** (Java convention).
 
@@ -211,16 +214,16 @@ public class DSGEPolicyFunction {
     }
     
     /**
-     * Get wage and inflation — both STATE variables since V15 —
-     * for feedback to microsimulation.
+     * Get wage and inflation, both state variables, for the
+     * microsimulation.
      */
     public double[] getMicrosimFeedback(double[] sOld, double[] eps) {
         double[] sNew = updateStates(sOld, eps);
         
         double w = sNew[S_W];    // wage is a state
-        double pi = sNew[S_PI];  // inflation is ALSO a state (V15+ indexation)
+        double pi = sNew[S_PI];  // inflation is a state too (indexation)
         
-        return new double[]{w, pi};  // feedback to the microsim
+        return new double[]{w, pi};  // to the microsimulation
     }
 }
 ```

@@ -4,7 +4,7 @@
 
 This document describes the workflow for creating country-specific DSGE models for SimPaths integration. The German model serves as the template; other countries (Spain, Poland, UK, Sweden) follow the same structure with country-specific calibration and estimation.
 
-## Model File Architecture (Refactored)
+## Model File Architecture
 
 The DSGE model uses a **template + wrapper** pattern for multi-country support:
 
@@ -37,7 +37,7 @@ input_processing/macromodel/
 
 | File | Purpose |
 |------|---------|
-| `Macromodel_[COUNTRY].mod` | Wrapper → estimation (runs Dynare as before) |
+| `Macromodel_[COUNTRY].mod` | Wrapper → estimation (runs Dynare) |
 | `Macromodel_[COUNTRY]_frozen.mod` | Simulation (auto-generated, posterior modes hardcoded) |
 
 ## Parameter Classification
@@ -49,7 +49,7 @@ These are "deep" parameters with strong theoretical foundations:
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
 | `beta` | 0.99 | Quarterly discount factor (~4% annual) |
-| `sigma` | 1.0 | Log utility (standard) |
+| `sigma` | 2.0 | Inverse intertemporal elasticity of substitution (IES 0.5) |
 | `alpha_m` | 0.5 | Matching function elasticity (Petrongolo & Pissarides 2001) |
 | `eta` | 0.5 | Hosios efficiency condition |
 
@@ -62,14 +62,17 @@ These vary by country but are calibrated, not estimated:
 | `chi_L` | Labor force share, L/WAP | Eurostat LFS | Age 15-64, estimation-sample mean |
 | `chi_u` | Unemployment **share**, U/WAP | `chi_L` × sample-mean ILO rate | **Not** the U/L rate |
 | `chi_n` | Total employment share, N/WAP | Derived: `chi_L - chi_u` | Total employment, not employees |
+| `delta` | Separation rate | OECD EPL data | Higher for flexible markets |
+| `lambda_w` | Wage stickiness | Institutional | Collective bargaining coverage |
+| `phi_pi`, `phi_y` | Taylor rule | Literature | ECB for €-zone, BoE for UK, Riksbank for Sweden |
 
 > **Calibrate `chi_L` and `chi_u`; derive `chi_n`. Never the other way round.**
 > The identity (eq. 10) requires `chi_u = chi_L - chi_n`, but `chi_L` and `chi_n`
 > are two large, similar numbers, so computing `chi_u` as their difference
 > amplifies any rounding by more than an order of magnitude. Rounding Poland's
-> `chi_n` from 0.6777 to 0.70 turned `chi_u` from 0.052 into 0.030 — a 43% error
-> in the coefficient scaling the whole latent u channel, worth ~156 log points of
-> marginal likelihood. Deriving `chi_n` from `chi_u` keeps errors proportional.
+> `chi_n` from 0.6777 to 0.70 would turn `chi_u` from 0.052 into 0.030, a 43% error
+> in the coefficient scaling the whole latent u channel, which costs about 156 log
+> points of marginal likelihood. Deriving `chi_n` from `chi_u` keeps errors proportional.
 >
 > **Use the estimation-sample mean unemployment rate, not a recent window.** The
 > model is linearised around the sample it is estimated on. Poland 2005-2025
@@ -77,12 +80,8 @@ These vary by country but are calibrated, not estimated:
 > `test_calibration_identities.m` checks both the identity and that the implied
 > rate matches the sample.
 >
-> **Two errors nearly cancelled historically.** Poland's original `chi_u = 0.05`
-> was entered as the U/L rate (too big by ~1/`chi_L`) on a low-unemployment window
-> (too small by ~1.75x), landing close to the correct 0.0523 by accident.
-| `delta` | Separation rate | OECD EPL data | Higher for flexible markets |
-| `lambda_w` | Wage stickiness | Institutional | Collective bargaining coverage |
-| `phi_pi`, `phi_y` | Taylor rule | Literature | ECB for €-zone, BoE for UK, Riksbank for Sweden |
+> **`chi_u` is a share of the working-age population, not the U/L rate.** Entered
+> as the U/L rate it is too big by a factor of about 1/`chi_L`.
 
 **Country-specific values:**
 
@@ -110,14 +109,16 @@ the search-and-matching block is ever taken literally as a model of employee job
 
 ### Tier 3: Estimated from Country Data
 
-Only `omega_h` and the shock standard deviations are estimated; every structural
-parameter is fixed at its calibrated value because the identification problems are
-structural rather than data-specific. The country estimation file is the authority —
-the Poland priors below are illustrative of the shape, not a second copy to maintain.
+Only `omega_h`, `phi_inv_r` and the shock standard deviations are estimated; every
+other structural parameter is fixed at its calibrated value because the identification
+problems are structural rather than data-specific. The country estimation file is the
+authority — the Poland priors below are illustrative of the shape, not a second copy to
+maintain.
 
 | Parameter | Prior (Poland) | Description |
 |-----------|----------------|-------------|
 | `omega_h` | Beta(0.35, 0.10) | Hours weight in production |
+| `phi_inv_r` | Gamma(0.50, 0.25) | Cost-of-capital sensitivity of investment |
 | `stderr eps_a` | InvGamma(0.50, 0.25) | Technology shock |
 | `stderr eps_d` | InvGamma(0.50, 0.25) | Demand shock |
 | `stderr eps_r` | InvGamma(0.40, 0.15) | Monetary shock |
@@ -177,12 +178,12 @@ whole sample, with no splicing:
 | 3-month rate | Euribor (ECB) or Eurostat `irt_st_m` | OECD STES, the same monthly-average concept |
 
 Three checks in `make_datasets.do` hold these to the other countries' concepts
-(contract #39 in `Integration_Contracts.md`): the ONS-based GDP must lie within 5%
+(contract 39 in `Integration_Contracts.md`): the ONS-based GDP must lie within 5%
 of Eurostat's own UK `CLV15_MEUR` series where that exists (2026-10 vintage: -0.3%
 to +3.3%, ONS revisions since 2020), the fixed rate is read off Eurostat's UK GDP
 pair like Poland's and Sweden's, and hours per employee must lie in [200, 700] per
-quarter for every country. Before it was replaced, ONS `D7BT` equalled Eurostat's
-UK HICP in all 299 months of 1996m1-2020m11.
+quarter for every country. Where both exist, ONS `D7BT` equals Eurostat's UK HICP in
+all 299 months of 1996m1-2020m11.
 
 The re-referencing is not cosmetic. A chain-linked component is valued at its
 reference year's relative prices, so the base-year shares `calibrate_growth_model`
@@ -219,8 +220,8 @@ Two rules, for any country with its own currency:
   rate. `real_wage_per_employee` divides by the domestic HICP, so a euro
   numerator puts every exchange-rate swing into the "real" wage. For Sweden the
   implied conversion factor runs from 0.085 to 0.119 over 2001-2025; for Poland
-  `w_level` fell 28% between 2008q3 and 2009q1 while output per hour was flat
-  (issue #29). Poland's and Sweden's D1/D11 are therefore `CP_MNAC`, and the UK's
+  the wage at current rates falls 28% between 2008q3 and 2009q1 while output per
+  hour is flat. Poland's and Sweden's D1/D11 are therefore `CP_MNAC`, and the UK's
   are the ONS's GBP series.
 
 The deflated national-currency wage is then converted to euro at the *fixed*
@@ -241,9 +242,9 @@ no MATLAB stage reads the column.
 ECB Euribor for Germany and Spain, Eurostat `irt_st_m` for Poland (WIBOR) and
 Sweden, OECD STES `GBR.M.IR3TIB` for the UK, whose `irt_st_m` series stops at
 2024m3 (over 1999m1-2024m3 the two differ by -0.002 pp on average and at most
-0.12 pp). Poland used OECD MEI `POL.IR3TIB01.ST.M` until 2026-10; that dataset
-stopped at 2024-01 and was an end-of-month value, so it is not interchangeable
-with the Eurostat series and must not be spliced onto it.
+0.12 pp). OECD MEI `POL.IR3TIB01.ST.M` is no substitute for Poland: it ends in
+2024-01 and is an end-of-month value, so it must not be spliced onto the Eurostat
+series.
 
 ### Data Preparation
 
@@ -253,7 +254,7 @@ Extend the Stata script `make_datasets.do` with a country branch. For each count
 3. Set `startdate`/`enddate`
 4. Add the HICP series to `make_datasets_hicp.do` (its Eurostat code and output name)
    if it is not already there; X-13 adjusts every series listed there.
-   A country Eurostat no longer covers needs its own price-level file, as the UK's
+   A country Eurostat does not cover needs its own price-level file, as the UK's
    `hicp_q_sa_uk.dta` from `make_datasets_hicp_uk.do`, selected through `hicp_file`
 5. Add the SimPaths population workbook as `input/{CC}/align_popProjections.xlsx`.
    `build_population_projection` reads its `Population_projections` sheet, or,
@@ -274,7 +275,7 @@ country_params/{Country}_growth_params.json
 ```
 
 Copy `Poland_growth_params.json` and set the structural inputs: `alpha_K`, `sigma`,
-`phi`, `delta_annual`, `beta_annual`, `base_year`, `tfp_growth_annual`, the
+`delta_annual`, `beta_annual`, `base_year`, `tfp_growth_annual`, the
 `terminal_growth` block, and the inflation target. `base_year` **must** equal the
 year of the first row of the levels CSV — `ramsey_trend.m` asserts this.
 
@@ -290,28 +291,23 @@ Calibrate `chi_L` and `chi_u` from that country's own sample and **derive** `chi
 (see the Tier 2 warning above). `test_calibration_identities.m` will fail loudly if
 the triple is inconsistent or the implied rate does not match the estimation sample.
 
-There is no static model. Static artefacts (`*_static.mod`, `generate_static_model.m`,
-`export_static_for_simpaths.m`, `static_M.csv`) were removed from the pipeline; do not
-recreate them.
-
 ### Step 4: Run the full workflow
 
 ```matlab
 >> run_full_workflow('Spain')
 ```
 
-This executes, in order:
-1. Ramsey growth-model calibration (`calibrate_growth_model`)
-2. Ramsey trend solve and detrending (`ramsey_trend`)
-3. SimPaths-aligned population projection (`build_population_projection`)
-4. Bayesian estimation (Dynare)
-5. Frozen-model generation (`generate_frozen_model`)
-6. Dynamic policy-matrix export for SimPaths (`export_dynamic_for_simpaths`)
-7. Postestimation analysis and summary report
-
-Note the ordering caveat in `docs/Integration_Contracts.md`: step 3 writes the
-demographic tail that step 2 consumes, so a *changed demographic projection* needs a
-second run to propagate fully.
+This executes, in order (the step labels are the ones the workflow prints):
+- 0a. Ramsey growth-model calibration (`calibrate_growth_model`)
+- 0b. Ramsey trend solve and detrending (`ramsey_trend`)
+- 0c. SimPaths-aligned population projection (`build_population_projection`). Step 0b reads the
+  demographic tail that 0c writes, so when 0c changes `demographic_L_{country}.csv` the workflow
+  solves 0b a second time on the new demographics and reports how far the terminal anchor moved.
+- 0d. Ramsey projection diagnostic plot
+- 1. Bayesian estimation (Dynare)
+- 2. Frozen-model generation (`generate_frozen_model`)
+- 3. Dynamic policy-matrix export for SimPaths (`export_dynamic_for_simpaths`)
+- 4. Postestimation analysis and summary report
 
 Optional example (skip postestimation):
 
@@ -325,17 +321,15 @@ After generating models for all countries, verify:
 
 ### 1. Parameter Plausibility
 
-Check that estimated parameters are in reasonable ranges:
-- `rho_h` ∈ [0.6, 0.95] (hours persistence)
-- `psi_hy` ∈ [0.01, 0.10] (hours-demand elasticity)
+Check that the estimated structural parameters lie in reasonable ranges:
 - `omega_h` ∈ [0.2, 0.5] (hours weight)
+- `phi_inv_r` > 0 and well inside its prior's support (cost-of-capital channel)
 
 ### 2. Cross-Country Comparisons
 
 Expected patterns:
 - Higher `delta` (separation rate) for UK, Spain (flexible markets)
 - Higher `lambda_w` (wage stickiness) for Germany, Sweden (collective bargaining)
-- Higher `psi_hy` for Germany (Kurzarbeit) than UK
 
 ### 3. Policy-Matrix Sign Verification
 
@@ -352,16 +346,13 @@ For all countries, verify the impact (t=0) responses in the exported bundle
 - h↑ → π↓ (marginal cost falls: the marginal product rises at once, the
   staggered wage only partly)
 
-All four patterns hold in all four country bundles (checked 2026-10) and in the
-UK bundle (2026-10-21; impact: L↑ moves w by -0.056 and π by -0.0009, h↑ moves w
-by +0.0063 and π by -0.0025). Earlier
-versions of this list expected h↑ → w↓, which the model cannot produce by
-construction.
+All four patterns hold in the committed Poland and UK bundles (checked 2026-11-07 on
+period 0 of `irfs_eps_L.csv` and `irfs_eps_h.csv`).
 
 Remember that the exported matrices hold **raw `ghu`** entries: a one-standard-deviation
 response is `ghu(y, eps_j) * sigma_j` (multiply, never divide), for every shock, `eps_L` and
 `eps_h` included: all are innovations in standard-deviation units, and the labour force and hours
-follow their calibrated AR(1) (contract #37). See contracts #1, #3 and #37 in
+follow their calibrated AR(1) (contract 37). See contracts 1, 3 and 37 in
 `docs/Integration_Contracts.md`.
 
 ## File Organization
@@ -408,9 +399,6 @@ input_processing/macromodel/
     └── BUNDLE_PROVENANCE.txt
 ```
 
-There is no `static_M.csv` and no `*_static.mod`. The static integration path was
-removed; do not recreate it.
-
 ## Troubleshooting
 
 ### Common Issues
@@ -425,18 +413,12 @@ removed; do not recreate it.
    - Verify discount factor β < 1
    - Check for typos in parameter values
 
-3. **M matrix has wrong signs**
-   - Verify vacancy equation uses structural form: v = -(1 + β*λ_w)*w
-   - Check that labor market equilibrium is correctly specified
-
-4. **Cross-country parameter differences seem implausible**
+3. **Cross-country parameter differences seem implausible**
    - Review data sources for consistency
    - Check seasonal adjustment methods match
    - Verify sample periods are comparable
 
 ## Version Control
 
-Each country model should be tracked separately in Git:
-- Commit estimation results after successful runs
-- Tag releases when M matrices are updated for SimPaths
+- Commit the data files, the frozen model and the bundle they produced together (contracts 18 and 33)
 - Document any country-specific modifications in commit messages

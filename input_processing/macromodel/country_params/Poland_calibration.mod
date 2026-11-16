@@ -38,7 +38,7 @@ rho_v    = 0.85;    // vacancy persistence (Poland: somewhat faster hiring adjus
 rho_sep  = 0.8;     // separation shock persistence
 rho_d    = 0.8;     // preference/demand shock persistence
 
-// ----- HABIT PERSISTENCE (V14) -----
+// ----- HABIT PERSISTENCE -----
 hab      = 0.5;     // external habit formation (standard Euro area range)
 
 // ----- NEW KEYNESIAN PARAMETERS -----
@@ -48,7 +48,7 @@ lambda_p = 0.03;    // Phillips curve slope (slightly steeper than Germany)
 phi_mc   = 1.0;     // output gap effect on marginal cost (same structural mechanism)
 phi_v_y  = 5.0;     // vacancy response to demand conditions (same mechanism)
 
-// ----- INFLATION INDEXATION (V15: Smets-Wouters style) -----
+// ----- INFLATION INDEXATION (Smets-Wouters style) -----
 // Poland has more backward-looking inflation behavior than the Euro area
 // due to indexation clauses in contracts and administered prices.
 iota_p   = 0.45;    // partial indexation (higher than Germany's 0.35)

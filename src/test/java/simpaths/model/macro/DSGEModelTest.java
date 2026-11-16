@@ -167,7 +167,7 @@ public class DSGEModelTest {
         DSGEState.VarIndices idx = model.getVarIndices();
         assertNotNull(idx, "VarIndices should be loaded");
         assertTrue(idx.sW >= 0 && idx.sW < model.getNumStates(), "w index should be valid");
-        // pi is a state in the current (V15+, indexation) exports
+        // pi is a state in the current exports (iota_p indexation)
         assertTrue(idx.piIsState, "pi should resolve to the state side in the current export");
         assertTrue(idx.piIdx >= 0 && idx.piIdx < model.getNumStates(), "pi state index should be valid");
 
@@ -359,7 +359,7 @@ public class DSGEModelTest {
     /**
      * Contract 37: a one-σ labour-force (or hours) innovation in one quarter moves L (h) by
      * σ on impact and by σ ρ^k after k quarters, with ρ read from the bundle and not zero.
-     * Fails on a bundle exported with the old zero-persistence switch.
+     * Fails on a bundle exported with zero persistence for the labour force or hours.
      */
     @Test
     public void testLabourForceInnovationDecaysAtTheBundlesPersistence() {

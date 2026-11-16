@@ -23,10 +23,9 @@ import org.apache.log4j.Logger;
  *
  * <h3>Shock Units</h3>
  * <p>Every column is an innovation in standard-deviation units, as in {@link DSGEModel}:
- * 1.0 is a one-σ shock, eps_L and eps_h included. A scenario file written before 2026-11
- * with an eps_L or eps_h column meant a percent level and must be rewritten. Because the
- * labour force and hours are persistent, a shock repeated every quarter accumulates (at a
- * persistence of 0.95 a constant 1σ shock converges to twenty times its size) and can trip
+ * 1.0 is a one-σ shock, eps_L and eps_h included. Because the labour force and hours are
+ * persistent, a shock repeated every quarter accumulates (at a persistence of 0.95 a
+ * constant 1σ shock converges to twenty times its size) and can trip
  * {@code mm_dsgeMaxStateDeviation}.</p>
  *
  * <p>Scenario shocks are the only shocks the DSGE receives.</p>
@@ -107,7 +106,7 @@ public class DSGEShockScenario {
         List<String> allLines = Files.readAllLines(csvPath);
 
         // Comment/blank filtering and row splitting live in MacroCsv so the two
-        // scenario readers cannot drift apart again (audit §9).
+        // scenario readers cannot drift apart.
         List<String> lines = MacroCsv.stripCommentsAndBlanks(allLines);
 
         if (lines.size() < 2) {

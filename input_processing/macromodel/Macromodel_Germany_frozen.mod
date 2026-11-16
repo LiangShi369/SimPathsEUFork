@@ -45,24 +45,17 @@
 
 //
 // PURPOSE:
-// This model serves as "economic guardrails" for a dynamic microsimulation.
-// It provides general equilibrium wage responses to labor supply changes
-// from a discrete choice microsimulation model.
+// This model is the business-cycle layer of the macro model that serves as
+// "economic guardrails" for the SimPaths dynamic microsimulation: it gives
+// the cyclical deviation of the real wage around the Ramsey trend.
 //
-// INTERFACE WITH MICROSIMULATION:
-// ┌─────────────────┐                    ┌─────────────────┐
-// │  Microsim       │  ── L (labor) ──►  │  DSGE           │
-// │  (Java)         │  ── h (hours) ──►  │  (Dynare→Java)  │
-// │                 │  ◄── w (wage) ───  │                 │
-// │                 │  ◄── pi (infl) ──  │                 │
-// └─────────────────┘                    └─────────────────┘
+// INTERFACE WITH SIMPATHS (one-way):
+//   scenario shocks (sigma-units) --> DSGE --> w (cycle wage) --> SimPaths
+//   pi is computed and recorded but reaches no agent. The DSGE takes no
+//   input from SimPaths: L and h are exogenous AR(1) processes, observed
+//   in estimation.
 //
-// INPUT:  L  = labor force change (extensive margin: participation)
-//         h  = hours per worker change (intensive margin: hours choice)
-// OUTPUT: w  = real wage change (equilibrium response)
-//         pi = inflation (equilibrium response)
-//
-// FREQUENCY: Quarterly (for estimation), convert to annual for microsim
+// FREQUENCY: Quarterly; SimPaths averages four quarterly steps per year
 // =========================================================================
 
 // Variable declarations
@@ -73,19 +66,19 @@ var
     c       // consumption (Euler equation)          [OBSERVED]
     gap     // demand-supply gap (d - y)
     R       // nominal interest rate
-    pi      // inflation                        [OUTPUT TO MICROSIM]
-    w       // real wage (aggregate)            [OUTPUT TO MICROSIM]
+    pi      // inflation                        [recorded only]
+    w       // real wage (aggregate)            [OUTPUT TO SIMPATHS]
     w_star  // reset wage (newly negotiated)    [Gertler-Trigari]
     u       // unemployment level (log-deviation, for internal dynamics)
     u_rate  // unemployment RATE gap (pp, for observation)
     v       // vacancies
     n       // employment
-    h       // hours per worker (intensive margin) [INPUT FROM MICROSIM]
+    h       // hours per worker (intensive margin) [exogenous AR(1)]
     m       // matches
     mc      // marginal cost
     x       // technology (TFP)
     theta   // labor market tightness (v/u)
-    L       // labor force (participation)     [INPUT FROM MICROSIM]
+    L       // labor force (participation)     [exogenous AR(1)]
     k       // capital stock (predetermined)    [CAPITAL EXTENSION]
     inv     // investment (reduced-form rule)    [CAPITAL EXTENSION]
     sep_shock    // separation shock process
@@ -97,9 +90,9 @@ varexo
     eps_r       // monetary policy shock
     eps_d       // PREFERENCE/DEMAND shock (confidence, fiscal, exports)
     eps_p       // cost-push / price markup shock (energy, imports, markup)
-    eps_L       // labor force shock (FROM MICROSIM)
+    eps_L       // labor force shock
     eps_sep     // separation rate shock
-    eps_h       // hours shock (FROM MICROSIM or Kurzarbeit policy)
+    eps_h       // hours shock (e.g. short-time work)
     eps_inv;    // investment shock [CAPITAL EXTENSION]
 
 // Parameters
@@ -134,15 +127,15 @@ parameters
     psi_wL      // wage response to labor force (bypasses slow θ channel)
     // DEMAND COMPOSITION
     s_inv       // steady-state investment share of GDP (I_ss/Y_ss)
-    // CAPITAL EXTENSION PARAMETERS (Phase 2: Approach B)
+    // CAPITAL PARAMETERS
     alpha_k     // capital share in production (Cobb-Douglas)
     delta_k     // quarterly capital depreciation rate
     rho_inv     // investment persistence
     phi_inv_y   // investment sensitivity to output gap
     phi_inv_r   // investment sensitivity to interest rate
-    // HABIT PERSISTENCE (V14)
+    // HABIT PERSISTENCE
     hab         // external habit formation parameter (0 = no habits, 1 = full)
-    // INFLATION INDEXATION (V15)
+    // INFLATION INDEXATION
     iota_p;     // backward-looking inflation indexation (0 = no indexation, 1 = full)
 
 // =========================================================================
@@ -158,16 +151,14 @@ parameters
 //   - National accounts: Destatis VGR
 //   - Monetary policy: ECB, Bundesbank
 //
-// To convert to ANNUAL frequency for microsim:
-//   rho_annual = rho_quarterly^4
-//   beta_annual = beta_quarterly^4
-//   delta_annual = 1 - (1-delta_quarterly)^4
+// The model is quarterly; SimPaths steps it four quarters per simulated year,
+// so no parameter is converted to annual frequency.
 // =========================================================================
 
 // ----- PREFERENCES & TECHNOLOGY -----
 beta     = 0.99;    // quarterly discount factor → ~4% annual real rate
 sigma    = 2.0;     // IES = 1/sigma = 0.5 (halves R→c sensitivity vs sigma=1)
-                    // Motivation: sigma=1 (log utility) gave 49% monetary share
+                    // Motivation: sigma=1 (log utility) gives a 49% monetary share
                     // because 1/sigma=1.0 makes R→c channel too potent.
                     // Estimates for Germany: Pytlarczyk (2005) ~1.4, Smets-Wouters
                     // (2003, Euro area) ~1.6, Christiano et al. (2005) ~1.4-2.0.
@@ -190,26 +181,26 @@ rho_r    = 0.85;    // interest rate smoothing (ECB is quite persistent)
 // ----- SHOCK PERSISTENCE -----
 rho_a    = 0.95;    // technology persistence (annual: 0.81)
 rho_L    = 0.95;    // labor force persistence - CALIBRATED to resolve collinearity
-                    // (Perplexity fix: rho_L and SE_eps_L were perfectly collinear)
+                    // (rho_L and SE_eps_L are collinear when both are estimated)
 rho_v    = 0.9;     // vacancy persistence (Germany: slow hiring adjustment)
 rho_sep  = 0.8;     // separation shock persistence
 rho_d    = 0.8;     // preference/demand shock persistence (confidence cycles)
 
-// ----- HABIT PERSISTENCE (V14) -----
+// ----- HABIT PERSISTENCE -----
 hab      = 0.5;     // external habit formation (Smets-Wouters: 0.5-0.7 for Euro area)
 
 // ----- NEW KEYNESIAN PARAMETERS -----
 lambda_p = 0.02;    // Phillips curve slope (Pytlarczyk 2005, Hristov 2016 for Germany)
 phi_mc   = 1.0;     // output gap effect on marginal cost (increased for demand→inflation)
-phi_v_y  = 5.0;     // vacancy response to demand conditions (ITERATION 9: high to amplify demand→n channel)
+phi_v_y  = 5.0;     // vacancy response to demand conditions (high, to amplify the demand→n channel)
 
-// ----- INFLATION INDEXATION (V15: Smets-Wouters style) -----
+// ----- INFLATION INDEXATION (Smets-Wouters style) -----
 // Firms that cannot re-optimize prices index to lagged inflation.
-// iota_p = 0: purely forward-looking NKPC (V14 baseline)
+// iota_p = 0: purely forward-looking NKPC
 // iota_p = 1: full indexation (Christiano et al. 2005)
 // Smets-Wouters (2003) Euro area posterior: ~0.2-0.5
-// Effect: reduces impact of cost-push shocks by factor 1/(1+iota_p*beta),
-// adds inflation persistence, dampens the R→c→gap→v amplification chain.
+// Effect: scales the marginal-cost term by 1/(1+iota_p*beta) (eps_p enters
+// unscaled), adds inflation persistence, dampens the R→c→gap→v amplification chain.
 iota_p   = 0.35;    // partial indexation (SW2003 range for Euro area)
 
 // ----- WAGE RIGIDITY (Gertler-Trigari 2009) -----
@@ -224,15 +215,13 @@ lambda_w = 0.75;    // baseline: 1-year average wage duration
 // Germany adjusts 70-90% of labor input via hours (not employment) in recessions
 // Sources: IAB, Möller (2010), Burda & Hunt (2011)
 rho_h    = 0.85;    // hours persistence - CALIBRATED to resolve collinearity
-                    // (Perplexity fix: rho_h and SE_eps_h were perfectly collinear)
+                    // (rho_h and SE_eps_h are collinear when both are estimated)
                     // Kurzarbeit contracts average ~6 months (quarterly ρ ≈ 0.85)
 omega_h  = 0.437293;  // ESTIMATED (posterior mode)    // hours weight in production: total labor = n + omega_h * h
                     // < 1.0 because headcount matters more than marginal hours
                     // Matches production function literature (Chetty et al. 2012)
-// NOTE (Option B): psi_hy and psi_hw REMOVED - h is now pure AR(1)
-// Rationale: h comes from SimPaths (household discrete choice), not from
-// macro demand conditions. The gap→h channel was a business cycle mechanism
-// inappropriate for annual policy analysis.
+// h is a pure AR(1): no output-gap or wage term moves hours. The DSGE has no
+// hours choice; on the micro side SimPaths' household choice sets hours.
 
 // ----- DIRECT LABOR FORCE → WAGE EFFECT (CALIBRATED) -----
 // Rationale: Reduced-form "wage drift" capturing competitive pressure from
@@ -242,11 +231,10 @@ omega_h  = 0.437293;  // ESTIMATED (posterior mode)    // hours weight in produc
 // wages due to increased competition, independent of formal bargaining.
 // Calibration target: Long-run wage elasticity to labor supply ~ -0.2 to -0.4
 // (Borjas 2003, Dustmann et al. 2017 for Germany)
-// NOTE (Option B): L is now OBSERVED, so this effect could potentially be
-// estimated. However, we keep it calibrated for stability.
+// L is observed, so psi_wL could be estimated; it is calibrated for stability.
 psi_wL   = -0.05;     // direct L→w elasticity (negative: ↑L → ↓w)
 
-// ----- DEMAND COMPOSITION (Option C: Smets-Wouters-style) -----
+// ----- DEMAND COMPOSITION (Smets-Wouters-style) -----
 // GDP expenditure decomposition: Y = C + I + G + NX
 // In log-deviations: d = (1-s_inv)*c + s_inv*inv
 // Government + net exports (~30% of GDP) lumped with consumption behavior.
@@ -254,18 +242,18 @@ psi_wL   = -0.05;     // direct L→w elasticity (negative: ↑L → ↓w)
 s_inv    = 0.20;    // investment share of GDP (Destatis VGR: ~20% for Germany)
                     // Residual (1-s_inv)=0.80 captures C + G + NX
 
-// ----- CAPITAL EXTENSION (Phase 2: Approach B) -----
+// ----- CAPITAL -----
 // Capital stock with reduced-form investment rule.
 // Captures capital deepening: as L declines, K/L rises, boosting MPL and wages.
 // Sources: Destatis VGR, Smets & Wouters (2003), Merz (1995), Andolfatto (1996)
 alpha_k  = 0.35;    // capital share (Destatis VGR: ~35% for Germany)
                     // Note: alpha_k + alpha_n = 0.35 + 0.65 = 1.0 (CRS)
 delta_k  = 0.025;   // quarterly depreciation ≈ 10% annual (standard)
-rho_inv  = 0.85;    // investment persistence - CALIBRATED at v11b posterior mode (0.848)
-                    // Perplexity Chat 087: cosn(rho_inv, phi_inv_r) = 0.9973 → fix to resolve
-                    // Option C hit unit root (0.9888) → singular Hessian
-phi_inv_y = 0.3;    // V15: Restored to small positive value as structural floor.
-                    // Estimation rejected accelerator (posterior 0.085 vs prior 1.5),
+rho_inv  = 0.85;    // investment persistence - CALIBRATED near its estimated mode (0.848)
+                    // Estimated with phi_inv_r it is collinear (cosn 0.9973) and runs to
+                    // a unit root (0.9888) with a singular Hessian.
+phi_inv_y = 0.3;    // small positive value as a structural floor.
+                    // Estimated, the accelerator is rejected (posterior 0.085 vs prior 1.5),
                     // but setting exactly 0 produces absurd conditional responses:
                     // negative demand shock → R↓ → inv↑ (investment rises in recessions).
                     // 0.3 ensures weak demand co-movement without dominating unconditional VD.
@@ -318,17 +306,17 @@ model(linear);
     y = x + alpha_k * k(-1) + alpha_n * (n + omega_h * h) + phi_mc * gap;
     
     // -----------------------------------------------------------------------
-    // INTENSIVE MARGIN: HOURS EQUATION (Option B: Pure AR(1))
+    // INTENSIVE MARGIN: HOURS EQUATION (pure AR(1))
     // -----------------------------------------------------------------------
     
-    // 2. Hours per worker - EXOGENOUS LABOR SUPPLY FROM SIMPATHS
+    // 2. Hours per worker - exogenous AR(1), observed in estimation
     h = rho_h * h(-1) + eps_h;
     
     // -----------------------------------------------------------------------
-    // DEMAND SIDE: OPTION C (Smets-Wouters-style C/I decomposition)
+    // DEMAND SIDE: Smets-Wouters-style C/I decomposition
     // -----------------------------------------------------------------------
     
-    // 2a. Consumption Euler equation with EXTERNAL HABITS (V14)
+    // 2a. Consumption Euler equation with EXTERNAL HABITS
     c - hab*c(-1) = (c(+1) - hab*c) - (1/sigma) * (R - pi(+1)) + d_shock;
 
     // 2b. Aggregate demand identity (GDP expenditure decomposition)
@@ -348,7 +336,7 @@ model(linear);
     // PRICING
     // -----------------------------------------------------------------------
     
-    // 5. New Keynesian Phillips Curve with INFLATION INDEXATION (V15)
+    // 5. New Keynesian Phillips Curve with INFLATION INDEXATION
     pi = (iota_p / (1 + iota_p * beta)) * pi(-1)
        + (beta / (1 + iota_p * beta)) * pi(+1)
        + (lambda_p / (1 + iota_p * beta)) * mc + eps_p;
@@ -399,7 +387,7 @@ model(linear);
     // 13. Technology (AR(1))
     x = rho_a * x(-1) + eps_a;
     
-    // 14. Labor force (AR(1)) - OBSERVED IN ESTIMATION, INPUT FROM SIMPATHS
+    // 14. Labor force (AR(1)) - observed in estimation
     L = rho_L * L(-1) + eps_L;
     
     // 14b. Demand/preference shock AR(1) state
@@ -409,7 +397,7 @@ model(linear);
     sep_shock = rho_sep * sep_shock(-1) + eps_sep;
 
     // -----------------------------------------------------------------------
-    // CAPITAL EXTENSION (Phase 2: Explicit K with Investment Rule)
+    // CAPITAL: explicit K with an investment rule
     // -----------------------------------------------------------------------
 
     // K1. Capital accumulation (law of motion)
@@ -435,41 +423,16 @@ end;
 // =========================================================================
 // CALIBRATED SHOCK STANDARD DEVIATIONS
 // =========================================================================
-// PHASE 0: Calibrated std devs to match German data moments (2000-2024)
-// 
-// TARGET DATA MOMENTS (from data_for_dynare.csv, after demeaning):
-//   y:      std = 1.53%   (HP-filtered real GDP)
-//   n:      std = 0.66%   (HP-filtered employment)
-//   u_rate: std = 0.49 pp (HP-filtered unemployment rate)
-//   L:      std = 0.30%   (HP-filtered labor force)
-//   pi:     std = 1.91%   (QoQ annualized inflation, demeaned)
-//                         400*(P_t/P_{t-1}-1) per make_datasets.do; the Y-o-Y
-//                         series is computed there but not used as the observable
-//   R:      std = 1.80%   (Euribor, demeaned)
-//
-// =========================================================================
-// CALIBRATION PHASE 0: FINAL WORKING CALIBRATION (Iteration 15)
-// =========================================================================
-// 
-// DATA TARGETS (with QoQ annualized inflation):
-//   y std:             1.54%     pi std:    1.92%     R std:     1.81%
-//   n std:             0.66%     u_rate std: 0.49pp   L std:     0.30%
-//   y-pi corr:        +0.27      n-u_rate:  -0.84
-//
-// MODEL RESULTS (Iteration 15):
-//   y-pi correlation:  +0.44  (target: +0.27)    ✅ Positive, economic!
-//   y std:             1.59%  (target: 1.54%)    ✅ Excellent
-//   pi std:            1.77%  (target: 1.92%)    ✅ Good
-//   R std:             1.07%  (target: 1.81%)    ⚠️ Low (R volatility hard to match)
-//   n-u_rate corr:    -0.91   (target: -0.84)    ✅ Acceptable
-//   u_rate std:        0.62%  (target: 0.49pp)   ✅ Acceptable
+// Starting values. The estimation replaces the standard deviations it
+// estimates (estimated_params below); eps_sep, which is not estimated, keeps
+// the value set here.
 //
 shocks;
-    var eps_a;      stderr 1.0977;  // ESTIMATED    // technology: slightly reduced
+    var eps_a;      stderr 1.0977;  // ESTIMATED    // technology
     var eps_d;      stderr 0.3340;  // ESTIMATED    // demand: main driver for y-pi
-    var eps_r;      stderr 0.4557;  // ESTIMATED    // monetary: reduced from 0.80
-    var eps_L;      stderr 0.1423;  // ESTIMATED    // labor force: keep
-    var eps_sep;    stderr 0.08;    // separation: keep
+    var eps_r;      stderr 0.4557;  // ESTIMATED    // monetary
+    var eps_L;      stderr 0.1423;  // ESTIMATED    // labor force
+    var eps_sep;    stderr 0.08;    // separation (not estimated)
     var eps_h;      stderr 0.4241;  // ESTIMATED    // hours shock (Kurzarbeit): calibrated to σ(h) ≈ 0.8%
                                     // German data: σ(h) = 0.81%, σ(h)/σ(n) = 1.22
     var eps_p;      stderr 1.4682;  // ESTIMATED    // cost-push / price markup shock
@@ -486,7 +449,7 @@ estimated_params;
     // -----------------------------------------------------------------------
     
     // Vacancy posting cost (affects labor market tightness)
-    // FIXED: poorly identified, mode jumped around (0.02 → 0.14)
+    // FIXED: poorly identified; estimated, the mode moves between 0.02 and 0.14
     // Calibrated at 0.20 (Shimer 2005 literature lower bound)
     // kappa,          gamma_pdf,  0.20,   0.05;  // COMMENTED OUT - not identified
     
@@ -504,11 +467,11 @@ estimated_params;
     // phi_mc,         gamma_pdf,  0.2,    0.05;  // COMMENTED OUT
     
     // Vacancy demand sensitivity
-    // FIXED: was hitting boundary (0.07), poorly identified from data
+    // FIXED: estimated, it hits the boundary (0.07); poorly identified from data
     // phi_v_y,        gamma_pdf,  1.0,    0.5;  // COMMENTED OUT - fix at 1.0
     
     // Calvo wage stickiness (Gertler-Trigari 2009)
-    // FIXED: was hitting upper boundary (0.9787), almost full stickiness
+    // FIXED: estimated, it hits the upper boundary (0.9787), almost full stickiness
     // Fix at 0.75 = 4 quarter average duration (German collective agreements)
     // lambda_w,       beta_pdf,   0.75,   0.1;  // COMMENTED OUT - fix at 0.75
     
@@ -521,11 +484,11 @@ estimated_params;
     // sigma,          gamma_pdf,  2.0,    0.5;   // COMMENTED OUT - fix at 2.0
     
     // Taylor rule: inflation response (Taylor principle > 1)
-    // FIXED: mode kept hitting ~1.0, violating Taylor principle
+    // FIXED: estimated, the mode hits ~1.0, violating the Taylor principle
     // phi_pi,         gamma_pdf,  1.5,    0.15;  // COMMENTED OUT - fix at 1.5
     
     // Taylor rule: output response
-    // FIXED: was hitting boundary, not well identified jointly with phi_pi
+    // FIXED: estimated, it hits the boundary; not well identified jointly with phi_pi
     // phi_y,          gamma_pdf,  0.125,  0.03;  // COMMENTED OUT - fix at 0.125
     
     // Interest rate smoothing (ECB is persistent)
@@ -533,15 +496,15 @@ estimated_params;
     // rho_r,          beta_pdf,   0.85,   0.05;  // COMMENTED OUT - fix at 0.85
     
     // Technology shock persistence
-    // FIXED: was hitting upper boundary (0.9999), near unit root
+    // FIXED: estimated, it hits the upper boundary (0.9999), near a unit root
     // rho_a,          beta_pdf,   0.95,   0.03;  // COMMENTED OUT - fix at 0.95
     
     // Vacancy persistence (Germany: slow adjustment)
-    // FIXED: was hitting upper boundary (0.999)
+    // FIXED: estimated, it hits the upper boundary (0.999)
     // rho_v,          beta_pdf,   0.9,    0.05;  // COMMENTED OUT - fix at 0.9
     
     // Separation shock persistence
-    // FIXED: was hitting upper boundary (0.983), causing Hessian singularity
+    // FIXED: estimated, it hits the upper boundary (0.983) and makes the Hessian singular
     // rho_sep,        beta_pdf,   0.8,    0.05;  // COMMENTED OUT - fix at 0.8
     
     // -----------------------------------------------------------------------
@@ -570,7 +533,7 @@ estimated_params;
     // Hours shock
     stderr eps_h,       inv_gamma_pdf,  0.35,   0.10;   // hours shock (%)
     
-    // Labor force shock (Option B - L is observed)
+    // Labor force shock (L is observed)
     stderr eps_L,       inv_gamma_pdf,  0.12,   0.05;   // labor force shock (%)
     
     // -----------------------------------------------------------------------

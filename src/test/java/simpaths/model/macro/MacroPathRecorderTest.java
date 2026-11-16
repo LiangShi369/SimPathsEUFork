@@ -103,8 +103,8 @@ class MacroPathRecorderTest {
             "Default fallback jump schema should match current export layout");
         assertTrue(header.contains(",eps_a,eps_r,eps_d,eps_p,eps_L,eps_sep,eps_h,eps_inv,"),
             "Default fallback shock schema should match current export layout");
-        assertFalse(header.contains("match_shock"), "Fallback header should not include removed match_shock");
-        assertFalse(header.contains("eps_match"), "Fallback header should not include removed eps_match");
+        assertFalse(header.contains("match_shock"), "Fallback header should not include match_shock, which the model does not have");
+        assertFalse(header.contains("eps_match"), "Fallback header should not include eps_match, which the model does not have");
         }
 
     @Test

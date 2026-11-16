@@ -14,15 +14,17 @@
 %%   - Individual figures saved to Macromodel_Germany/graphs/
 %%   - Summary text saved to Macromodel_Germany/Output/postestimation_summary.txt
 %%
-%% V11 Note (Feb 2026):
-%%   - 8 shocks: eps_a, eps_d, eps_r, eps_p, eps_L, eps_sep, eps_h, eps_inv
-%%   - V13: eps_match dropped (contributed 0.0% to all VD, collinear with eps_sep)
+%% Model notes:
+%%   - 8 shocks: eps_a, eps_d, eps_r, eps_p, eps_L, eps_sep, eps_h, eps_inv. There
+%%     is no matching-efficiency shock: it contributes 0.0% to every variance
+%%     decomposition and is collinear with eps_sep
 %%   - Capital extension: k (capital stock), inv (investment) with estimated rule
-%%   - L and h are EXOGENOUS AR(1) from SimPaths (rho_L=0.95, rho_h=0.85 CALIBRATED)
-%%   - eps_p is independent cost-push shock in NKPC (replaces 0.40*eps_d term)
+%%   - L and h are EXOGENOUS AR(1) processes driven by eps_L and eps_h; rho_L and
+%%     rho_h are CALIBRATED per country in country_params/{C}_calibration.mod
+%%   - eps_p is an independent cost-push shock in the NKPC
 %%   - 9 params ESTIMATED: sigma_a, sigma_d, sigma_r, sigma_p, sigma_h, sigma_L,
 %%     sigma_inv, omega_h, phi_inv_r
-%%   - phi_inv_y FIXED at 0 (V11b): data rejects accelerator, cosn=0.9989 with rho_inv
+%%   - phi_inv_y is calibrated, not estimated: cosn = 0.9989 with rho_inv
 %% =========================================================================
 
 function postestimation_analysis(model_name, data_file)
@@ -65,12 +67,12 @@ config.sample_start = 2000;  % Fallback start year when the data file has no par
 config.data_dates = [];
 config.irf_horizon = 40;     % IRF horizon in quarters
 
-% Observable variables and their labels (8 observables: add consumption, observe L)
+% Observable variables and their labels (8 observables, consumption and L among them)
 config.obs_vars = {'y', 'inv', 'c', 'pi', 'R', 'n', 'L', 'h'};
 config.obs_labels = {'Output Gap (%)', 'Investment Gap (%)', 'Consumption Gap (%)', 'Inflation (% ann.)', 'Interest Rate (%)', ...
                      'Employment Gap (%)', 'Labor Force Gap (%)', 'Hours Gap (%)'};
 
-% Shock names and labels (8 shocks: eps_match dropped in V13)
+% Shock names and labels (8 shocks)
 config.shock_names = {'eps_a', 'eps_d', 'eps_r', 'eps_p', 'eps_L', 'eps_sep', 'eps_h', 'eps_inv'};
 config.shock_labels = {'Technology', 'Demand', 'Monetary', 'Cost-Push', 'Labor Force', 'Separation', 'Hours', 'Investment'};
 

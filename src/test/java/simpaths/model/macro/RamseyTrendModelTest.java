@@ -38,8 +38,7 @@ import java.util.List;
  * decoupled from the live {@code input/PL/MacroModel/} bundle and refreshed only by
  * {@code refresh_java_parity_fixtures('Poland')}. The LBJ stacked-time solver is
  * mirrored between {@code ramsey_trend.m} and {@code RamseyTrendModel.java}; labour
- * input is exogenous on both sides (the endogenous-labour variant was removed on
- * 2026-10-20, JuergenWiemers/SimPathsEU#28).</p>
+ * input is exogenous on both sides.</p>
  */
 public class RamseyTrendModelTest {
 
@@ -76,20 +75,18 @@ public class RamseyTrendModelTest {
      * exogenous fixture's MATLAB reference.
      *
      * <p>The two solvers are intended mirrors in exogenous mode. Measured
-     * deviations: 1.6e-13 on the path cross-validation; the terminal-quarter
-     * forward anchor measured 4.4e-11 until 2026-08-19, but that figure was not
-     * solver disagreement — it was the %.10f rounding of {@code A_terminal} in
-     * {@code growth_terminal_state.json} (~9 significant digits on a value of
-     * order 0.03). Now that the export writes {@code A_terminal} at %.16e, the
-     * worst measured anchor deviation is ~1.3e-11 (investment). Both are near
-     * machine precision, as the technical documentation's "~1e-12 parity"
-     * claims.</p>
+     * deviations: 1.6e-13 on the path cross-validation, and ~1.3e-11 (investment)
+     * at worst on the terminal-quarter forward anchor, with the export writing
+     * {@code A_terminal} in {@code growth_terminal_state.json} at %.16e. (At %.10f,
+     * ~9 significant digits on a value of order 0.03, the rounding of
+     * {@code A_terminal} alone puts the anchor at ~4.4e-11: that is not solver
+     * disagreement.) Both are near machine precision, as the technical
+     * documentation's "~1e-12 parity" claims.</p>
      *
-     * <p>This was previously 5e-3 — eight orders of magnitude looser than the worst
-     * observed deviation — justified by "path-construction differences that
-     * accumulate over ~100 quarters" which the measurements show do not exist. At
-     * that setting the suite would have passed a catastrophic parity regression
-     * without complaint.</p>
+     * <p>The measurements show no "path-construction differences that accumulate
+     * over ~100 quarters". A tolerance in the 1e-3 range, eight orders of magnitude
+     * above the worst observed deviation, would pass a catastrophic parity
+     * regression without complaint.</p>
      *
      * <p>1e-9 leaves ~20x headroom over the worst observed deviation for
      * platform/BLAS variation while still failing on any real divergence. If this
@@ -189,31 +186,32 @@ public class RamseyTrendModelTest {
     }
 
     /**
-     * The endogenous-labour variant was removed (JuergenWiemers/SimPathsEU#28). A bundle
-     * whose growth params still declare it must be refused at load, not silently solved as
-     * exogenous on an N path that was {@code l * WAP}.
+     * Labour input is exogenous. A bundle whose growth params declare
+     * {@code labor_supply: endogenous} must be refused at load, not silently solved as
+     * exogenous on an N path that is {@code l * WAP}.
      */
     @Test
     public void testEndogenousBundleIsRejected() throws IOException {
         assumeTestDataAvailable();
         Path json = tempDir.resolve("growth_params_endogenous.json");
-        // The current fixture carries no labor_supply key at all; inject the removed
-        // variant's declaration into the parameters block of an otherwise valid file.
+        // The fixture carries no labor_supply key at all; inject an endogenous
+        // declaration into the parameters block of an otherwise valid file.
         String content = growthParamsContent.replaceFirst("\"parameters\"\\s*:\\s*\\{",
                 "\"parameters\": {\n    \"labor_supply\": \"endogenous\",");
         assertNotEquals(growthParamsContent, content, "fixture should have a parameters block");
         Files.writeString(json, content);
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> new RamseyTrendModel().loadParams(json));
-        assertTrue(e.getMessage().contains("removed"), e.getMessage());
+        assertTrue(e.getMessage().contains("labor_supply=endogenous") && e.getMessage().contains("Re-export"),
+                e.getMessage());
     }
 
     @Test
     public void testExogenousLaborSupplyKeyStillLoads() throws IOException {
         assumeTestDataAvailable();
         Path json = tempDir.resolve("growth_params_exogenous.json");
-        // Bundles exported before the endogenous variant was removed (DE, ES, SE) still
-        // declare "labor_supply": "exogenous"; only "endogenous" is refused.
+        // A bundle may declare "labor_supply": "exogenous" explicitly; only "endogenous"
+        // is refused.
         String content = growthParamsContent.replaceFirst("\"parameters\"\\s*:\\s*\\{",
                 "\"parameters\": {\n    \"labor_supply\": \"exogenous\",");
         assertNotEquals(growthParamsContent, content, "fixture should have a parameters block");
@@ -271,15 +269,15 @@ public class RamseyTrendModelTest {
 
     /**
      * The annual->quarterly conversions and the BGP K/Y closure are computed on BOTH
-     * sides (calibrate_growth_model.m / ramsey_trend.m upstream; loadParams /
+     * sides (calibrate_growth_model.m / ramsey_trend.m in MATLAB; loadParams /
      * calculateBgpCapitalOutputRatio here). The `derived` block in growth_params is
-     * MATLAB's own values for them, previously exported and read by nothing.
+     * MATLAB's own values for them; production does not read it, this test does.
      * testQuarterlyConversions and testBgpCapitalOutputRatio re-derive the formulas
      * inside the test body, so they can never catch a MATLAB-side change; this can —
      * and it pins the duplicated formulas exactly where the 1e-9 anchor test is least
      * sensitive (the terminal closure sits ~900 quarters out, attenuated ~1e-7 on the
      * way back to quarter 0). If this fails, one side's formula moved: find which,
-     * do not loosen. (2026-08-19 boundary audit, C5.)
+     * do not loosen.
      */
     @Test
     public void testDerivedBlockMatchesJavaRecomputation() {
@@ -329,22 +327,22 @@ public class RamseyTrendModelTest {
         }
 
         @Test
-        public void testLegacyJsonWithoutTerminalGrowthKeepsConstantBaselineGrowth() throws IOException {
+        public void testJsonWithoutTerminalGrowthKeepsConstantBaselineGrowth() throws IOException {
         assumeTestDataAvailable();
 
-        Path paramsPath = tempDir.resolve("growth_params_legacy_constant.json");
+        Path paramsPath = tempDir.resolve("growth_params_constant.json");
         Files.writeString(paramsPath, withoutTerminalGrowth(growthParamsContent));
 
-        RamseyTrendModel legacyModel = solveSimpleExogenous(paramsPath, 24);
+        RamseyTrendModel constantModel = solveSimpleExogenous(paramsPath, 24);
         double expectedGrowth = extractJsonDouble(growthParamsContent, "tfp_growth_annual");
 
-        assertFalse(legacyModel.isTerminalGrowthEnabled(),
-            "Legacy JSON without terminal_growth should fall back to constant growth mode");
-        assertEquals(expectedGrowth, annualizedQuarterGrowth(legacyModel, 0), 1e-12,
-            "Quarter 0 annualized TFP growth should match the legacy baseline");
-        assertEquals(expectedGrowth, annualizedQuarterGrowth(legacyModel, 5), 1e-12,
+        assertFalse(constantModel.isTerminalGrowthEnabled(),
+            "JSON without terminal_growth should use constant growth");
+        assertEquals(expectedGrowth, annualizedQuarterGrowth(constantModel, 0), 1e-12,
+            "Quarter 0 annualized TFP growth should match the constant baseline");
+        assertEquals(expectedGrowth, annualizedQuarterGrowth(constantModel, 5), 1e-12,
             "Mid-sample annualized TFP growth should stay constant without terminal_growth");
-        assertEquals(expectedGrowth, annualizedQuarterGrowth(legacyModel, 15), 1e-12,
+        assertEquals(expectedGrowth, annualizedQuarterGrowth(constantModel, 15), 1e-12,
             "Later annualized TFP growth should stay constant without terminal_growth");
         }
 
@@ -431,27 +429,15 @@ public class RamseyTrendModelTest {
         // ========== 3. Forward-Parity Against MATLAB Export Contract ==========
 
     /**
-     * The MATLAB-Java cross-validation anchor.
-     *
-     * <p>Drives {@link MacroModelManager#initializeRamseyTrend} rather than assembling the
-     * projection locally. A local assembly was a fourth copy of the path-building rules and had
-     * silently gone stale: it extrapolated employment geometrically, reaching 35,983 thousand by
-     * 2103, where MATLAB's handoff solve splices the SimPaths-consistent demographic projection
-     * and reaches 9,641 — 273% apart. The test still passed because the frozen fixture predated
-     * MATLAB gaining that override, so Java was being checked against a MATLAB that no longer
-     * existed, over a projection production never uses. Regenerating the fixture on 2026-08-18
-     * exposed it. Route this through the production loader so the two can only drift together.</p>
-     */
-    /**
      * Every directory the Ramsey loader can be pointed at must spell the reference CSV
      * the way the loader derives it.
      *
      * <p>{@code MacroModelManager.initializeRamseyTrend} reads the country tag out of
      * {@code growth_params_<Country>.json} and then lower-cases it to build
      * {@code growth_model_reference_<country>.csv}. The export bundle is written that way,
-     * but the parity fixtures were copied in under a capitalised name, so the loader's
-     * derived name matched only on a case-insensitive filesystem. Every Windows run stayed
-     * green while CI on Linux failed outright.</p>
+     * and every fixture directory must be too: a name that differs only in case matches on
+     * a case-insensitive filesystem, so every Windows run stays green while CI on Linux
+     * fails outright.</p>
      *
      * <p>This compares the derived name against the actual directory listing rather than
      * calling {@code File.exists()}, because {@code exists()} is itself case-insensitive on
@@ -486,6 +472,17 @@ public class RamseyTrendModelTest {
         }
     }
 
+    /**
+     * The MATLAB-Java cross-validation anchor.
+     *
+     * <p>Drives {@link MacroModelManager#initializeRamseyTrend} rather than assembling the
+     * projection locally: a local assembly is another copy of the path-building rules and can
+     * go stale while this test still passes (measured 2026-08-18: a local assembly that
+     * extrapolates employment geometrically reaches 35,983 thousand by 2103, where MATLAB's
+     * handoff solve, which splices the SimPaths-consistent demographic projection, reaches
+     * 9,641 — 273% apart). Routed through the production loader, the two can only drift
+     * together.</p>
+     */
     @Test
         public void testForwardProjectionAnchorMatchesMATLABExport() throws Exception {
         assumeTestDataAvailable();
@@ -1195,9 +1192,9 @@ public class RamseyTrendModelTest {
     private static String withoutTerminalGrowth(String jsonContent) {
         // Strip the terminal_growth object structurally (leading comma + block).
         // The block contains only scalars/strings (no nested braces), so [^{}]*
-        // is safe. Independent of the following key, so it works across export
-        // layouts (the old hand-formatted JSON had equations_doc next; the
-        // jsonencode-refactored JSON does not).
+        // is safe. Independent of the following key, so it works whichever key
+        // follows the block (a hand-formatted JSON may have equations_doc next,
+        // jsonencode output does not).
         String stripped = jsonContent.replaceFirst(
                 ",\\s*\\\"terminal_growth\\\"\\s*:\\s*\\{[^{}]*\\}", "");
         if (stripped.contains("\"terminal_growth\"")) {
@@ -1226,9 +1223,9 @@ public class RamseyTrendModelTest {
         int projectionQuarters = 320;
         int totalExtended = refSize + projectionQuarters;
         // Reproduces what MATLAB writes into the bundle: extend_level_path(N_trend, ..., 20)
-        // and extend_level_path(handoff_h_hist, ..., 1). The hours window was 20 here until
-        // 2026-08-18, matching the production bug rather than MATLAB; it is invisible while
-        // hours_trend_method is log_linear because the h column is then a pure exponential.
+        // and extend_level_path(handoff_h_hist, ..., 1). A wrong hours window here would stay
+        // invisible while hours_trend_method is log_linear, because the h column is then a
+        // pure exponential.
         double[] extLabor = RamseyTrendModel.extendExogenous(refLabor, totalExtended, 20);
         double[] extH = RamseyTrendModel.extendExogenous(refH, totalExtended, 1);
         double[] extGY = RamseyTrendModel.extendShare(refGY, totalExtended);

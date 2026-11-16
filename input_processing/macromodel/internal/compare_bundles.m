@@ -15,7 +15,7 @@ function result = compare_bundles(dir_a, dir_b, options)
 % decimal numbers in a line under the same tolerance, integers and the text
 % around them exactly. Ignored there: generation
 % stamps, the dynare and matlab lines of BUNDLE_PROVENANCE.txt (another toolchain
-% is not a difference, and bundles exported before 2026-11 lack the lines), and
+% is not a difference, and a bundle without the lines is not one either), and
 % the hex of `sha256` lines (kind and path are compared; the Java
 % provenance test owns the digests, which noise in a regenerated datafile
 % changes). A file present on one side only, a different header, a different
@@ -67,7 +67,7 @@ end
 function d = compare_csv(fa, fb, name, options)
     d = {};
     % '#' lines are comments (the scenario CSVs open with a block of them); left to
-    % readtable's detection, the '=' in them was taken for the delimiter.
+    % readtable's detection, the '=' in them is taken for the delimiter.
     if ~isequal(comment_lines(fa), comment_lines(fb))
         d{end+1} = sprintf('%s: comment lines differ', name);
     end

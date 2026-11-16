@@ -1,7 +1,4 @@
 # Batch scenario 2/5 — Ramsey baseline (Ramsey trend only, no counterfactual)
-# Until 2026-11 this arm ran with the planner's feedback switched off.
-# The feedback is now always on with a Ramsey layer, here with rho = 1, so earlier results of
-# this arm are not reproduced by the same file.
 countryString: "Poland"
 maxNumberOfRuns: 1
 executeWithGui: false

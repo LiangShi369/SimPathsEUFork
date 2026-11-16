@@ -14,14 +14,14 @@ function p = artifact_path(kind, name, options)
 %   figures   figures written by our own plotting code
 %   bundle    the SimPaths-facing export, <input tree>/{CC}/MacroModel (needs 'country'; see model_location)
 %
-% NAME: deliberately not 'model_file'. That name collided with local variables
-% of the same name in run_full_workflow.m and run_detrending_benchmark.m, both
-% holding a .mod filename. MATLAB classifies an identifier as a VARIABLE for the
-% whole function scope if it is assigned anywhere in the body, so every call in
-% those two files parsed as indexing an unassigned variable -- regardless of the
-% function existing on the path. checkcode did not flag it, and the unit tests
-% passed because none of them calls an entry point. tests/test_name_collisions.m
-% now guards the class.
+% NAME: deliberately not 'model_file'. run_full_workflow.m and
+% run_detrending_benchmark.m hold a .mod filename in local variables of that
+% name. MATLAB classifies an identifier as a VARIABLE for the whole function
+% scope if it is assigned anywhere in the body, so every call in those two files
+% would parse as indexing an unassigned variable -- regardless of the function
+% existing on the path. checkcode does not flag it, and the unit tests would
+% pass because none of them calls an entry point. tests/test_name_collisions.m
+% guards the class.
 %
 % Returns a path RELATIVE to the working directory, deliberately. The working
 % directory has to be the model root anyway -- Dynare writes its own output
@@ -78,8 +78,8 @@ end
 
 function assert_in_model_root()
 % The model root is identifiable by its entry points. Checking costs nothing and
-% turns "the CSV is missing" into "you are in the wrong folder", which is what
-% actually went wrong.
+% turns "the CSV is missing" into "you are in the wrong folder", which names the
+% actual cause.
     persistent checked_dir
     if ~isempty(checked_dir) && strcmp(checked_dir, pwd)
         return;

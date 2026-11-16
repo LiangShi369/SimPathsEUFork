@@ -26,8 +26,8 @@ import simpaths.model.enums.MacroModelMode;
  *
  * <p>The switch table in the macro model documentation
  * ({@code WELLSIM_SVEC_Overleaf/Tables/table_macro_switches.tex}) is written by hand and has
- * no other link to this code. It went stale once already, missing four switches and misstating
- * two defaults. When this test fails, update that table in the same commit as the code.</p>
+ * no other link to this code, so it goes stale silently. When this test fails, update that
+ * table in the same commit as the code.</p>
  */
 class MacroSwitchContractTest {
 

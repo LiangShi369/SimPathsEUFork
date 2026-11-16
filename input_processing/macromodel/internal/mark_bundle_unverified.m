@@ -7,10 +7,8 @@ function marker_file = mark_bundle_unverified(output_dir, country, problems)
 % WHY THIS EXISTS
 %   verify_export_bundle refuses a bundle by raising an error, which is seen by
 %   whoever ran that export and by nobody afterwards. The files stay in
-%   input/{CC}/MacroModel/, the folder SimPaths reads, and get committed looking
-%   exactly like a shippable bundle. The Spain and Sweden bundles were committed
-%   that way in 2026-09: complete except for the population projection, which
-%   Java treats as optional and silently replaces with its default extrapolation.
+%   input/{CC}/MacroModel/, the folder SimPaths reads, and without a marker a
+%   refused bundle can be committed looking exactly like a shippable one.
 %
 %   The marker makes the refusal a property of the bundle. Both exporters write
 %   it before their first file, so an export that dies partway is marked too,

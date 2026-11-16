@@ -55,7 +55,7 @@ class DsgeOneWayTest {
             assertEquals(0.0, m.getWageDeviation(), 0.0);
         }
         assertNull(MacroTestSupport.getField(m, "ramseyProjN", double[].class),
-                "DSGE-only mode no longer loads the population projection");
+                "DSGE-only mode does not load the population projection");
     }
 
     /**

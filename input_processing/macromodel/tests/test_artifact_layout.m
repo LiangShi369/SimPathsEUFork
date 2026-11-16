@@ -8,8 +8,8 @@ function test_artifact_layout()
 % find it, and depending on the reader that is either a loud error or a silent
 % fallback to a stale copy that IS in the subfolder.
 %
-% It runs against whatever is on disk, so it catches the miss the first time the
-% pipeline is run after the reorganisation rather than at the next audit.
+% It runs against whatever is on disk, so it catches a missed write site the
+% first time the pipeline runs rather than at the next audit.
 %
 % Dynare's own output is exempt: it writes +Macromodel_*/ , Macromodel_*/ and
 % its logs into the working directory unconditionally and offers no way to
@@ -106,7 +106,7 @@ function test_artifact_layout()
     catch ME
         raised = strcmp(ME.identifier, 'artifact_path:UnknownKind');
     end
-    assert(raised, 'the scenarios role no longer exists: scenario CSVs live in input/{CC}/MacroModel/');
+    assert(raised, 'there is no scenarios role: scenario CSVs live in input/{CC}/MacroModel/');
     fprintf('  [PASS] bundle role resolves into ../../input/{CC}/MacroModel\n\n');
 
     % A refused bundle must never be committed into the SimPaths input tree.

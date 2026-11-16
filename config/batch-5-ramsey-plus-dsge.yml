@@ -1,8 +1,5 @@
 # Batch scenario 5/5 — Ramsey counterfactual + DSGE energy shock
-# Until 2026-11 this arm ran with the planner's feedback switched off.
-# The feedback is now always on with a Ramsey layer, here with rho = 1, so earlier results of
-# this arm are not reproduced by the same file. The DSGE takes no input from SimPaths: its
-# cycle comes from the energy-shock scenario alone.
+# The DSGE takes no input from SimPaths: its cycle comes from the energy-shock scenario alone.
 countryString: "Poland"
 maxNumberOfRuns: 1
 executeWithGui: false

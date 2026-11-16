@@ -5,9 +5,7 @@ function test_data_loading()
 % data_for_dynare_levels_{COUNTRY}.csv routinely carry no observables yet: the
 % calendar runs ahead of published national accounts. Averaging a "last year"
 % window over that tail yields NaN, which propagates into g_Y, K_0 and the
-% N trend and finally makes the Ramsey initial guess infeasible - the failure
-% that silently kept the Ramsey pipeline from running between 2026-05 and
-% 2026-08 while the Stata HP fallback stood in for its output.
+% N trend and finally makes the Ramsey initial guess infeasible.
 %
 % Usage:
 %   >> test_data_loading
@@ -99,8 +97,8 @@ function test_data_loading()
     % Unlike the ragged national-accounts tail, a missing R is not trimmed: the
     % rows stay, the Kalman filter runs without the rate observable, and
     % ramsey_trend.m extrapolates the ex-ante real rate linearly over the gap,
-    % which tilts the HP trend of R across the WHOLE sample. Poland ran that way
-    % from 2024q1 to 2025q1 because its OECD source had stopped updating.
+    % which tilts the HP trend of R across the WHOLE sample (see ramsey_trend.m
+    % for the size measured on Poland). A source that stops updating does that.
     synthetic = table({'2024q1'; '2024q2'; '2024q3'}, [100; 101; 102], [50; 51; 52], ...
                       [10; 11; 12], [5.8; NaN; NaN], ...
                       'VariableNames', {'time', 'y_level', 'n_level', 'h_level', 'R'});

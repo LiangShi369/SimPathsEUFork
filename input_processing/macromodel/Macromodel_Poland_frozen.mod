@@ -45,24 +45,17 @@
 
 //
 // PURPOSE:
-// This model serves as "economic guardrails" for a dynamic microsimulation.
-// It provides general equilibrium wage responses to labor supply changes
-// from a discrete choice microsimulation model.
+// This model is the business-cycle layer of the macro model that serves as
+// "economic guardrails" for the SimPaths dynamic microsimulation: it gives
+// the cyclical deviation of the real wage around the Ramsey trend.
 //
-// INTERFACE WITH MICROSIMULATION:
-// ┌─────────────────┐                    ┌─────────────────┐
-// │  Microsim       │  ── L (labor) ──►  │  DSGE           │
-// │  (Java)         │  ── h (hours) ──►  │  (Dynare→Java)  │
-// │                 │  ◄── w (wage) ───  │                 │
-// │                 │  ◄── pi (infl) ──  │                 │
-// └─────────────────┘                    └─────────────────┘
+// INTERFACE WITH SIMPATHS (one-way):
+//   scenario shocks (sigma-units) --> DSGE --> w (cycle wage) --> SimPaths
+//   pi is computed and recorded but reaches no agent. The DSGE takes no
+//   input from SimPaths: L and h are exogenous AR(1) processes, observed
+//   in estimation.
 //
-// INPUT:  L  = labor force change (extensive margin: participation)
-//         h  = hours per worker change (intensive margin: hours choice)
-// OUTPUT: w  = real wage change (equilibrium response)
-//         pi = inflation (equilibrium response)
-//
-// FREQUENCY: Quarterly (for estimation), convert to annual for microsim
+// FREQUENCY: Quarterly; SimPaths averages four quarterly steps per year
 // =========================================================================
 
 // Variable declarations
@@ -73,19 +66,19 @@ var
     c       // consumption (Euler equation)          [OBSERVED]
     gap     // demand-supply gap (d - y)
     R       // nominal interest rate
-    pi      // inflation                        [OUTPUT TO MICROSIM]
-    w       // real wage (aggregate)            [OUTPUT TO MICROSIM]
+    pi      // inflation                        [recorded only]
+    w       // real wage (aggregate)            [OUTPUT TO SIMPATHS]
     w_star  // reset wage (newly negotiated)    [Gertler-Trigari]
     u       // unemployment level (log-deviation, for internal dynamics)
     u_rate  // unemployment RATE gap (pp, for observation)
     v       // vacancies
     n       // employment
-    h       // hours per worker (intensive margin) [INPUT FROM MICROSIM]
+    h       // hours per worker (intensive margin) [exogenous AR(1)]
     m       // matches
     mc      // marginal cost
     x       // technology (TFP)
     theta   // labor market tightness (v/u)
-    L       // labor force (participation)     [INPUT FROM MICROSIM]
+    L       // labor force (participation)     [exogenous AR(1)]
     k       // capital stock (predetermined)    [CAPITAL EXTENSION]
     inv     // investment (reduced-form rule)    [CAPITAL EXTENSION]
     sep_shock    // separation shock process
@@ -97,9 +90,9 @@ varexo
     eps_r       // monetary policy shock
     eps_d       // PREFERENCE/DEMAND shock (confidence, fiscal, exports)
     eps_p       // cost-push / price markup shock (energy, imports, markup)
-    eps_L       // labor force shock (FROM MICROSIM)
+    eps_L       // labor force shock
     eps_sep     // separation rate shock
-    eps_h       // hours shock (FROM MICROSIM or Kurzarbeit policy)
+    eps_h       // hours shock (e.g. short-time work)
     eps_inv;    // investment shock [CAPITAL EXTENSION]
 
 // Parameters
@@ -134,15 +127,15 @@ parameters
     psi_wL      // wage response to labor force (bypasses slow θ channel)
     // DEMAND COMPOSITION
     s_inv       // steady-state investment share of GDP (I_ss/Y_ss)
-    // CAPITAL EXTENSION PARAMETERS (Phase 2: Approach B)
+    // CAPITAL PARAMETERS
     alpha_k     // capital share in production (Cobb-Douglas)
     delta_k     // quarterly capital depreciation rate
     rho_inv     // investment persistence
     phi_inv_y   // investment sensitivity to output gap
     phi_inv_r   // investment sensitivity to interest rate
-    // HABIT PERSISTENCE (V14)
+    // HABIT PERSISTENCE
     hab         // external habit formation parameter (0 = no habits, 1 = full)
-    // INFLATION INDEXATION (V15)
+    // INFLATION INDEXATION
     iota_p;     // backward-looking inflation indexation (0 = no indexation, 1 = full)
 
 // =========================================================================
@@ -190,7 +183,7 @@ rho_v    = 0.85;    // vacancy persistence (Poland: somewhat faster hiring adjus
 rho_sep  = 0.8;     // separation shock persistence
 rho_d    = 0.8;     // preference/demand shock persistence
 
-// ----- HABIT PERSISTENCE (V14) -----
+// ----- HABIT PERSISTENCE -----
 hab      = 0.5;     // external habit formation (standard Euro area range)
 
 // ----- NEW KEYNESIAN PARAMETERS -----
@@ -200,7 +193,7 @@ lambda_p = 0.03;    // Phillips curve slope (slightly steeper than Germany)
 phi_mc   = 1.0;     // output gap effect on marginal cost (same structural mechanism)
 phi_v_y  = 5.0;     // vacancy response to demand conditions (same mechanism)
 
-// ----- INFLATION INDEXATION (V15: Smets-Wouters style) -----
+// ----- INFLATION INDEXATION (Smets-Wouters style) -----
 // Poland has more backward-looking inflation behavior than the Euro area
 // due to indexation clauses in contracts and administered prices.
 iota_p   = 0.45;    // partial indexation (higher than Germany's 0.35)
@@ -296,17 +289,17 @@ model(linear);
     y = x + alpha_k * k(-1) + alpha_n * (n + omega_h * h) + phi_mc * gap;
     
     // -----------------------------------------------------------------------
-    // INTENSIVE MARGIN: HOURS EQUATION (Option B: Pure AR(1))
+    // INTENSIVE MARGIN: HOURS EQUATION (pure AR(1))
     // -----------------------------------------------------------------------
     
-    // 2. Hours per worker - EXOGENOUS LABOR SUPPLY FROM SIMPATHS
+    // 2. Hours per worker - exogenous AR(1), observed in estimation
     h = rho_h * h(-1) + eps_h;
     
     // -----------------------------------------------------------------------
-    // DEMAND SIDE: OPTION C (Smets-Wouters-style C/I decomposition)
+    // DEMAND SIDE: Smets-Wouters-style C/I decomposition
     // -----------------------------------------------------------------------
     
-    // 2a. Consumption Euler equation with EXTERNAL HABITS (V14)
+    // 2a. Consumption Euler equation with EXTERNAL HABITS
     c - hab*c(-1) = (c(+1) - hab*c) - (1/sigma) * (R - pi(+1)) + d_shock;
 
     // 2b. Aggregate demand identity (GDP expenditure decomposition)
@@ -326,7 +319,7 @@ model(linear);
     // PRICING
     // -----------------------------------------------------------------------
     
-    // 5. New Keynesian Phillips Curve with INFLATION INDEXATION (V15)
+    // 5. New Keynesian Phillips Curve with INFLATION INDEXATION
     pi = (iota_p / (1 + iota_p * beta)) * pi(-1)
        + (beta / (1 + iota_p * beta)) * pi(+1)
        + (lambda_p / (1 + iota_p * beta)) * mc + eps_p;
@@ -377,7 +370,7 @@ model(linear);
     // 13. Technology (AR(1))
     x = rho_a * x(-1) + eps_a;
     
-    // 14. Labor force (AR(1)) - OBSERVED IN ESTIMATION, INPUT FROM SIMPATHS
+    // 14. Labor force (AR(1)) - observed in estimation
     L = rho_L * L(-1) + eps_L;
     
     // 14b. Demand/preference shock AR(1) state
@@ -387,7 +380,7 @@ model(linear);
     sep_shock = rho_sep * sep_shock(-1) + eps_sep;
 
     // -----------------------------------------------------------------------
-    // CAPITAL EXTENSION (Phase 2: Explicit K with Investment Rule)
+    // CAPITAL: explicit K with an investment rule
     // -----------------------------------------------------------------------
 
     // K1. Capital accumulation (law of motion)

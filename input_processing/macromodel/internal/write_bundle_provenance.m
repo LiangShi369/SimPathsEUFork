@@ -27,8 +27,8 @@ function prov_file = write_bundle_provenance(output_dir, country, exporter, inpu
 % (input_processing/macromodel/, see model_location), the kind is 't' (text, CR bytes ignored, see sha256_file) or
 % 'b' (binary). Paths are written relative to the SimPathsEU root, which is
 % where BundleProvenanceTest.java resolves them. A missing input is recorded
-% as "missing <path>", never hashed, never fatal: Spain and Sweden have no
-% population file yet and their bundles are refused for other reasons.
+% as "missing <path>", never hashed, never fatal: whether the bundle may ship
+% is verify_export_bundle's decision.
 %
 % The dynare and matlab lines record the toolchain of this export. They are a
 % record, not a requirement: compare_bundles ignores them, and the Java test

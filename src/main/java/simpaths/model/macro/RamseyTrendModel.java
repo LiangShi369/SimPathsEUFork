@@ -42,20 +42,20 @@ import org.apache.log4j.Logger;
  *
  * <p>Both implementations read the same {@code growth_params_{COUNTRY}.json}
  * and must produce identical results (verified by {@code RamseyTrendModelTest}
- * at a relative tolerance of 1e-9). Labour input is exogenous on both sides;
- * the endogenous-labour variant was removed on 2026-10-20
- * (JuergenWiemers/SimPathsEU#28).</p>
+ * at a relative tolerance of 1e-9). Labour input is exogenous on both sides.</p>
  *
  * <h3>SimPaths integration</h3>
  * <p>In forward projection mode, the model initializes from the terminal
  * capital stock and TFP level ({@code growth_terminal_state.json}) and
- * solves the full path once at initialization. It then steps through the
+ * solves the full path at initialization. It then steps through the
  * solved path year by year, returning trend state (wage, output, r*) at
- * each step.</p>
+ * each step. At the end of every simulated year {@link MacroModelManager}
+ * re-solves the remaining path from the predetermined capital stock, on a
+ * labour path revised by SimPaths' realized employment and hours.</p>
  *
  * @author WELLSIM / DSGE-SimPaths Integration
  * @version 1.0
- * @see <a href="macromodel/.docs/Technical_Documentation_v14.md">Technical Documentation v14</a>
+ * @see "input_processing/macromodel/docs/Technical_Documentation_Macromodel.md"
  */
 public class RamseyTrendModel {
 
@@ -265,16 +265,16 @@ public class RamseyTrendModel {
         // BGP capital-output ratio uses terminal-period growth, not the zero-growth shortcut.
         kyBgp = calculateBgpCapitalOutputRatio(alphaK, deltaQ, betaQ, sigma, gATerminalQ);
 
-        // The endogenous-labour variant (participation FOC on phi/psi) was removed on
-        // 2026-10-20 (JuergenWiemers/SimPathsEU#28). A bundle that still declares it was
-        // exported against a different model: its N path is l*WAP and its reference CSV
-        // carries columns this solver no longer reads, so refuse it instead of solving
-        // it as if it were exogenous. An absent key or "exogenous" is the normal case.
+        // Labour input is exogenous. A bundle that declares labor_supply=endogenous was
+        // exported against a different model (a participation FOC on phi/psi): its N path
+        // is l*WAP and its reference CSV carries columns this solver does not read, so
+        // refuse it instead of solving it as if it were exogenous. An absent key or
+        // "exogenous" is the normal case.
         String laborSupplyMode = extractJsonString(content, "labor_supply");
         if ("endogenous".equalsIgnoreCase(laborSupplyMode)) {
             throw new IllegalArgumentException(
-                    "growth_params declares labor_supply=endogenous, but the endogenous-labour "
-                    + "variant was removed (JuergenWiemers/SimPathsEU#28). Re-export the bundle: "
+                    "growth_params declares labor_supply=endogenous, but the planner takes labour "
+                    + "input as exogenous and has no participation choice. Re-export the bundle: "
                     + jsonPath);
         }
 
@@ -475,8 +475,8 @@ public class RamseyTrendModel {
         // terminal transversality closure K_{T-1}/Y_{T-1} = kyBgp. Because the
         // linear solve is global, saddle-path conditioning is irrelevant — this
         // handles anticipated/delayed permanent shocks (e.g. a TFP step that
-        // only arrives years into the simulation) that broke the legacy
-        // one-dimensional forward solve.
+        // only arrives years into the simulation), which a one-dimensional
+        // forward shooting solve does not.
         solvedK = new double[totalQ];
         solvedC = new double[totalQ];
         solvedY = new double[totalQ];
@@ -1026,31 +1026,18 @@ public class RamseyTrendModel {
     // ========== Exogenous Path Construction ==========
 
     /**
-     * Extend an exogenous path beyond the sample period using constant growth.
-     *
-     * <p>The growth rate is estimated from the last {@code window} observations
-     * of the sample path and applied geometrically beyond.</p>
-     *
-     * @param sample   In-sample path (quarterly)
-     * @param totalLen Target total length (sample + extension)
-     * @param window   Number of trailing quarters to estimate growth rate from
-     * @return Extended path of length totalLen
-     */
-    /**
      * Trailing-growth windows for the terminal tail appended past the SimPaths horizon.
-     * These MUST match the upstream WELLSIM_SVEC {@code macromodel/ramsey_trend.m}, which
-     * builds its own tail with {@code extend_level_path(handoff_labor_proj, ..., 20)} and
-     * {@code extend_level_path(handoff_h_proj, ..., 1)}.
+     * These MUST match {@code input_processing/macromodel/ramsey_trend.m}, which builds its
+     * own tail with {@code extend_level_path(handoff_labor_proj, ..., 20)} for labour and
+     * {@code apply_smooth_terminal_demographic_closure(handoff_h_ext, ..., 1)} for hours.
      *
      * <p>Unlike the forward projection, the tail is not carried by any bundle artefact:
      * both sides construct it, so this convention is enforced only by the tripwire in
      * {@code MacroModelManagerTest}.</p>
      *
-     * <p>The hours tail is tapered on BOTH sides since 2026-08-18 (Task 2 of the
-     * handoff-contract plan): {@link #extendWithTaperedGrowth} here mirrors
-     * {@code apply_smooth_terminal_demographic_closure(handoff_h_ext, ..., 1)} in
-     * ramsey_trend.m. See
-     * docs/superpowers/plans/2026-08-18-ramsey-hours-handoff-contract.md.</p>
+     * <p>The hours tail is tapered on BOTH sides: {@link #extendWithTaperedGrowth} here
+     * mirrors {@code apply_smooth_terminal_demographic_closure(handoff_h_ext, ..., 1)} in
+     * ramsey_trend.m.</p>
      */
     public static final int TAIL_DEMOGRAPHIC_WINDOW = 20;
     public static final int TAIL_HOURS_WINDOW = 1;
@@ -1108,6 +1095,17 @@ public class RamseyTrendModel {
         return out;
     }
 
+    /**
+     * Extend an exogenous path beyond the sample period using constant growth.
+     *
+     * <p>The growth rate is estimated from the last {@code window} observations
+     * of the sample path and applied geometrically beyond.</p>
+     *
+     * @param sample   In-sample path (quarterly)
+     * @param totalLen Target total length (sample + extension)
+     * @param window   Number of trailing quarters to estimate growth rate from
+     * @return Extended path of length totalLen
+     */
     public static double[] extendExogenous(double[] sample, int totalLen, int window) {
         if (sample == null || sample.length == 0) {
             throw new IllegalArgumentException("sample must be non-null and non-empty");
@@ -1348,9 +1346,9 @@ public class RamseyTrendModel {
     // Manual parsing (no external JSON library) — consistent with DSGEModel approach.
 
     // Thin delegates to MacroJson, the single reader shared with DSGEModel and
-    // MacroModelManager. Do not re-inline a local parser: the three copies these
-    // replaced disagreed on whitespace after the colon, so a change of MATLAB
-    // writer would have zeroed parameters silently.
+    // MacroModelManager. Keep the parsing there: a local parser that disagrees
+    // with it on whitespace after the colon would zero parameters silently when
+    // the MATLAB writer changes.
 
     private static double extractJsonDouble(String json, String key) {
         return MacroJson.number(json, key, 0.0);
@@ -1406,8 +1404,8 @@ public class RamseyTrendModel {
      * Load the MATLAB reference CSV for cross-validation.
      *
      * <p>Expected columns: time,K,Y,C,I,w,r_star,N,L,h[,g_Y,nx_Y]</p>
-     * <p>The g_Y and nx_Y columns are optional for backward compatibility
-     * with older reference CSVs (defaults to 0). Further columns are ignored.</p>
+     * <p>The g_Y and nx_Y columns are optional (default 0). Further columns are
+     * ignored.</p>
      *
      * @param csvPath Path to growth_model_reference_{country}.csv
      * @return List of ReferenceRow records

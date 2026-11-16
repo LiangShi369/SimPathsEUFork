@@ -1,7 +1,4 @@
 # Batch scenario 3/5 — Ramsey counterfactual (high g_A +0.5pp from start)
-# Until 2026-11 this arm ran with the planner's feedback switched off.
-# The feedback is now always on with a Ramsey layer, here with rho = 1, so earlier results of
-# this arm are not reproduced by the same file.
 countryString: "Poland"
 maxNumberOfRuns: 1
 executeWithGui: false

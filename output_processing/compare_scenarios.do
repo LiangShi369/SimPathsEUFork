@@ -89,7 +89,7 @@ if "$scenario_label" == "" {
     global scenario_label "Scenario"
 }
 
-// Use current CSV (fall back to legacy dynamic/static names)
+// Read MacroPaths.csv, or MacroPathsDynamic.csv / MacroPathsStatic.csv in output folders that carry those names
 local csv_file = "MacroPaths.csv"
 cap confirm file "$baseline_dir/`csv_file'"
 if _rc != 0 {
@@ -309,13 +309,12 @@ foreach var of local allvars {
 display as text "Created `n_diff_created' diff_ variables."
 
 // ----- 4e. Demographic level indices: use Java-provided values directly -----
-// LaborSupplyAggregator/MacroModelManager now emit wap_level and atrisk_level
+// LaborSupplyAggregator/MacroModelManager emit wap_level and atrisk_level
 // as labour-market-invariant head-count indices (% from first year), correct
 // from the first simulated year. Use them directly instead of reconstructing
-// WAP/atRisk from the l_level / participation_rate identity. That reconstruction
-// anchored pr0/ar0 on the first row with participation_rate > 0; once the
-// eager year-1 demographic pass was added on the Java side, a pre-labour-market
-// year-1 participation_rate became that anchor and produced a spurious +13%
+// WAP/atRisk from the l_level / participation_rate identity: a reconstruction
+// anchors pr0/ar0 on the first row with participation_rate > 0, and a
+// pre-labour-market year-1 participation_rate in that row produces a spurious
 // WAP/atRisk spike. Java's wap_level/atrisk_level have no such dependency.
 //
 // Downstream (the Demographics panel) expects wap_level / wap_level_base and
@@ -721,10 +720,8 @@ if _rc == 0 {
 // valid (>0) annual value and plot % change from first year, so the comparison
 // isolates the dynamics. Leading pre-labour-market zeros are left missing (line
 // starts at first valid year, no spurious -100 jump); a series that is zero
-// throughout stays flat at 0. The Ramsey participation series that used to sit
-// next to it went with the endogenous-labour variant
-// (JuergenWiemers/SimPathsEU#28); old MacroPaths.csv files that still carry
-// that column are read without it.
+// throughout stays flat at 0. The Ramsey layer has no participation series of
+// its own; a MacroPaths.csv that carries such a column is read without it.
 cap confirm variable participation_rate participation_rate_base
 if _rc == 0 {
     cap drop _ord
@@ -768,8 +765,7 @@ if _rc == 0 {
 // including when the macro model is off. Averaging over the at-risk pool —
 // the exact population that enters the SimPaths discrete-choice labour-supply
 // model — keeps the wage diagnostic internally consistent with
-// participation_rate, workers_over_atriskpool and the labour-category panels
-// (cf. SP_CHATS_107 / SP_CHATS_108).
+// participation_rate, workers_over_atriskpool and the labour-category panels.
 cap confirm variable wage_realized wage_realized_base w_total w_total_base
 if _rc == 0 {
     local rw_growth_base_fmt "n.a."

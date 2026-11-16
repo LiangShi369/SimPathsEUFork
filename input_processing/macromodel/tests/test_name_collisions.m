@@ -1,7 +1,7 @@
 function test_name_collisions()
 % TEST_NAME_COLLISIONS  No file may assign a variable named like one of our functions.
 %
-% THE BUG THIS EXISTS FOR
+% THE FAILURE THIS GUARDS AGAINST
 %   MATLAB decides whether an identifier is a variable or a function ONCE, for
 %   the whole function scope, based on whether it is assigned ANYWHERE in the
 %   body. So this fails:
@@ -16,17 +16,16 @@ function test_name_collisions()
 %   assigned yet. It does not matter that the assignment comes later, or that
 %   the function exists on the path.
 %
-%   This happened for real: a helper introduced as `model_file` collided with
-%   local variables of that name in run_full_workflow.m and
-%   run_detrending_benchmark.m, both holding a .mod filename. Every call in
-%   those two files was dead on arrival. checkcode reported nothing, and the
-%   unit tests passed because none of them calls an entry point -- it only
-%   surfaced on a real run. The helper is now `artifact_path`.
+%   checkcode reports nothing, and the unit tests pass because none of them
+%   calls an entry point, so such a collision surfaces only on a real run. A
+%   helper named `model_file`, for example, would collide with local variables
+%   of that name in run_full_workflow.m and run_detrending_benchmark.m, both
+%   holding a .mod filename (see the NAME note in internal/artifact_path.m).
 %
 % WHAT IS CHECKED
 %   For every .m file we own, every assignment `name = ...` whose name is also
 %   one of our function files. Any hit is at best confusing and at worst the
-%   bug above, so all of them fail.
+%   failure above, so all of them fail.
 
     fprintf('\n');
     fprintf('=================================================================\n');

@@ -22,7 +22,7 @@ import java.nio.file.Path;
  */
 public class DSGEShockScenarioTest {
 
-    /** Standard model shock names matching Germany v14 model */
+    /** Shock names in the order of the current DSGE export */
     private static final String[] SHOCK_NAMES = {
         "eps_a", "eps_r", "eps_d", "eps_p", "eps_L", "eps_sep", "eps_h", "eps_inv"
     };

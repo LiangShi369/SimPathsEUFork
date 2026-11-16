@@ -9,12 +9,9 @@ function info = refresh_java_parity_fixtures(country, simpaths_repo)
 % WHY THIS EXISTS. The parity fixture pins two different things at once: that
 % MATLAB and Java AGREE (must never break), and that the numbers are SPECIFIC
 % VALUES (must change whenever a bug is fixed or a parameter recalibrated).
-% Freezing the file conflates them, so every legitimate fix turned into a "the
-% rules forbid me from fixing this bug" argument, and the fixture instead went
-% stale: on 2026-08-18 it was found to predate both the current TFP calibration
-% (g_A_terminal 0.8% vs the live 0.5%) and MATLAB gaining the SimPaths-consistent
-% demographic override in the handoff solve. The parity test passed the whole
-% time, against a MATLAB that no longer existed.
+% Freezing the file conflates them: every legitimate fix becomes a "the rules
+% forbid me from fixing this bug" argument, and the fixture goes stale, so the
+% parity test keeps passing against a MATLAB that has since changed.
 %
 % The safety property is NOT the numbers. It is that Java reproduces whatever
 % MATLAB currently produces, over the path production actually uses. So:
@@ -48,8 +45,8 @@ function info = refresh_java_parity_fixtures(country, simpaths_repo)
     end
 
     % A fixture is only meaningful as a COHERENT SET: params, reference, terminal
-    % state and both projections must come from one MATLAB run. Mixing sources is
-    % what produced the 6.3% consumption mismatch on 2026-08-18.
+    % state and both projections must come from one MATLAB run. Mixed sources give
+    % mismatches of several percent (6.3% in consumption, measured 2026-08-18).
     files = { ...
         sprintf('growth_params_%s.json', country),          sprintf('growth_params_%s.json', country); ...
         % Destination keeps lower(country): the Java loader derives this name by
@@ -105,8 +102,8 @@ end
 function root_rel = repo_relative_path(rel)
 % Mirror of repo_relative in internal/write_bundle_provenance.m: the bundle path
 % is recorded relative to the SimPathsEU root with forward slashes, so the tracked
-% FIXTURE_PROVENANCE.txt does not change with the platform of whoever refreshes it
-% (JuergenWiemers/SimPathsEU#14). pwd is the model root, model_location().repo_rel;
+% FIXTURE_PROVENANCE.txt does not change with the platform of whoever refreshes it.
+% pwd is the model root, model_location().repo_rel;
 % each leading '../' drops one of its segments. Absolute paths are left alone.
     rel = strrep(rel, '\', '/');
     if ~isempty(regexp(rel, '^([A-Za-z]:)?/', 'once'))

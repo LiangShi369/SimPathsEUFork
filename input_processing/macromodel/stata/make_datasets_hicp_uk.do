@@ -13,12 +13,11 @@
 // adjusted) for the whole sample, with no splicing. The UK columns of HICP.dta and
 // hicp_q_sa.dta are not read.
 //
-// AGAINST TRAMO/SEATS. Until 2026-10 the other countries were adjusted with EViews'
-// TRAMO/SEATS, and the UK was the first on X-13. X-13 pre-adjusts with regARIMA rather
-// than TRAMO, and the two pick different models. Measured on Eurostat's UK HICP over
-// 2000q1-2020q3 (2026-10 vintage), Q-o-Q annualised inflation from this X-13 path and
-// from the EViews TRAMO/SEATS series differed by a mean of 0.00 pp and an RMSE of
-// 0.54 pp, against 0.001 pp (Sweden) to 0.26 pp (Spain) for the other four countries
+// AGAINST TRAMO/SEATS. X-13 pre-adjusts with regARIMA rather than TRAMO, and the two
+// pick different models. Measured on Eurostat's UK HICP over 2000q1-2020q3 (2026-10
+// vintage), Q-o-Q annualised inflation from this X-13 path and from the EViews
+// TRAMO/SEATS series differs by a mean of 0.00 pp and an RMSE of 0.54 pp, against
+// 0.001 pp (Sweden) to 0.26 pp (Spain) for the other four countries
 // over their estimation samples (make_datasets_hicp.do). The gap is noise between two
 // valid adjustments, not a bias: neither leaves residual seasonality (regressing
 // quarterly inflation on quarter dummies gives p > 0.9 for both, over 2000q1-2020q3 and

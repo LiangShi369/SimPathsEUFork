@@ -8,41 +8,16 @@
 // =========================================================================
 // CALIBRATED SHOCK STANDARD DEVIATIONS
 // =========================================================================
-// PHASE 0: Calibrated std devs to match German data moments (2000-2024)
-// 
-// TARGET DATA MOMENTS (from data_for_dynare.csv, after demeaning):
-//   y:      std = 1.53%   (HP-filtered real GDP)
-//   n:      std = 0.66%   (HP-filtered employment)
-//   u_rate: std = 0.49 pp (HP-filtered unemployment rate)
-//   L:      std = 0.30%   (HP-filtered labor force)
-//   pi:     std = 1.91%   (QoQ annualized inflation, demeaned)
-//                         400*(P_t/P_{t-1}-1) per make_datasets.do; the Y-o-Y
-//                         series is computed there but not used as the observable
-//   R:      std = 1.80%   (Euribor, demeaned)
-//
-// =========================================================================
-// CALIBRATION PHASE 0: FINAL WORKING CALIBRATION (Iteration 15)
-// =========================================================================
-// 
-// DATA TARGETS (with QoQ annualized inflation):
-//   y std:             1.54%     pi std:    1.92%     R std:     1.81%
-//   n std:             0.66%     u_rate std: 0.49pp   L std:     0.30%
-//   y-pi corr:        +0.27      n-u_rate:  -0.84
-//
-// MODEL RESULTS (Iteration 15):
-//   y-pi correlation:  +0.44  (target: +0.27)    ✅ Positive, economic!
-//   y std:             1.59%  (target: 1.54%)    ✅ Excellent
-//   pi std:            1.77%  (target: 1.92%)    ✅ Good
-//   R std:             1.07%  (target: 1.81%)    ⚠️ Low (R volatility hard to match)
-//   n-u_rate corr:    -0.91   (target: -0.84)    ✅ Acceptable
-//   u_rate std:        0.62%  (target: 0.49pp)   ✅ Acceptable
+// Starting values. The estimation replaces the standard deviations it
+// estimates (estimated_params below); eps_sep, which is not estimated, keeps
+// the value set here.
 //
 shocks;
-    var eps_a;      stderr 0.25;    // technology: slightly reduced
+    var eps_a;      stderr 0.25;    // technology
     var eps_d;      stderr 4.50;    // demand: main driver for y-pi
-    var eps_r;      stderr 0.60;    // monetary: reduced from 0.80
-    var eps_L;      stderr 0.04;    // labor force: keep
-    var eps_sep;    stderr 0.08;    // separation: keep
+    var eps_r;      stderr 0.60;    // monetary
+    var eps_L;      stderr 0.04;    // labor force
+    var eps_sep;    stderr 0.08;    // separation (not estimated)
     var eps_h;      stderr 0.35;    // hours shock (Kurzarbeit): calibrated to σ(h) ≈ 0.8%
                                     // German data: σ(h) = 0.81%, σ(h)/σ(n) = 1.22
     var eps_p;      stderr 0.50;    // cost-push / price markup shock
@@ -59,7 +34,7 @@ estimated_params;
     // -----------------------------------------------------------------------
     
     // Vacancy posting cost (affects labor market tightness)
-    // FIXED: poorly identified, mode jumped around (0.02 → 0.14)
+    // FIXED: poorly identified; estimated, the mode moves between 0.02 and 0.14
     // Calibrated at 0.20 (Shimer 2005 literature lower bound)
     // kappa,          gamma_pdf,  0.20,   0.05;  // COMMENTED OUT - not identified
     
@@ -77,11 +52,11 @@ estimated_params;
     // phi_mc,         gamma_pdf,  0.2,    0.05;  // COMMENTED OUT
     
     // Vacancy demand sensitivity
-    // FIXED: was hitting boundary (0.07), poorly identified from data
+    // FIXED: estimated, it hits the boundary (0.07); poorly identified from data
     // phi_v_y,        gamma_pdf,  1.0,    0.5;  // COMMENTED OUT - fix at 1.0
     
     // Calvo wage stickiness (Gertler-Trigari 2009)
-    // FIXED: was hitting upper boundary (0.9787), almost full stickiness
+    // FIXED: estimated, it hits the upper boundary (0.9787), almost full stickiness
     // Fix at 0.75 = 4 quarter average duration (German collective agreements)
     // lambda_w,       beta_pdf,   0.75,   0.1;  // COMMENTED OUT - fix at 0.75
     
@@ -94,11 +69,11 @@ estimated_params;
     // sigma,          gamma_pdf,  2.0,    0.5;   // COMMENTED OUT - fix at 2.0
     
     // Taylor rule: inflation response (Taylor principle > 1)
-    // FIXED: mode kept hitting ~1.0, violating Taylor principle
+    // FIXED: estimated, the mode hits ~1.0, violating the Taylor principle
     // phi_pi,         gamma_pdf,  1.5,    0.15;  // COMMENTED OUT - fix at 1.5
     
     // Taylor rule: output response
-    // FIXED: was hitting boundary, not well identified jointly with phi_pi
+    // FIXED: estimated, it hits the boundary; not well identified jointly with phi_pi
     // phi_y,          gamma_pdf,  0.125,  0.03;  // COMMENTED OUT - fix at 0.125
     
     // Interest rate smoothing (ECB is persistent)
@@ -106,15 +81,15 @@ estimated_params;
     // rho_r,          beta_pdf,   0.85,   0.05;  // COMMENTED OUT - fix at 0.85
     
     // Technology shock persistence
-    // FIXED: was hitting upper boundary (0.9999), near unit root
+    // FIXED: estimated, it hits the upper boundary (0.9999), near a unit root
     // rho_a,          beta_pdf,   0.95,   0.03;  // COMMENTED OUT - fix at 0.95
     
     // Vacancy persistence (Germany: slow adjustment)
-    // FIXED: was hitting upper boundary (0.999)
+    // FIXED: estimated, it hits the upper boundary (0.999)
     // rho_v,          beta_pdf,   0.9,    0.05;  // COMMENTED OUT - fix at 0.9
     
     // Separation shock persistence
-    // FIXED: was hitting upper boundary (0.983), causing Hessian singularity
+    // FIXED: estimated, it hits the upper boundary (0.983) and makes the Hessian singular
     // rho_sep,        beta_pdf,   0.8,    0.05;  // COMMENTED OUT - fix at 0.8
     
     // -----------------------------------------------------------------------
@@ -143,7 +118,7 @@ estimated_params;
     // Hours shock
     stderr eps_h,       inv_gamma_pdf,  0.35,   0.10;   // hours shock (%)
     
-    // Labor force shock (Option B - L is observed)
+    // Labor force shock (L is observed)
     stderr eps_L,       inv_gamma_pdf,  0.12,   0.05;   // labor force shock (%)
     
     // -----------------------------------------------------------------------

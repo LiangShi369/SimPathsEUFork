@@ -171,7 +171,7 @@ class BundleProvenanceTest {
                     "unknown kind '" + p[1] + "' in " + provenance + ": " + line);
             Path input = Paths.get(p[3]);
             if (!Files.exists(input)) {
-                failures.add("input no longer exists: " + p[3]);
+                failures.add("input missing: " + p[3]);
                 failedPaths.add(p[3]);
                 continue;
             }

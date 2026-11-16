@@ -1,15 +1,12 @@
 # SimPaths Coupling: the Java Side of the Macro Layer
 
-**Status:** describes the Java runtime (`simpaths.model.macro`) as of 2026-11-06. Until 2026-10-14 this file was
-`docs/DSGE_INTEGRATION_PLAN.md`. The MATLAB/Dynare model is described in
-`Technical_Documentation_Macromodel.md`, the contracts between the two sides in `Integration_Contracts.md`,
-both in this folder.
+This document describes the Java runtime of the macro layer (`simpaths.model.macro`). The MATLAB/Dynare model
+is described in `Technical_Documentation_Macromodel.md`, the contracts between the two sides in
+`Integration_Contracts.md`, both in this folder.
 
 ---
 
 ## 1. Executive Summary
-
-This document describes the current SimPaths macro-coupling architecture.
 
 The macro stack has two orthogonal layers:
 - **Ramsey growth model (trend layer):** long-run structural path, re-solved each year against the labour
@@ -24,9 +21,9 @@ Scenario shocks (mm_dsgeShockScenario) -> DSGE cycle model (quarterly state-spac
 SimPaths receives: delta_w_total = delta_w_cycle + delta_w_trend, delta_pi = delta_pi_cycle
 ```
 
-### Current design principles
+### Design principles
 
-1. Opt-in macro feedback via `mm_macroModel` (default `off`)  
+1. Opt-in macro layer via `mm_macroModel` (default `off`)  
 2. Macro model provides trend (Ramsey growth model) and cycle (DSGE) decomposition; the two layers are selected together by `mm_macroModel`: `off | ramsey | dsge | ramsey_dsge`
 3. SimPaths wage application uses total wage effect (trend + cycle changes)
 4. The DSGE takes no input from SimPaths. SimPaths' labour supply reaches the macro side through the planner alone, counted once a year after the labour market and the population alignment (§4, §7.1).
@@ -38,7 +35,7 @@ across a run in §4, and what the feedback assumes about employment in §8.1.
 
 ---
 
-## 2. Current Architecture
+## 2. Architecture
 
 ### 2.1 Entry and orchestration
 
@@ -61,8 +58,9 @@ Under `input/{COUNTRY}/MacroModel/` (the bundle the MATLAB exporters write):
   this folder. They are maintained by hand; no exporter writes them.
 
 In the bundle but not read at runtime: `steady_state.csv` (the exported model is log-linearised, so every
-steady state is zero; kept for inspection), `irfs_eps_*.csv` and `policy_full_gh{u,x}.csv` (read by
-`DSGEIrfParityTest`), `SIMPATHS_INTERFACE.md` (a human-readable summary) and `BUNDLE_PROVENANCE.txt`
+steady state is zero; kept for inspection), `irfs_eps_*.csv` (read by `DSGEIrfParityTest` and
+`CommittedBundlesTest`), `policy_full_gh{u,x}.csv` (for reference; nothing reads them),
+`SIMPATHS_INTERFACE.md` (a human-readable summary) and `BUNDLE_PROVENANCE.txt`
 (checked by `BundleProvenanceTest`, contract 18). A bundle holding `BUNDLE_NOT_VERIFIED.txt` is refused at
 startup.
 
@@ -71,12 +69,12 @@ startup.
 The Ramsey trend layer reads country-specific growth inputs from `growth_params_*.json` together with
 `growth_terminal_state.json` and `growth_model_reference_*.csv`.
 
-For TFP growth, the runtime supports two baseline contracts:
+For TFP growth, `growth_params_*.json` carries `tfp_growth_annual` and an optional `terminal_growth` object:
 
-- Legacy contract: `tfp_growth_annual` only. In this case SimPaths uses a constant baseline TFP growth rate.
-- Current contract: `tfp_growth_annual` plus an optional `terminal_growth` object. When present and enabled,
-	SimPaths treats `tfp_growth_annual` as the in-sample calibration growth rate and lets it converge quarter by
-	quarter toward `terminal_growth.g_A_terminal_annual` using `terminal_growth.rho_quarterly`.
+- Without the object, or with `enabled: false`, the baseline TFP growth rate is `tfp_growth_annual` throughout.
+- With `enabled: true`, SimPaths treats `tfp_growth_annual` as the in-sample calibration growth rate and lets it
+	converge quarter by quarter toward `terminal_growth.g_A_terminal_annual` at the rate
+	`terminal_growth.rho_quarterly` (0.99 when the key is absent).
 
 Example:
 
@@ -88,9 +86,6 @@ Example:
 }
 ```
 
-This behaviour is backward compatible: if the `terminal_growth` block is absent, SimPaths falls back to the
-legacy constant-growth interpretation.
-
 ---
 
 ## 3. Coupling Contract
@@ -99,13 +94,12 @@ legacy constant-growth interpretation.
 
 None. The DSGE takes no input from SimPaths: its annual step (`DSGEModel.stepAnnual(DSGEShockScenario, int)`,
 called from `MacroModelManager.runDsgePass`) receives the scenario's shocks for the year and nothing else, all
-zero without a scenario. `eps_L` and `eps_h` remain shocks of the model, which a scenario may set like any other.
+zero without a scenario. `eps_L` and `eps_h` are shocks of the model like the others, which a scenario may set.
 SimPaths' labour supply reaches the macro side through the planner's end-of-year feedback alone (§8.1).
 
-Until 2026-11 SimPaths also wrote `eps_L` and `eps_h` into the DSGE, as year-over-year changes of its headcount
-and hours. Nothing SimPaths produces is a business-cycle movement (its workers move
-with ageing, reforms, alignment and sampling noise), and the same movement already reached the planner, so the
-channel was removed.
+The reason is that nothing SimPaths produces is a business-cycle movement: its workers move with ageing, reforms,
+alignment and sampling noise, and those movements reach the planner. Feeding them to the DSGE as well would count
+one movement twice, in the trend wage and in the cycle wage.
 
 ### 3.2 DSGE -> SimPaths outputs
 
@@ -137,7 +131,8 @@ person:
    `W1mb`/`W1fb` for persons employed last year, with the lagged log wage), plus the person's random component;
 2. `labWageHrlyRegression`, the exponentiated and clamped regression wage before any overlay. This is what
    `updateLaggedVariables` rolls into next year's lag, so the overlay never re-enters the wage equation's own
-   AR dynamics;
+   AR dynamics. Rolled into the lag, the multiplier would compound every year: a Ramsey trend of about 1.9%/yr
+   would be realized as about 5%/yr;
 3. the wage times `1 + dw / 100`, the same multiplier for every person, whatever their skill, age, gender or
    region;
 4. a clamp to `[MIN_HOURLY_WAGE_RATE, MAX_HOURLY_WAGE_RATE]`, stored as the potential hourly wage `labWageHrly`
@@ -156,7 +151,7 @@ for PL), so that the secular trend is not counted twice. In-sample years are unt
 flag from `mm_macroModel.usesRamseyTrend()`.
 
 **Macro model off: an index inside the wage equation.** There is no multiplier: step 3 is skipped and
-`labWageHrlyRegression` equals `labWageHrly`, as before the macro layer existed. The only aggregate wage input is
+`labWageHrlyRegression` equals `labWageHrly`. The only aggregate wage input is
 the real-wage index in `input/{CC}/time_series_factor.xlsx`, sheet `wage_growth`. It is loaded into
 `Parameters.upratingIndexMapRealWageGrowth`, rebased to `BASE_PRICE_YEAR` (`rebaseIndexMap`) and extended beyond
 its last year at its last observed growth ratio (`extendValueTimeSeries`). It enters wages only as a regressor,
@@ -166,7 +161,7 @@ estimated coefficient times the index, carried forward by the lag in the `W1mb`/
 pass-through is partial and is whatever the regression estimated. The `fixTimeTrend` / `timeTrendStopsIn*`
 switches freeze the year polynomial regressors, not this index.
 
-**The older scenario variant.** `macroShocksOn`, with `macroShockPopulation`, `macroShockProductivity` and
+**The scenario-workbook variant.** `macroShocksOn`, with `macroShockPopulation`, `macroShockProductivity` and
 `macroShockGreenPolicy`, swaps the `wage_growth` sheet for a path from `scenario_macro_shocks.xlsx`
 (`wage_{pop}_{prod}[_green]`), together with scenario GDP, population projections and employment-share targets,
 to which `ActivityAlignmentMacroShock` aligns employment. It uses the same entry point, the regressor: the path is
@@ -188,14 +183,6 @@ independent of `mm_macroModel`.
 The exogenous index treats the aggregate wage as a covariate that the micro wage equation responds to as
 estimated; the macro layer treats it as a price level that scales everyone's potential wage one for one and that
 SimPaths' own labour supply moves. Out of sample the two trends would stack, hence the freeze.
-
-**Two defects this design encodes (do not undo).**
-
-- *AR amplification* (fixed 2026-05-19). Before `labWageHrlyRegression` existed, the multiplied wage rolled
-  into the lag, so the cumulative overlay was multiplied again every year: a trend of about 1.9%/yr was
-  realized as about 5%/yr. The pre-overlay snapshot is the fix.
-- *Double count* (fixed 2026-05-19). The Ramsey trend stacked on the extended `wage_growth` index. The
-  out-of-sample freeze is the fix.
 
 **Simplifications.**
 
@@ -227,10 +214,10 @@ At `MacroEndYearCapture`, after mortality and population alignment:
    re-solve the remaining Ramsey horizon against the realized employment and hours (§8.1). This is the one count
    of SimPaths' labour supply the macro side uses (§7.1).
 
-No static equilibrium iteration is performed. The order of steps 1 and 2 does not matter for the wage: neither
-layer reads the other's output within the year, and the wage is the sum. The labour market of year `t` reaches
-wages in `t+1` through one channel, the planner's re-solve on the post-alignment count; the DSGE never sees it.
-The one dependency between the layers is conceptual: the DSGE was estimated on Ramsey-detrended data, so the
+Nothing is iterated within the year. The order of steps 1 and 2 does not matter for the wage: neither layer
+reads the other's output within the year, and the wage is the sum. The labour market of year `t` reaches wages
+in `t+1` through one channel, the planner's re-solve on the post-alignment count; the DSGE never sees it.
+The one dependency between the layers is conceptual: the DSGE is estimated on Ramsey-detrended data, so the
 Ramsey path is its steady state, which is why `mm_macroModel: dsge` alone is diagnostic (§6.1).
 
 ### 4.1 One simulated year
@@ -248,7 +235,7 @@ config:
 ---
 flowchart TB
   A["Aging, retirement,<br/>education, health"]
-  W0["UpdatePotentialHourlyEarnings<br/>(still carries dw of t-1)"]
+  W0["UpdatePotentialHourlyEarnings<br/>(with dw of t-1)"]
   U["Cohabitation, union<br/>matching, fertility"]
   M["DSGEMacroUpdate"]
   LM["LabourMarketAndIncomeUpdate<br/>hours, earnings, tax-benefit"]
@@ -267,7 +254,7 @@ flowchart TB
   M -- "labWageHrly x (1 + dw/100)<br/>for every person" --> LM
   LM --> B --> P --> O --> E --> Y
 
-  R -- "w_trend(t) = w(t)/w(q0) - 1" --> M
+  R -- "w_trend(t) = 100 (w(t)/w(q0) - 1)" --> M
   SC -- "shocks of the 4 quarters of t<br/>(zero without a scenario)" --> D
   D -- "w_cycle(t), pi_cycle(t)" --> M
   E -- "L_sim(t), h(t)<br/>(post-labour-market, post-alignment)" --> RS
@@ -385,7 +372,7 @@ sequenceDiagram
   at the end of `t-1`, and year `t`'s realized labour changes the wage from `t+1`. This is the extended-path
   convention, not a defect (§8.1).
 - **Union matching sees last year's multiplier.** `Person.Processes.UpdatePotentialHourlyEarnings` runs before
-  `DSGEMacroUpdate` with `dw(t-1)` still in place; `DSGEMacroUpdate` re-runs the wage equation with `dw(t)`
+  `DSGEMacroUpdate` and applies `dw(t-1)`; `DSGEMacroUpdate` re-runs the wage equation with `dw(t)`
   before the labour market. The random component is the same in both calls (its draw changes at most once a year,
   in `Person.update`), and of the wage covariates (in the PL specification: age, education, health, region,
   part-time, the `wage_growth` index) union matching and fertility change only one: a newly matched woman moves
@@ -414,10 +401,8 @@ Therefore input handling must be:
 - The labour force and hours follow their own AR(1) at the calibrated persistence the bundle carries
   (`shock_params.csv`; Poland 0.95 and 0.80 per quarter), like every other exogenous process, so a
   labour-force shock repeated every quarter accumulates and can trip `mm_dsgeMaxStateDeviation`.
-- Until 2026-11 the export set that persistence to zero and `eps_L`/`eps_h` were percent levels written by
-  SimPaths. A bundle exported that way lacks the field `deviation_scale` in `model_info.json` and is refused
-  with a message to re-export; a scenario file of that time with an `eps_L` or `eps_h` column meant a percent
-  level and must be rewritten in sigma-units.
+- `model_info.json` declares the units (`deviation_scale = 100`); Java refuses a bundle that does not, with a
+  message to re-export (contract 1).
 
 Formula for every shock:
 
@@ -429,14 +414,14 @@ This matches Dynare:
 
 ---
 
-## 6. Configuration Surface (Current)
+## 6. Configuration Surface
 
-### 6.1 Supported macro switches
+### 6.1 Macro switches
 
 All under `model_args`:
 
 - `mm_macroModel` (`off | ramsey | dsge | ramsey_dsge`, default `off`; which layers run. `dsge`
-  alone is diagnostic: the cycle was estimated on Ramsey-detrended observables, so without the
+  alone is diagnostic: the cycle is estimated on Ramsey-detrended observables, so without the
   trend layer it deviates around SimPaths' own wage trend instead)
 - `mm_useMacroPathRecorder` (boolean, default `true`; records path regardless of `mm_macroModel`)
 - `mm_dsgeShockScenario` (string; ignored unless `mm_macroModel` runs the DSGE)
@@ -450,22 +435,9 @@ All under `model_args`:
 Unquoted `off` is a YAML 1.1 boolean, so SnakeYAML delivers `Boolean.FALSE`; the enum parser
 maps it to the disabled constant, which is why `mm_macroModel: off` works without quotes.
 
-### 6.2 Removed legacy switches
-
-The following are removed from active code/config:
-
-- `mm_staticIntegration`
-- `mm_maxIterations`
-- `mm_convergenceTolerance`
-- `mm_shockRelaxation`
-- `mm_dampingFactor`
-- `mm_capitalShareAlphaK`
-- `mm_capitalPartialAdjustment`
-- `mm_ramseyFeedbackMargins` and `mm_ramseyFeedbackHoursPersistence` (2026-11: the feedback is always on for
-  both margins, with the one persistence `mm_ramseyFeedbackPersistence`)
-
-Like every unknown key, a removed switch left in a config is ignored without a message;
-`MacroScenarioConfigTest` fails on any `mm_*` key in `config/` that is not a field of `SimPathsModel`.
+A key under `model_args` that is not a field of `SimPathsModel` prints a `NoSuchFieldException` stack trace and
+is otherwise ignored; the run goes on. `MacroScenarioConfigTest` fails on any `mm_*` key in `config/` that is not
+a field of `SimPathsModel`.
 
 ---
 
@@ -478,12 +450,6 @@ mortality and population alignment (`LaborSupplyAggregator.computeRawAggregates`
 headcount `L_sim(t)` and mean hours `h(t)`, is what the planner's feedback reads (§8.1) and what the year's
 level columns in `MacroPaths.csv` keep. The in-year level columns written at `DSGEMacroUpdate` come from the
 population before the labour market and are overwritten by the end-of-year values.
-
-Until 2026-11 the DSGE also received a second count, taken before the labour market, as year-over-year
-changes, with special rules for the first three years. The DSGE now takes no input from SimPaths (§3.1), and
-that count and its first-year rules are gone: the DSGE runs the same annual step in every year from the start
-year on, and DSGE-only mode no longer loads the population projection (it still refuses a start year other
-than the bundle's handoff year).
 
 ### 7.2 Anchor-year asymmetry: the level indices start to move at different points
 
@@ -540,14 +506,13 @@ Implications:
 ## 8. Trend Handling
 
 - Preferred path: Ramsey trend via `mm_macroModel: ramsey`
-- If `growth_params_*.json` contains `terminal_growth.enabled=true`, the forward Ramsey baseline no longer assumes
-	permanently constant TFP growth. Instead, annual TFP growth converges from the calibrated in-sample rate
-	(`tfp_growth_annual`) toward the long-run anchor (`g_A_terminal_annual`) at the quarterly persistence
-	`rho_quarterly`.
-- The terminal balanced-growth-path target in Java is computed from the terminal TFP growth anchor, not from a
-	zero-growth shortcut. This keeps SimPaths aligned with the MATLAB export contract used to generate the Ramsey
-	inputs.
-- If Ramsey trend is unavailable, secular wage trend fallback is currently `0` (no reduced-form alpha/gamma fallback)
+- If `growth_params_*.json` contains `terminal_growth.enabled=true`, annual TFP growth in the forward Ramsey
+	baseline converges from the calibrated in-sample rate (`tfp_growth_annual`) toward the long-run anchor
+	(`g_A_terminal_annual`) at the quarterly persistence `rho_quarterly`.
+- The terminal balanced-growth-path target in Java is computed from the terminal TFP growth anchor, as in the
+	MATLAB export that generates the Ramsey inputs.
+- Without a Ramsey layer (`mm_macroModel` `off` or `dsge`) the trend wage is `0`. A requested Ramsey layer that
+	fails to initialise stops the run (`MacroModelManager.requireRamseyTrendSolved`).
 - The trend is not strictly top-down: with a Ramsey layer, realized labour supply always feeds back into the
 	yearly re-solve (§8.1)
 
@@ -579,39 +544,35 @@ solved path positioned at `t + 1`.
 year `t`'s own realized labour. Only `advanceRamseyTrend()` for year `t+1` steps into the revised
 path. This one-period lag is the standard extended-path convention, not a defect to be closed.
 
-**Mutual exclusions.** The feedback is fatal (rather than silently self-disabling) if the Ramsey
-trend fails to solve. (Until 2026-10-20 it also refused the endogenous-labour Ramsey bundle, whose
-participation FOC approximated the same response ex ante; that variant was removed,
-JuergenWiemers/SimPathsEU#28, so the feedback is the only labour channel into the planner.)
+**A failed solve is fatal.** If the Ramsey trend fails to solve, the run stops rather than continuing without
+the feedback. The feedback is the only channel through which SimPaths' labour reaches the planner.
 
 **A missing feedback is fatal.** `applyRamseyRecursiveFeedback` records the year it ran, and
 `updateEquilibrium` refuses to advance the trend into year `t` when the feedback of `t-1` did not run
 (`t-1 > startYear`), with a message naming `MacroEndYearCapture`. Advancing on a path that ignores a year of
 SimPaths' labour supply would be a silent fallback. The guard is in the schedule-driven path, not in
-`advanceRamseyTrend`, which tests step on their own. The warn-and-skip branches for degenerate inputs
-(non-positive realised `L`, exhausted projection horizon, unusable hours) are unchanged.
+`advanceRamseyTrend`, which tests step on their own. Degenerate inputs (a non-positive realised `L`, an
+exhausted projection horizon, unusable hours) are logged as warnings and that year's re-solve is skipped; the
+year still counts as fed back, because the check tests that the hook ran, not that it re-solved.
 
 **The DSGE takes no part.** With a DSGE mode the cycle layer runs on the scenario's shocks alone and takes no
 input from SimPaths (§3.1), so the planner's feedback is the only channel from SimPaths' labour supply to the
 macro side. Consequence: with no scenario shocks, a Ramsey+DSGE run has the Ramsey-only wage index year by year
 on the same seed, and its cycle wage is zero (`DsgeOneWayTest`; end to end, `config/ramsey-feedback-persistent.yml`
-against `config/ramsey-dsge-feedback-persistent.yml`). Until 2026-11 SimPaths also handed the DSGE the
-year-over-year change of the same headcount, so one movement moved the trend wage and the cycle wage at once.
+against `config/ramsey-dsge-feedback-persistent.yml`).
 
 **Hours feedback.** Realized mean hours per worker are fed back alongside the headcount, with the same
 persistence `rho`. Heads-only feedback would show the planner `delta_n` while the labour input is `N*h`
 (`RamseyTrendModel`), getting the capital-dilution response wrong whenever the two margins move in opposite
 directions; an x% hours gap dilutes capital exactly as an x% headcount gap does. Diagnostic column:
-`h_realized_gap`. (History: hours were added on 2026-08-18 as a separate margin with its own persistence, and
-the four arms behind the recursive-feedback note ran heads-only. Since 2026-11 both margins are always fed
-back, with one `rho`.)
+`h_realized_gap`.
 
 **The two gaps use different references, and this is the subtle part.** `delta_n` is measured
 against the planner's projected `N`, which is legitimate only because `extDemographic` is
 overwritten at startup with the same population projection SimPaths aligns to — realized and
 projected employment are then comparable and `delta_n` isolates genuine labour-market surprises.
-No equivalent reconciliation exists for hours. `projH` (since 2026-08-18 read from
-`hours_projection_*.csv` rather than extrapolated locally) is a log-linear trend fitted to observed
+No equivalent reconciliation exists for hours. `projH` (read from `hours_projection_*.csv`) is a
+log-linear trend fitted to observed
 hours (`hours_trend_method` in the growth params; for PL, -0.203%/yr, and the `h` column of
 `growth_model_reference_poland.csv` is a pure exponential at that one rate, not a data series).
 SimPaths models no hours trend at all, so measuring `delta_h` against `projH` would compare two
@@ -627,21 +588,19 @@ revision, which is correct, because SimPaths carries no information about the ho
 asserts the fixture's hours projection really does decline so the test cannot go vacuous. Revisit
 the reference if SimPaths ever gains an exogenous hours projection, e.g. an hours alignment.
 
-**Handoff contract (2026-08-18).** The forward hours path is no longer derived on both sides. MATLAB
-writes `hours_projection_{COUNTRY}.csv` (single writer `internal/write_hours_projection.m`, called by
-both export paths, listed in `verify_export_bundle.m`) and `MacroModelManager.loadProjectedHours`
-reads it, failing loudly if it is absent — no local fallback, because the fallback is what allowed
-the two sides to use different trailing-growth windows unnoticed. The terminal tail is still built
+**Handoff contract.** MATLAB writes `hours_projection_{COUNTRY}.csv` (single writer
+`internal/write_hours_projection.m`, called by both export paths, listed in `verify_export_bundle.m`) and
+`MacroModelManager.loadProjectedHours` reads it, failing loudly if it is absent. There is no local fallback:
+one would let the two sides use different trailing-growth windows unnoticed. The terminal tail is built
 independently on both sides; its windows are pinned by `RamseyTrendModel.TAIL_DEMOGRAPHIC_WINDOW` /
 `TAIL_HOURS_WINDOW` and the tripwire in `MacroModelManagerTest`.
 
-**Hours terminal tail (fixed 2026-08-18).** The 600-quarter terminal tail extends hours with their
-trailing growth rate tapered geometrically to zero (half-life 20 quarters), on both sides:
-`RamseyTrendModel.extendWithTaperedGrowth` and `apply_smooth_terminal_demographic_closure(..., 1)` in
-`ramsey_trend.m`. Before, the fitted -0.2%/yr decline ran undamped for another 150 years and hours
-reached ~69% of their handoff level, at odds with the terminal condition `K/(kyBgp*Y) = 1`: on a
-balanced growth path hours per worker must be constant. The tail is a terminal-condition device, not a
-forecast; its effect on the trend wage over 2023-2060 is under 0.003%.
+**Hours terminal tail.** The 600-quarter terminal tail extends hours with their trailing growth rate tapered
+geometrically to zero (half-life 20 quarters), on both sides: `RamseyTrendModel.extendWithTaperedGrowth` and
+`apply_smooth_terminal_demographic_closure(..., 1)` in `ramsey_trend.m`. The taper is needed because hours per
+worker are constant on a balanced growth path (terminal condition `K/(kyBgp*Y) = 1`); left undamped over the
+150-year tail, the fitted -0.2%/yr decline would take hours to about 69% of their handoff level. The tail is a
+terminal-condition device, not a forecast; its effect on the trend wage over 2023-2060 is under 0.003%.
 
 **Persistence (`rho`) semantics.** `rho` is the assumed persistence of a realized employment or hours
 surprise, the same for both, applied as a per-year geometric decay on the tail: `rho=1` treats the whole gap as
@@ -650,11 +609,12 @@ leaves every future quarter at the originally assumed path. **`rho=0` is a near-
 setting by construction, not a "weak feedback" setting**: with only the current year replaced, the
 planner still expects labour to revert next period, so the announced wage for `t+1` is essentially
 the marginal product of labour at *assumed* labour, and a persistent labour-supply shift never
-produces the capital-dilution wage response the channel exists to deliver. Measured on this
-branch, a +2% persistent employment surprise revises the next year's trend wage by **-0.5612%**
-under `rho=1` (capital dilution, of the order `alpha * 2%`) versus **-0.0102%** under `rho=0` —
-i.e. `rho=0` delivers essentially no feedback. This is why the default is `rho=1.0`; `rho=0` stays
-settable for comparison runs (no shipped config uses it), not as a milder version of the feature.
+produces the capital-dilution wage response the channel exists to deliver. On the Poland bundle (measured
+2026-08-17), a +2% persistent employment surprise revises the next year's trend wage by about **-0.56%**
+under `rho=1` (capital dilution, of the order `alpha * 2%`) versus about **-0.01%** under `rho=0`, i.e. `rho=0`
+delivers essentially no feedback; `RamseyRecursiveFeedbackTest` checks the bands (below -0.10% and above -1.20%
+under `rho=1`, within ±0.10% under `rho=0`). This is why the default is `rho=1.0`; `rho=0` is settable for
+comparison runs (no shipped config uses it), not as a milder version of the feature.
 
 **Diagnostics.** Besides `h_realized_gap` (above), two columns are appended to all four quarterly rows of year `t` in
 `MacroPaths.csv`:
@@ -724,7 +684,7 @@ by this channel.
 
 ### 9.1 Path export
 
-Dynamic DSGE paths export to:
+The macro paths are exported to:
 
 - `output/{run_id}/csv/MacroPaths.csv`
 
@@ -735,7 +695,7 @@ Dynamic DSGE paths export to:
 
 ---
 
-## 10. Code Map (Current)
+## 10. Code Map
 
 ### 10.1 Main classes
 
@@ -755,24 +715,18 @@ Dynamic DSGE paths export to:
 
 `src/test/java/simpaths/model/macro/`
 
-`BundleProvenanceTest` (contract 18), `DSGEBundleContractTest`, `DSGEIntegrationTest`, `DSGEIrfParityTest`,
+`BundleProvenanceTest` (contract 18), `CommittedBundlesTest` (replays every committed bundle's IRFs and Ramsey
+forward solve), `DSGEBundleContractTest`, `DSGEIntegrationTest`, `DSGEIrfParityTest`,
 `DSGEModelTest`, `DSGEShockScenarioTest`, `DSGEStateTest`, `DsgeOneWayTest` (contract 38),
 `LaborSupplyAggregatorTest`, `LevelDiagnosticsTest`, `MacroJsonTest`, `MacroModelManagerTest`,
 `MacroPathRecorderTest`, `MacroScenarioConfigTest`, `MacroSwitchContractTest`, `RamseyRecursiveFeedbackTest`,
-`RamseyScenarioTest`, `RamseyTrendModelTest` (MATLAB parity in exogenous mode at `RELATIVE_TOLERANCE = 1e-9`),
+`RamseyScenarioTest`, `RamseyTrendModelTest` (MATLAB parity against `src/test/resources/macro/exogenous/` at
+`RELATIVE_TOLERANCE = 1e-9`),
 `ScenarioLoaderParityTest`. `MacroTestSupport` holds the helpers that drive a manager through the schedule.
 
 ---
 
-## 11. Migration Notes
-
-Until 2026-10-14 this file was `docs/DSGE_INTEGRATION_PLAN.md`. It superseded older plan text that described
-static equilibrium components and static-only test classes; those are removed from the code. For
-historical rationale, see the repository history.
-
----
-
-## 12. References
+## 11. References
 
 - The macro model itself: `Technical_Documentation_Macromodel.md` (this folder)
 - Contracts between the MATLAB and Java sides: `Integration_Contracts.md` (this folder)

@@ -6,9 +6,9 @@ function test_calibration_identities()
 % Background: the linearised unemployment identity (Macromodel_template.mod
 % eq. 10) is u = (chi_L/chi_u)*L - (chi_n/chi_u)*n, which is the exact
 % linearisation of U = L - N only when chi_u is the unemployment-to-
-% POPULATION share, i.e. chi_u = chi_L - chi_n. Poland was calibrated with
-% the U/L rate (0.05 instead of 0.03), mis-scaling the latent u -> theta ->
-% matching -> bargaining chain by ~40%.
+% POPULATION share, i.e. chi_u = chi_L - chi_n. Calibrating it with the U/L
+% rate instead (0.05 instead of 0.03 for Poland) mis-scales the latent
+% u -> theta -> matching -> bargaining chain by ~40%.
 %
 % Usage:
 %   >> test_calibration_identities
@@ -67,7 +67,7 @@ function test_calibration_identities()
     % The identity alone is not enough. chi_L=0.73, chi_n=0.70, chi_u=0.03 satisfies
     % it exactly while implying a 4.1% unemployment rate on a sample that averages
     % 7.16% - the model would be linearised around a point the data never visits.
-    % Since chi_u scales the whole latent u channel, that cost ~140 log points of
+    % Since chi_u scales the whole latent u channel, that costs ~140 log points of
     % marginal likelihood. Tolerance is deliberately loose: this catches a wrong
     % window or a U/L-vs-U/pop mix-up, not ordinary rounding.
     fprintf('\nTEST 1b: implied u-rate matches the estimation-sample mean\n');

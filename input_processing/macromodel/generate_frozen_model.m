@@ -4,18 +4,17 @@
 % This script reads posterior modes from Dynare estimation output and
 % creates Macromodel_[COUNTRY]_frozen.mod with hardcoded parameters.
 %
-% VERSION: v12 (Option C, February 2026)
-%   - Option C: Smets-Wouters-style C/I decomposition
-%     - New endogenous variable: c (consumption, Euler equation)
-%     - New parameter: s_inv (investment share of GDP)
-%     - IS curve replaced with: consumption Euler + demand aggregation identity
-%     - Measurement errors for c and inv
-%   - Capital extension: k (capital stock), inv (investment)
-%   - New parameters: alpha_k, delta_k, rho_inv, phi_inv_r, s_inv
-%   - New shock: eps_inv (investment-specific)
-%   - Hours is pure AR(1) (no psi_hy, psi_hw estimated)
+% THE MODEL (Macromodel_template.mod with the country's calibration and
+% estimation files):
+%   - Smets-Wouters-style C/I decomposition: consumption Euler equation (c) and
+%     a demand aggregation identity with the investment share s_inv
+%   - Measurement errors for c and inv
+%   - Capital k and investment inv (alpha_k, delta_k, rho_inv, phi_inv_r, s_inv),
+%     with the investment-specific shock eps_inv
+%   - Hours is a pure AR(1)
 %   - rho_h and rho_L are CALIBRATED (not estimated)
-%   - Estimated: sigma_a, sigma_d, sigma_r, sigma_h, sigma_L, sigma_inv, omega_h
+%   - The estimated parameters are those of country_params/{C}_estimation.mod;
+%     their names come from oo_.posterior_mode, so this script lists none
 %
 % Usage:
 %   1. Run estimation: dynare Macromodel_{COUNTRY}.mod
@@ -134,9 +133,9 @@ function generate_frozen_model(country)
     VALUE_PATTERN = '[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?';
 
     % Every substitution below goes through subst_verified, which fails if the pattern
-    % did not match exactly the expected number of times. Previously these were all
-    % fire-and-forget regexprep calls: any reformatting upstream would silently leave the
-    % original text in a file whose header claims "FROZEN (estimated parameters)". The
+    % does not match exactly the expected number of times. A plain regexprep that
+    % misses after a reformatting upstream silently leaves the original text in a
+    % file whose header claims "FROZEN (estimated parameters)". The
     % most dangerous case is 4b - a missed substitution there leaves
     % do_parameter_estimation = true, so the "frozen" model re-runs estimation on export.
 
@@ -153,7 +152,7 @@ function generate_frozen_model(country)
         'do_parameter_estimation switch', 1);
 
     % 4b2. Disable custom IRFs (frozen model is for export, not interactive plotting)
-    % Handle both true and false in template (Option C sets false in main .mod)
+    % The pattern accepts either value (the template sets false)
     frozen = subst_verified(frozen, ...
         '@#define use_custom_irfs = (true|false)[^\n]*', ...
         '@#define use_custom_irfs = false   // FROZEN: use standard IRFs for export', ...
@@ -161,10 +160,8 @@ function generate_frozen_model(country)
 
     % rho_L, rho_h and rho_inv are calibrated, not estimated, so the calibration's
     % lines pass through unchanged: the frozen model is the estimated model for
-    % every shock. (Until 2026-11 an export switch zeroed rho_L and rho_h, because
-    % SimPaths wrote levels into eps_L and eps_h; the DSGE now takes no input from
-    % SimPaths. Zeroing rho_inv once destroyed the long-run investment multiplier
-    % phi_inv_r/(1 - rho_inv) that estimation identifies.)
+    % every shock. Zeroing rho_inv would destroy the long-run investment
+    % multiplier phi_inv_r/(1 - rho_inv) that estimation identifies.
 
     % 4c. Update estimated parameters in calibration section
     for i = 1:length(est_param_names)
@@ -175,8 +172,8 @@ function generate_frozen_model(country)
         % Replace value while preserving comment
         % Use (?<![a-zA-Z_]) negative lookbehind to avoid matching 'eta' in 'beta'
         % VALUE_PATTERN accepts negatives and scientific notation: psi_wL is -0.08
-        % (Poland) / -0.05 (Germany), so the old [0-9.]+ would silently fail to
-        % substitute it the moment such a parameter is estimated.
+        % (Poland) / -0.05 (Germany), and an unsigned [0-9.]+ would silently fail
+        % to substitute it the moment such a parameter is estimated.
         pattern = sprintf('((?<![a-zA-Z_])%s\\s*=\\s*)%s\\s*;', pname, VALUE_PATTERN);
         replacement = sprintf('$1%.6f;  // ESTIMATED (posterior mode)', pvalue);
         frozen = subst_verified(frozen, pattern, replacement, ...

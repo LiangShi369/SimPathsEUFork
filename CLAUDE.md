@@ -263,6 +263,20 @@ re-export; the fix is to re-export, not to edit the bundle. A changed input need
 the inputs (commit both with the bundle); a changed bundle file alone needs only the skip-estimation
 re-export. The test prints the recipe that fits the failing line.
 
+## Documentation describes the current state
+
+All documentation in this repository (Markdown docs and READMEs, diagrams, config headers, code
+comments and Javadoc) says how things work now, never how they once worked.
+
+- State the rule and, where it helps, its reason in the present tense. Write no "fixed on 2026-05-19",
+  "until 2026-11", "no longer", "previously", "as before" or "vN change" notes, no lists of removed
+  switches and no "do not undo" warnings about past defects.
+- A code change updates the documentation that describes it, diagrams included, in the same commit.
+- History goes into commit messages, PR descriptions and a document's own changelog table (its
+  "Document History"), nowhere else.
+- Allowed: a dated measurement ("checked on 2026-10-21") as evidence, and an error message that tells
+  the user what an outdated input is and how to replace it.
+
 ## Branch Conventions
 
 - `main` — stable release; `develop` — integration. PRs target `develop` on `simpaths/SimPathsEU`, and `develop` is merged into `main` by PR.

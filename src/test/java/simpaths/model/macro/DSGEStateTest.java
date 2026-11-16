@@ -17,7 +17,7 @@ public class DSGEStateTest {
 
     @Test
     public void testInflationReadFromStateWhenPiIsState() {
-        // Since V15 (iota_p indexation) pi(-1) enters the NKPC, so pi is a STATE
+        // With iota_p indexation pi(-1) enters the NKPC, so pi is a STATE
         // variable in the exported model (state_idx_in_s["pi"] = 2 in model_info.json;
         // the jump map has no "pi"). getInflationDeviation() must therefore read the
         // state vector's pi slot — NOT fall back to jump slot 2, which is "gap".
@@ -53,7 +53,7 @@ public class DSGEStateTest {
         double[] jumps = new double[DSGEState.DEFAULT_N_JUMP];
 
         states[IDX.sW] = 0.05;      // 5% wage deviation (STATE)
-        states[IDX.piIdx] = 0.02;   // 2% inflation deviation (STATE since V15)
+        states[IDX.piIdx] = 0.02;   // 2% inflation deviation (STATE)
         jumps[IDX.yY] = 0.03;       // 3% output deviation (JUMP)
 
         DSGEState state = new DSGEState(states, jumps);

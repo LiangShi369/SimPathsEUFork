@@ -5,7 +5,7 @@ function name = basename_of(p)
 %       -> 'growth_model_reference_poland.csv'
 %
 % WHY THIS EXISTS
-%   Artefact paths now carry a role folder (artifact_path returns
+%   Artefact paths carry a role folder (artifact_path returns
 %   'output/foo.csv', not 'foo.csv'). Anything that copies such a file into a
 %   DIFFERENT directory must strip that folder first:
 %
@@ -14,11 +14,10 @@ function name = basename_of(p)
 %       copyfile(src, fullfile(dest_dir, basename_of(src)))  % right
 %           -> dest_dir/foo.csv
 %
-%   The wrong form is what the exporters had after the reorganisation: it read
-%   correctly when the source was a bare filename and silently started composing
-%   a nested destination once the source gained a folder. It failed loudly at
-%   copyfile, but only after the exporter had already written the policy
-%   matrices -- leaving a half-updated SimPaths bundle.
+%   The wrong form reads correctly when the source is a bare filename and
+%   silently composes a nested destination when it carries a folder. It fails
+%   loudly at copyfile, but in an exporter only after the policy matrices are
+%   written -- leaving a half-updated SimPaths bundle.
 
     [~, stem, ext] = fileparts(p);
     name = [stem ext];

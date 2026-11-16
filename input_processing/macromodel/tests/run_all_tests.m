@@ -8,9 +8,7 @@ function failures = run_all_tests()
 % containing run_full_workflow.m), because the checks read data files by
 % pwd-relative paths -- see setup_path.m for why that is deliberate.
 %
-% Every check is fast and takes no country: none solves the model. (The
-% former slow set, test_endogenous_labor, went with the endogenous-labour
-% variant on 2026-10-20, JuergenWiemers/SimPathsEU#28.)
+% Every check is fast and takes no country: none solves the model.
 
     here = fileparts(mfilename('fullpath'));
     root = fileparts(here);

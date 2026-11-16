@@ -411,8 +411,8 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         macroManager.setLogMacroState(mm_macroLogging.logsState());
         macroManager.setVerboseMacroLogging(mm_macroLogging.isVerbose());
         // Freeze the exogenous WageGrowth index out of sample only when the Ramsey layer is
-        // the secular wage source; otherwise the Ramsey trend double-counts it. Baseline and
-        // time-trend modes keep the index as-is.
+        // the secular wage source; otherwise the Ramsey trend double-counts it. The modes
+        // without a Ramsey layer (off, dsge) keep the index as-is.
         Parameters.freezeWageGrowthForRamseyTrend = mm_macroModel.usesRamseyTrend();
         macroManager.setDsgeShockScenario(mm_dsgeShockScenario);
         macroManager.setRamseyScenario(mm_ramseyScenario);
@@ -583,7 +583,8 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         // HOUSEHOLD COMPOSITION MODULE: Decide whether to enter into a union (marry / cohabit), and then perform union matching (marriage) between a male and female
 
         // Update potential earnings so that as up to date as possible to decide partner in union matching.
-        // If DSGE is enabled (runs later), wages will be adjusted after union matching.
+        // With mm_macroModel on (any mode), DSGEMacroUpdate below recomputes them after union
+        // matching with the macro wage deviation (Ramsey trend and/or DSGE cycle) applied.
         yearlySchedule.addCollectionEvent(persons, Person.Processes.UpdatePotentialHourlyEarnings);
 
         // Consider whether in consensual union (cohabiting)
@@ -843,13 +844,15 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         GarbageCollection,
         CheckForImperfectTaxDBMatches,
         
-        // DSGE Macro Model
+        // Macro layer: with mm_macroModel on (any mode), sets this year's macro wage before
+        // the labour market; in recorder-only mode, records the MacroPaths.csv row only.
         DSGEMacroUpdate,
 
         // Re-emit SimPaths-side macro level aggregates against the post-alignment
         // population state so that the year's MacroPaths.csv row reflects the
         // year's official end-of-year demographics rather than the pre-alignment
-        // snapshot captured during DSGEMacroUpdate.
+        // snapshot captured during DSGEMacroUpdate. With a Ramsey layer, also runs the
+        // planner's end-of-year re-solve on SimPaths' realized employment and hours.
         MacroEndYearCapture,
     }
 
@@ -951,7 +954,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
             }
             case LabourMarketAndIncomeUpdate -> {
 
-                // Log DSGE wage adjustment summary before labor market update
+                // Log the macro wage adjustment summary before the labour market update
                 if (macroManager.isEnabled()) {
                     macroManager.logWageAdjustmentSummary();
                 }
@@ -983,7 +986,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                     System.out.println("Finished simulating population in " + timerForSim + " minutes");
                     if (commentsOn) log.info("Finished simulating population in " + timerForSim + " minutes");
                     
-                    // Export DSGE quarterly paths (only for dynamic integration mode)
+                    // Export the quarterly macro paths (MacroPaths.csv), if any were recorded
                     macroManager.exportPaths(getEngine().getCurrentExperiment().getOutputFolder());
                     macroManager.logDiagnosticsSummary();
                 }
@@ -3170,7 +3173,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
     }
 
     // ========== Macro Model Getters/Setters ==========
-    // These delegate to MacroModelManager to maintain backward compatibility
+    // The setters keep MacroModelManager in step with the mm_* fields
     
     public MacroModelMode getMm_macroModel() {
         return mm_macroModel;
@@ -3226,8 +3229,9 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
     }
     
     /**
-     * Get current DSGE wage deviation (% from steady state).
-     * @return wage deviation in percent (e.g., 2.5 means 2.5% above steady state)
+     * Get the current macro wage deviation: the DSGE cycle plus the Ramsey trend, in percent.
+     * Person multiplies the regression wage by {@code 1 + deviation/100}.
+     * @return wage deviation in percent (e.g., 2.5 means 2.5% above the SimPaths wage)
      */
     public double getMm_wageDeviation() {
         return macroManager.getWageDeviation();

@@ -159,13 +159,11 @@ class DSGEIntegrationTest {
     /**
      * A missing Ramsey bundle is fatal, not a soft fallback.
      *
-     * <p>This test previously asserted the opposite: that the manager quietly cleared
-     * {@code useRamseyTrend} and carried on. That behaviour was removed deliberately,
-     * because a silent fallback means a run configured for the Ramsey layer produces
-     * non-Ramsey numbers that look exactly like Ramsey numbers. The same reasoning
-     * removed the legacy population-projection fallback. The test kept asserting the
-     * old contract only because it never ran &mdash; surefire excludes
-     * {@code *IntegrationTest} and CI failed earlier in the build.</p>
+     * <p>Fails if the manager quietly clears {@code useRamseyTrend} and carries on: a
+     * silent fallback means a run configured for the Ramsey layer produces non-Ramsey
+     * numbers that look exactly like Ramsey numbers. The population projection follows
+     * the same rule. Surefire excludes {@code *IntegrationTest}, so this test runs under
+     * failsafe only.</p>
      */
     @Test
     void testManagerRefusesToRunWithoutRamseyFiles() {
@@ -185,11 +183,10 @@ class DSGEIntegrationTest {
     // ========== Export-bundle contract validation ==========
 
     /**
-     * shock_indices_java pins which column of the shock vector carries eps_L. The old
-     * default of 3 dates from an earlier schema; in the current export eps_L is 4 and 3
-     * is eps_p, so defaulting would route SimPaths' labour-supply signal into the
-     * cost-push slot and scale it by sigma_p. A bundle that cannot state its own shock
-     * layout must not load.
+     * shock_indices_java pins which column of the shock vector carries each shock. In the
+     * current export eps_L is 4 and 3 is eps_p, so a fixed default of 3 for eps_L would
+     * route a scenario's labour-force shock into the cost-push slot and scale it by
+     * sigma_p. A bundle that cannot state its own shock layout must not load.
      */
     @Test
     @EnabledIf("modelFilesExist")
@@ -206,7 +203,7 @@ class DSGEIntegrationTest {
     }
 
     /**
-     * A short shock_params.csv previously left trailing shocks at sigma=0, which silently
+     * A short shock_params.csv would leave trailing shocks at sigma=0, which silently
      * disables their scaling in stepQuarterly rather than failing.
      */
     @Test
@@ -229,8 +226,8 @@ class DSGEIntegrationTest {
     }
 
     /**
-     * Matrix rows are consumed positionally; the row-name column was read and discarded.
-     * A CSV refreshed from a different export run would misalign silently.
+     * Matrix rows are consumed positionally, so without a check of the row-name column a
+     * CSV refreshed from a different export run would misalign silently.
      */
     @Test
     @EnabledIf("modelFilesExist")
@@ -272,7 +269,7 @@ class DSGEIntegrationTest {
     void testProjectionHorizonComesFromBundle() throws IOException {
         Path scratch = copyBundleAndEdit("growth_terminal_state.json", s -> {
             String stripped = s.replaceAll("\\s*\"projection_quarters\"\\s*:\\s*\\d+,", "");
-            // Declare a horizon that differs from the legacy 320 default.
+            // Declare a horizon that differs from the 320-quarter fallback.
             return stripped.replaceFirst("\\{", "{\n  \"projection_quarters\": 240,");
         });
 
@@ -326,11 +323,10 @@ class DSGEIntegrationTest {
     }
 
     /**
-     * A population projection carrying the legacy country-agnostic name must not be
-     * silently consumed. Historically MacroModelManager fell back to
-     * population_projection.csv, which dated from the period when the German macro
-     * model was run inside Polish SimPaths. In a per-country layout that fallback can
-     * only ever feed one country's demographics into another country's trend.
+     * A population projection carrying a country-agnostic name
+     * (population_projection.csv) must not be silently consumed. In a per-country layout
+     * such a file can only ever feed one country's demographics into another country's
+     * trend.
      */
     @Test
     @EnabledIf("populationProjectionFileExists")
@@ -342,14 +338,14 @@ class DSGEIntegrationTest {
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> manager.initializeRamseyTrend(scratch.toString()),
-                "Legacy unsuffixed projection must not be accepted silently");
+                "An unsuffixed projection file must not be accepted silently");
         assertTrue(ex.getMessage().contains("population_projection_Poland.csv"),
                 "Error should name the expected file, got: " + ex.getMessage());
     }
 
     /**
-     * The dangerous historical case: another country's projection sitting in this
-     * bundle's directory must fail loudly rather than drive the Ramsey trend.
+     * The dangerous case: another country's projection sitting in this bundle's
+     * directory must fail loudly rather than drive the Ramsey trend.
      */
     @Test
     @EnabledIf("populationProjectionFileExists")
@@ -366,8 +362,8 @@ class DSGEIntegrationTest {
     
     /**
      * Test that population_projection_[COUNTRY].csv is loaded and causes the Ramsey trend
-     * to use declining N (Polish demographics) instead of growing N (German
-     * extrapolation). The key indicator: n_ramsey trend should turn negative
+     * to use declining N (Polish demographics) instead of extrapolating the estimation
+     * sample's growth. The key indicator: n_ramsey trend should turn negative
      * over time, reflecting Polish working-age population decline.
      */
     @Test
@@ -439,7 +435,7 @@ class DSGEIntegrationTest {
         assertTrue(Double.isFinite(manager.getWageDeviation()),
             "Wage deviation should be finite after year-2 DSGE update");
 
-        // Without a latch the DSGE still runs in year 2: no year waits for a baseline any more.
+        // Without a latch the DSGE still runs in year 2: no year waits for a baseline.
         MacroModelManager noLatchManager = new MacroModelManager();
         noLatchManager.setEnabled(true);
         noLatchManager.setUseDsge(true);

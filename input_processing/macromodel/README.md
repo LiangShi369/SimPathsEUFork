@@ -145,10 +145,10 @@ StataMP-64.exe /e do make_datasets.do UK
   (`-EstimatedRelTol`), the `data/` folder still at `1e-6`. Re-estimation moves the
   numbers between machines even on one Dynare version: with 6.5 on two machines
   (2026-11), Poland's posterior modes were identical and the UK's `omega_h` moved in the
-  sixth digit, taking policy entries by up to 6e-6; Spain's `omega_h` once moved by
-  2.6e-4. A real change is much larger: the switch to X-13 moved Poland's shock standard
-  deviations by up to 2.2%. A failure at `1e-3` means the difference needs explaining,
-  not that the version is forbidden.
+  sixth digit, taking policy entries by up to 6e-6. A real input change is much larger:
+  seasonally adjusting the price level with X-13 instead of TRAMO/SEATS moves Poland's
+  shock standard deviations by up to 2.2% (2026-10). A failure at `1e-3` means the
+  difference needs explaining, not that the version is forbidden.
 - `mvn -q test -Dtest='simpaths.model.macro.*Test'` runs the Java side.
   `CommittedBundlesTest` loads every committed bundle (Poland's and the UK's), replays
   each exported impulse response through the Java DSGE at `1e-8` and solves its Ramsey
@@ -213,18 +213,16 @@ StataMP-64.exe /e do make_datasets.do UK
 | Country | Code | Estimated | Bundle shipped | Why not |
 |---|---|---|---|---|
 | Poland | PL | yes | yes | |
-| Germany | DE | yes | no | not exported into this repository; the last export predates the units contract (`deviation_scale`), so re-export before any DE run |
-| Spain | ES | yes | no | SimPathsEU runs Spain with the macro layer off, but no bundle is exported. The tracked data and frozen model predate `input/ES/align_popProjections.xlsx` and extrapolate employment mechanically; the next `run_full_workflow('Spain')` reads the workbook and changes them |
+| Germany | DE | yes | no | not exported into this repository; export a bundle with the current exporter before any DE run (Java refuses a bundle that does not declare `deviation_scale`) |
+| Spain | ES | yes | no | SimPathsEU runs Spain with the macro layer off, but no bundle is exported. The tracked data and frozen model extrapolate employment mechanically instead of following `input/ES/align_popProjections.xlsx`; the next `run_full_workflow('Spain')` reads the workbook and changes them |
 | Sweden | SE | yes | no | no `input/SE/align_popProjections.xlsx`, so employment is extrapolated mechanically and the bundle is refused; SimPathsEU has no Sweden inputs |
 | UK | UK | yes | yes | shipped, but SimPathsEU cannot run the UK yet (`Country` has no UK), so no simulation reads the bundle; `CommittedBundlesTest` and `BundleProvenanceTest` check it like Poland's. Data from the ONS and the OECD, as Eurostat has none after Brexit (`docs/MULTI_COUNTRY_WORKFLOW.md`) |
 
-Seasonal adjustment moved from EViews' TRAMO/SEATS to X-13 in 2026-10 (the UK was on
-X-13 from the start). The tracked data and frozen models of all five countries, and the
-Poland and UK bundles, use X-13; Germany, Spain and Sweden were re-estimated on it and,
-as before, have no bundle here. The UK's larger measurement error
-on inflation (`country_params/UK_estimation.mod`) allows for the 0.54 pp gap between
-the two methods on UK data; whether it is still needed is a question for the next UK
-re-estimation.
+The price level of every country is seasonally adjusted with X-13ARIMA-SEATS; the
+tracked data and frozen models of all five countries, and the Poland and UK bundles, are
+built on it. The UK's larger measurement error on inflation
+(`country_params/UK_estimation.mod`) allows for the 0.54 pp gap between TRAMO/SEATS and
+X-13 on UK data; whether it is needed is a question for the next UK re-estimation.
 
 ## Adding a country
 
@@ -241,7 +239,8 @@ including the data sources that bite.
   between MATLAB and Java, each with what enforces it. Two bind Java changes: never
   re-derive downstream what upstream computes (carry it in the bundle, fail if it is
   missing), and treat parity fixtures as snapshots that are refreshed, never edited.
-- `docs/Technical_Documentation_Macromodel.md` (v17): the model.
+- `docs/Technical_Documentation_Macromodel.md`: the model (architecture, equations,
+  estimation setup, where each number comes from).
 - `docs/SimPaths_Coupling.md`: the Java side: the `mm_*` switches, which bundle files
   SimPaths reads, and the yearly Ramsey re-solve against realized labour supply.
 - `docs/Estimation_Guide.md`: priors, shocks, diagnostics.

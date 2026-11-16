@@ -3,8 +3,8 @@
 // is adjusted by one binary with one spec. Run with -include-, not -do-, so the locals
 // land in the caller; Stata's working directory must be input_processing/macromodel/stata/.
 //
-// THE SPEC. X-13 in its SEATS mode, called through x13_seats.ado, with the options of the
-// TRAMO/SEATS call EViews ran until 2026-10:
+// THE SPEC. X-13 in its SEATS mode, called through x13_seats.ado, with the X-13
+// counterparts of these EViews TRAMO/SEATS options:
 //   lam=-1           -> transform{ function=auto }    log/level choice
 //   inic=3 idif=3    -> automdl{ }                    automatic ARIMA identification
 //   iatip=1          -> outlier{ types=(ao ls tc) }   TRAMO's default outlier set

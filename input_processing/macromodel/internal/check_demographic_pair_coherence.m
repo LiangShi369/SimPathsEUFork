@@ -9,7 +9,7 @@ function problems = check_demographic_pair_coherence(pop_proj_file, demo_L_file,
 % other, or hand-edit demographic_L, and MATLAB detrends on one demographic
 % future while Java projects on another — silently. The files live in different
 % units, so the invariant is GROWTH, not level: over every post-handoff quarter
-% both must imply the same log growth. (2026-08-19 boundary audit, C4.)
+% both must imply the same log growth.
 %
 % Returns a cell row of problem strings; empty means coherent.
 

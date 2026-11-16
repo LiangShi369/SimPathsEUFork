@@ -6,8 +6,8 @@ function ann = annualize_complete_years(quarterly, quarter_year, years)
 % break-even series whose first entry is NaN by construction (its trailing-4Q
 % growth term has no history at the handoff).
 %
-% This existed as three pasted loops, and one of them already differed in its
-% omitnan handling, so the panels were not all aggregating the same way.
+% Every annual panel of ramsey_projection_plot aggregates through this one
+% function, so all of them treat incomplete years and NaN values the same way.
     n_years = numel(years);
     ann = nan(n_years, size(quarterly, 2));
     for k = 1:n_years

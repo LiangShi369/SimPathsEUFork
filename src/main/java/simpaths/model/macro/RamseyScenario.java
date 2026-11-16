@@ -39,8 +39,8 @@ import org.apache.log4j.Logger;
  * </ul>
  *
  * <p>Any other column is an error: a file that names a parameter the model does not
- * have (for example the {@code psi} column of the removed endogenous-labour variant,
- * JuergenWiemers/SimPathsEU#28) must not run as a silent baseline.</p>
+ * have (for example {@code psi}, a labour-supply parameter the planner does not carry)
+ * must not run as a silent baseline.</p>
  *
  * <p>Not all parameter columns need to be present — missing columns default to zero.
  * Years not listed in the file also default to zero (baseline values).
@@ -102,7 +102,7 @@ public class RamseyScenario {
         List<String> allLines = Files.readAllLines(csvPath);
 
         // Comment/blank filtering and row splitting live in MacroCsv so the two
-        // scenario readers cannot drift apart again (audit §9).
+        // scenario readers cannot drift apart.
         List<String> lines = MacroCsv.stripCommentsAndBlanks(allLines);
 
         if (lines.size() < 2) {

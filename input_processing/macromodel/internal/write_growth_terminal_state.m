@@ -9,14 +9,12 @@ function info = write_growth_terminal_state(growth_mat, output_dir)
 % export_dynamic_for_simpaths.m (full workflow) and export_ramsey_for_simpaths.m
 % (Ramsey-only refresh) call it.
 %
-% Two copies of this writer existed until 2026-08 and had already diverged: the
-% Ramsey-only copy did not emit `projection_quarters`. Java falls back to the
-% legacy 320-quarter horizon when that key is missing — with a log warning, but
-% the run continues on a different forward horizon than the one the trend was
-% solved over. Contract #9 in docs/Integration_Contracts.md exists precisely to
-% stop the horizon being a constant on each side; the second writer quietly
-% reopened it for anyone following the "Refresh Ramsey Files Only" recipe in
-% input_processing/macromodel/README.md.
+% One writer keeps both export paths emitting `projection_quarters`. Java falls
+% back to a 320-quarter horizon when that key is missing — with a log warning,
+% but the run continues on a different forward horizon than the one the trend
+% was solved over. Contract #9 in docs/Integration_Contracts.md keeps the horizon
+% from being a constant on each side, including for the "Refresh Ramsey Files
+% Only" recipe in input_processing/macromodel/README.md.
 
     arguments
         growth_mat (1,:) char
@@ -40,9 +38,9 @@ function info = write_growth_terminal_state(growth_mat, output_dir)
 
     lines = {};
     lines{end+1} = '{';
-    % %.16e, not %.10f: A is O(0.03), so ten decimals kept only ~9 significant
+    % %.16e, not %.10f: A is O(0.03), so ten decimals keep only ~9 significant
     % digits — worst-case ~1.4e-9 RELATIVE, above the 1e-9 Java parity tolerance.
-    % The 4.4e-11 the anchor test measured was luck of the digits. Full precision
+    % The 4.4e-11 the anchor test measured at ten decimals was luck. Full precision
     % takes this file out of the parity budget.
     lines{end+1} = sprintf('  "K_terminal": %.16e,', growth_data.K_terminal);
     lines{end+1} = sprintf('  "A_terminal": %.16e,', growth_data.A_terminal);
@@ -58,7 +56,7 @@ function info = write_growth_terminal_state(growth_mat, output_dir)
     else
         warning('write_growth_terminal_state:MissingHorizon', ...
                 ['%s carries no projection_quarters, so the bundle cannot pin the ' ...
-                 'forward horizon and Java will fall back to its legacy default. ' ...
+                 'forward horizon and Java will assume its default of 320 quarters. ' ...
                  'Re-run ramsey_trend to regenerate the workspace.'], growth_mat);
     end
 

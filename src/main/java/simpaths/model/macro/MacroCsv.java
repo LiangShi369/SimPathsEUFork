@@ -6,10 +6,10 @@ import java.util.List;
 /**
  * Shared row/field handling for the macro package's CSV readers.
  *
- * <p><b>Why this class exists.</b> The package carried several hand-rolled parse
- * loops with different strictness, and two of them — {@link RamseyScenario} and
- * {@link DSGEShockScenario}, which read the same family of scenario files — had
- * already drifted apart in two ways that both fail silently:</p>
+ * <p><b>Why this class exists.</b> {@link RamseyScenario} and
+ * {@link DSGEShockScenario} read the same family of scenario files. Both go
+ * through here, so they treat the two cases below as one decision rather than
+ * two; a hand-rolled parse loop in either would fail silently on them:</p>
  *
  * <ul>
  *   <li>{@code split(",")} drops trailing empty fields, so a row ending in
@@ -20,9 +20,6 @@ import java.util.List;
  *       stability guard does <em>not</em> fire — the run continues and every
  *       downstream number is NaN.</li>
  * </ul>
- *
- * <p>Both readers now go through here, so the two behaviours are one decision
- * rather than two.</p>
  */
 final class MacroCsv {
 

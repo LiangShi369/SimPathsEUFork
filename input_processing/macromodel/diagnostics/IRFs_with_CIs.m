@@ -10,10 +10,10 @@
 %           bayesian_irf, irf=40
 %       And ensure oo_.PosteriorIRF exists.
 %
-% V9 Note (Feb 2026):
+% Model note:
 %   - L (labor force) and h (hours) are EXOGENOUS AR(1) processes
-%   - L responds ONLY to eps_L (rho_L = 0.95, CALIBRATED)
-%   - h responds ONLY to eps_h (rho_h = 0.85, CALIBRATED)  
+%   - L responds ONLY to eps_L, h ONLY to eps_h; rho_L and rho_h are CALIBRATED
+%     per country in country_params/{C}_calibration.mod
 %   - IRFs of L and h to other shocks will show zero response (correct)
 %
 % =========================================================================
@@ -24,7 +24,7 @@ var_titles_all = {'Output', 'Real Wage', 'Employment', 'Hours', 'Unemployment', 
                   'Tightness', 'Inflation', 'Interest Rate', 'Output Gap', ...
                   'Demand', 'Consumption', 'Matching Rate', 'Labor Force', 'Unemp. Rate', 'Capital', 'Investment'};
 
-% Shocks in preferred order (matching combined plot layout) - v12: includes eps_p
+% Shocks in preferred order (matching combined plot layout)
 shocks = {'eps_L', 'eps_a', 'eps_d', 'eps_p', 'eps_h', 'eps_inv', 'eps_r', 'eps_sep'};
 shock_titles = {'Labor Force', 'Technology', 'Demand', 'Cost-Push', 'Hours', 'Investment', 'Monetary Policy', 'Separation'};
 
@@ -140,11 +140,11 @@ for s = 1:length(shocks)
 end
 
 % =========================================================================
-% PART 2: Combined mega-figure (2x3 shock blocks, each with variables)
+% PART 2: Combined mega-figure (2x4 shock blocks, each with variables)
 % =========================================================================
-% Layout: 2 rows x 3 columns of "shock blocks"
+% Layout: 2 rows x 4 columns of "shock blocks"
 % Each shock block has nrows x ncols variables
-% Total subplots: (2*nrows) x (3*ncols)
+% Total subplots: (2*nrows) x (4*ncols)
 
 fprintf('\nCreating combined mega-figure...\n');
 
@@ -157,9 +157,9 @@ set(fig_mega, 'PaperPositionMode', 'auto');
 set(fig_mega, 'PaperUnits', 'inches');
 set(fig_mega, 'PaperSize', [19.2 10.8]);
 
-% Define the 2x3 grid of shocks
-% Row 1: shocks 1-4 (Labor Force, Technology, Demand, Hours)
-% Row 2: shocks 5-8 (Investment, Matching, Monetary, Separation)
+% Define the 2x4 grid of shocks
+% Row 1: shocks 1-4 (Labor Force, Technology, Demand, Cost-Push)
+% Row 2: shocks 5-8 (Hours, Investment, Monetary Policy, Separation)
 shock_grid = [1, 2, 3, 4; 5, 6, 7, 8];
 
 nrows_var = nrows;   % rows per shock block (from Part 1)

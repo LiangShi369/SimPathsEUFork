@@ -1,10 +1,5 @@
 function summary = build_ramsey_documentation_summary(params, country, diagnostics)
 % BUILD_RAMSEY_DOCUMENTATION_SUMMARY  Build Ramsey documentation summary payload.
-%
-% Schema note (2026-10-20, JuergenWiemers/SimPathsEU#28): the fields
-% structural.labor_supply_mode_default, structural.phi, structural.psi,
-% base_year_values.WAP0, base_year_values.l0, base_year_values.c0 and
-% base_year_values.w0 were removed with the endogenous-labour variant.
 
     arguments
         params (1,1) struct

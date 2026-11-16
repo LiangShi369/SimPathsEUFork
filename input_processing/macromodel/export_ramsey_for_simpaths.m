@@ -75,9 +75,9 @@ function export_ramsey_for_simpaths(country)
               growth_mat, country);
     end
 
-    % Shared with export_dynamic_for_simpaths.m. This path used to carry its own
-    % copy of the writer, and that copy omitted projection_quarters - so a bundle
-    % refreshed this way silently reverted Java to its legacy 320-quarter horizon.
+    % Shared with export_dynamic_for_simpaths.m: one writer, so a Ramsey-only
+    % refresh also emits projection_quarters and Java keeps the forward horizon
+    % the trend was solved over.
     write_growth_terminal_state(growth_mat, output_dir);
 
     % Same reason: one writer for the hours path, both export paths call it.
@@ -91,7 +91,7 @@ function export_ramsey_for_simpaths(country)
         copyfile(pop_proj_file, fullfile(output_dir, basename_of(pop_proj_file)));
         fprintf('    ✓ %s\n', pop_proj_file);
     else
-        fprintf('    ℹ %s not found (using default demographic extrapolation)\n', pop_proj_file);
+        fprintf('    ℹ %s not found (SimPaths refuses a Ramsey bundle without it)\n', pop_proj_file);
     end
 
     fprintf('\n');

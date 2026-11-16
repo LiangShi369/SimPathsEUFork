@@ -17,10 +17,10 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Cross-validates the Java DSGE import against MATLAB's own impulse responses.
  *
- * <p>The export bundle has always shipped {@code irfs_eps_*.csv} — Dynare's one-standard-deviation
- * IRFs computed from the same policy matrices Java loads — but until 2026-08-18 nothing read them,
- * in production or in tests. They are the DSGE half's equivalent of the Ramsey parity fixture, and
- * they were free.</p>
+ * <p>The export bundle ships {@code irfs_eps_*.csv} — Dynare's one-standard-deviation IRFs
+ * computed from the same policy matrices Java loads. Production does not read them; this test
+ * does. They are the DSGE half's equivalent of the Ramsey parity fixture, at no extra export
+ * cost.</p>
  *
  * <p>Reproducing them end to end pins, in one assertion, every convention on the import path:
  * matrix loading (A, B_s, C, D), the state/jump split, row and column alignment against

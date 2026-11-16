@@ -232,9 +232,9 @@ public class RamseyScenarioTest {
     }
 
     /**
-     * The endogenous-labour variant and its {@code psi}/{@code phi} scenario columns were
-     * removed (JuergenWiemers/SimPathsEU#28). A scenario file that still carries one must
-     * fail with the list of valid columns rather than run as a silent baseline.
+     * The planner has no labour-supply parameters, so {@code psi} and {@code phi} are not
+     * scenario columns. A scenario file that carries one must fail with the list of valid
+     * columns rather than run as a silent baseline.
      */
     @Test
     public void testPsiColumnIsRejected() throws IOException {

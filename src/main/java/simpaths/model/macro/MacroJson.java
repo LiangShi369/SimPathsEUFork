@@ -10,19 +10,15 @@ import java.util.Map;
  * MATLAB export chain ({@code model_info.json}, {@code growth_params_*.json},
  * {@code growth_terminal_state.json}).
  *
- * <p><b>Why this class exists.</b> The macro package previously carried three
- * independent hand-rolled parsers — one in {@link DSGEModel}, one in
- * {@link RamseyTrendModel}, one in {@link MacroModelManager} — and they did not
- * agree. {@code RamseyTrendModel} skipped whitespace after the colon;
- * {@code DSGEModel} and {@code MacroModelManager} matched the literal
- * {@code "key":} and silently returned their default when the producer emitted
- * {@code "key": value} instead. The producers differ too: MATLAB's
- * {@code jsonencode(..., 'PrettyPrint', true)} writes a space after the colon,
- * while the exporter's hand-rolled pretty-printer does not. So each reader was
- * locked to whichever writer it happened to be developed against, and a change
- * of writer would have shifted a parameter to 0.0 with nothing failing — the
- * exact silent-agreement failure mode catalogued in
- * {@code .docs/Integration_Contracts.md}.</p>
+ * <p><b>Why this class exists.</b> {@link DSGEModel}, {@link RamseyTrendModel}
+ * and {@link MacroModelManager} all read these files through this one class.
+ * The producers differ: MATLAB's {@code jsonencode(..., 'PrettyPrint', true)}
+ * writes a space after the colon, while the exporter's hand-rolled
+ * pretty-printer does not. A reader that matched the literal {@code "key":}
+ * would silently return its default for {@code "key": value}, so a change of
+ * writer would shift a parameter to 0.0 with nothing failing — the
+ * silent-agreement failure mode catalogued in
+ * {@code input_processing/macromodel/docs/Integration_Contracts.md}.</p>
  *
  * <p>Everything here tolerates arbitrary whitespace around keys, colons and
  * values. This is deliberately not a general JSON parser: it does not handle

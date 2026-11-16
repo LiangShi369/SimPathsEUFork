@@ -27,7 +27,6 @@ function calibrate_growth_model(country)
 % GFCF (Eurostat P51G, including structures), so it needs the economy-wide
 % composite depreciation rate. The DSGE's delta_k governs cyclical
 % investment dynamics and implicitly represents fast-depreciating equipment.
-% See Chat 115 for the full derivation.
 %
 % Usage:
 %   >> calibrate_growth_model('Poland')
@@ -296,9 +295,7 @@ function calibrate_growth_model(country)
     fprintf('  Y check (should = %.1f): %.1f\n', Y_q, Y_check);
     assert(abs(Y_check - Y_q) / Y_q < 1e-6, 'Production function identity check failed!');
 
-    % Labour input is exogenous: N is taken as given (the endogenous-labour
-    % variant with its phi/psi calibration was removed on 2026-10-20,
-    % JuergenWiemers/SimPathsEU#28).
+    % Labour input is exogenous: N is taken as given.
     fprintf('\n  Labor supply mode: exogenous (N taken as given)\n');
 
     %% 6. Compute balanced growth path values for cross-validation
@@ -427,8 +424,10 @@ function calibrate_growth_model(country)
     params.derived.r_star_bgp_annual = r_star_annual;
     params.derived.Y_quarterly_base = Y_q;
 
-    % Normalize solver metadata so refreshed JSON no longer carries legacy
-    % forward-shooting labels from older templates.
+    % Normalize solver metadata: the written JSON names only the stacked-Newton
+    % solver and its fields. A template's values are read under those names or
+    % under the forward-shooting ones (terminal_extension_quarters, tolerance,
+    % max_iterations).
     solver_terminal_tail = 400;
     solver_tolerance = 1e-10;
     solver_max_iterations = 200;

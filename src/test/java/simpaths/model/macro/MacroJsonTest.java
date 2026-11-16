@@ -15,11 +15,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Contract tests for {@link MacroJson}, the single JSON reader for the MATLAB
  * export bundle.
  *
- * <p>The defect these pin: the macro package used to carry three separate
- * hand-rolled parsers, and they disagreed about whitespace after the colon.
+ * <p>What these pin: every reader agrees about whitespace after the colon.
  * MATLAB's {@code jsonencode(..., 'PrettyPrint', true)} emits {@code "k": v}
  * while the exporter's own pretty-printer emits {@code "k":v}, so a reader that
- * matched the literal {@code "k":} returned its default — a silent 0.0
+ * matched the literal {@code "k":} would return its default — a silent 0.0
  * parameter — depending only on which writer produced the file.</p>
  */
 class MacroJsonTest {
@@ -119,10 +118,8 @@ class MacroJsonTest {
     }
 
     /**
-     * Task 7 of the 2026-08-19 contract-fixes plan rewrites growth_terminal_state.json
-     * numbers as %.16e (K_terminal and A_terminal). A number reader that
-     * silently truncated at 'e' would be exactly the class of bug this plan removes,
-     * so the format is pinned here before the writer changes.
+     * growth_terminal_state.json writes K_terminal and A_terminal as %.16e. Fails if the
+     * number reader truncates at 'e', which would silently shift the Ramsey terminal state.
      */
     @Test
     void numberParsesScientificNotation() {

@@ -553,7 +553,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         }
         // The start-year lag roll uses this before any wage update, so a start-population person
         // (no pre-overlay wage of its own; input wages carry no macro overlay) seeds it with the
-        // current wage, as the lag roll did before labWageHrlyRegression existed.
+        // current wage.
         labWageHrlyRegression = (originalPerson.labWageHrlyRegression != null) ? originalPerson.labWageHrlyRegression : labWageHrly;
     }
 
@@ -1567,8 +1567,8 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
             labWageHrlyRegression = upratedFullTimeHourlyEarnings;
         }
 
-        // Apply DSGE macro wage deviation if macro model is enabled
-        // wageDeviation is in % (e.g., 2.5 means 2.5% above steady state)
+        // Apply the macro wage deviation (Ramsey trend and/or DSGE cycle) when mm_macroModel is on.
+        // wageDeviation is in % (e.g., 2.5 means 2.5% above the regression wage)
         if (model.getMm_macroModel().isOn()) {
             double wageDeviation = model.getMm_wageDeviation();
             if (Math.abs(wageDeviation) > 1e-9) {  // Only adjust if deviation is non-zero

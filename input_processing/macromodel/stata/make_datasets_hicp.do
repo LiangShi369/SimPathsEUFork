@@ -11,16 +11,15 @@
 // is adjusted over its own months and kept for reference only, as make_datasets.do reads
 // the UK's price level from hicp_q_sa_uk.dta.
 //
-// FROM TRAMO/SEATS TO X-13 (2026-10). Until then hicp_q_sa.dta came from EViews'
-// TRAMO/SEATS on the same HICP.dta. Over each country's estimation sample, Q-o-Q
-// annualised inflation from X-13 and from TRAMO/SEATS differs by an RMSE of 0.131 pp
-// (Germany, 2000q1-2025q1), 0.223 pp (Poland, 2005q1-2025q1), 0.261 pp (Spain,
-// 2000q1-2025q1; one quarter 1.54 pp) and 0.001 pp (Sweden, 2001q1-2025q1), with mean
-// differences of 0.002 pp or less. Neither leaves residual seasonality: regressing
-// quarterly inflation on quarter dummies over those samples gives p = 0.83 to 0.996 for
-// X-13 and 0.90 to 0.997 for TRAMO/SEATS. The old UK column ran to 2022q4, extended
-// past the data (2020m11) by EViews' forecasts; it now stops at 2020q3, the last
-// quarter with three observed months.
+// X-13 AGAINST TRAMO/SEATS (measured 2026-10). Over each country's estimation sample,
+// Q-o-Q annualised inflation from X-13 and from EViews' TRAMO/SEATS on the same HICP.dta
+// differs by an RMSE of 0.131 pp (Germany, 2000q1-2025q1), 0.223 pp (Poland,
+// 2005q1-2025q1), 0.261 pp (Spain, 2000q1-2025q1; one quarter 1.54 pp) and 0.001 pp
+// (Sweden, 2001q1-2025q1), with mean differences of 0.002 pp or less. Neither leaves
+// residual seasonality: regressing quarterly inflation on quarter dummies over those
+// samples gives p = 0.83 to 0.996 for X-13 and 0.90 to 0.997 for TRAMO/SEATS. The UK
+// column stops at 2020q3, the last quarter with three observed months; nothing
+// extends it past the data (2020m11) by forecasts.
 
 // First, so a missing X-13 binary stops the run before the tracked HICP.dta is rewritten.
 include x13_settings.do

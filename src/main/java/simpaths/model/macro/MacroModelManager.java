@@ -33,17 +33,22 @@ import simpaths.model.enums.UpratingCase;
  * <p>This class encapsulates all DSGE-related state and logic, keeping
  * SimPathsModel clean and focused on microsimulation orchestration.</p>
  * 
- * <h3>Integration Mode</h3>
+ * <h3>Layers</h3>
  * <ul>
- *   <li><b>Dynamic Integration</b>: Uses the dynamic state-space DSGE model
- *       (s_t = A×s_{t-1} + B×ε). Single pass per year: labor market runs once,
- *       labor supply is aggregated, and the DSGE state evolves forward.</li>
+ *   <li><b>Ramsey trend</b> ({@link RamseyTrendModel}): the planner's secular wage path.
+ *       SimPaths' realized employment and hours reach it only through the end-of-year
+ *       re-solve ({@link #applyRamseyRecursiveFeedback}).</li>
+ *   <li><b>DSGE cycle</b> ({@link DSGEModel}, optional): the state-space model
+ *       (s_t = A×s_{t-1} + B×ε), stepped once per year on the scenario's shocks. It takes
+ *       no input from SimPaths.</li>
  * </ul>
- * 
+ * <p>One pass per year: the labour market runs once, and nothing in the macro layer
+ * re-runs it within the year.</p>
+ *
  * <h3>Responsibilities</h3>
  * <ul>
- *   <li>Loading and initializing DSGE models from CSV files</li>
- *   <li>Managing single-pass dynamic equilibrium updates</li>
+ *   <li>Loading and initializing the macro layers from the bundle files</li>
+ *   <li>Running the yearly macro update and the planner's end-of-year feedback</li>
  *   <li>Storing current wage/inflation deviations for individual wage adjustments</li>
  *   <li>Logging and diagnostics for debugging feedback chain</li>
  * </ul>
@@ -61,7 +66,6 @@ import simpaths.model.enums.UpratingCase;
  * }</pre>
  * 
  * @author DSGE-SimPaths Integration
- * @version 2.0 (dynamic-only integration)
  */
 public class MacroModelManager {
     
@@ -73,21 +77,20 @@ public class MacroModelManager {
     private static final Pattern QUARTER_LABEL_PATTERN =
             Pattern.compile("(\\d{4})q([1-4])");
 
-    /** Forward horizon used before the exporter declared it (80 years). */
-    private static final int LEGACY_PROJECTION_QUARTERS = 320;
+    /** Forward horizon assumed when growth_terminal_state.json declares none (80 years). */
+    private static final int DEFAULT_PROJECTION_QUARTERS = 320;
 
     /** Forward horizon of the Ramsey handoff, taken from growth_terminal_state.json. */
-    private int ramseyProjectionQuarters = LEGACY_PROJECTION_QUARTERS;
+    private int ramseyProjectionQuarters = DEFAULT_PROJECTION_QUARTERS;
 
     /**
      * Handoff quarter declared by growth_terminal_state.json, e.g. "2023q1".
      *
      * <p>Every macro artifact is aligned to this quarter, and they are merged by DATE
-     * rather than by row position. Positional merging is how a start-year change
-     * silently corrupted a run: the reference CSV and the population projection both
-     * carry a time column, both were consumed by index, and regenerating only some
-     * artifacts left the splice off by however many quarters with every check still
-     * passing.</p>
+     * rather than by row position. The reference CSV and the population projection both
+     * carry a time column; consumed by index, a start-year change that regenerates only
+     * some artifacts would leave the splice off by however many quarters, with every
+     * check still passing.</p>
      */
     private String ramseyHandoffQuarter;
     private static final int DEMOGRAPHIC_TAIL_HALF_LIFE_QUARTERS = 20;
@@ -169,16 +172,16 @@ public class MacroModelManager {
 
     // ========== Internal State ==========
     
-    /** Dynamic DSGE model (state-space with A,B,C,D matrices) - for dynamic integration */
+    /** DSGE cycle model (state-space with A, Bs, C, D matrices); null without the DSGE layer */
     private DSGEModel dynamicDsgeModel;
 
     /** Recorder used when DSGE is disabled and only Ramsey trends are exported */
     private MacroPathRecorder trendOnlyPathRecorder;
 
-    /** Exogenous shock scenario for counterfactual simulations (dynamic mode only) */
+    /** Exogenous shock scenario for counterfactual simulations (DSGE layer only) */
     private DSGEShockScenario shockScenario;
-    
-    /** Labor supply aggregator (shared between both modes) */
+
+    /** Labor supply aggregator (every macro mode and recorder-only mode) */
     private LaborSupplyAggregator laborSupplyAggregator;
     
     /** Ramsey scenario for long-run counterfactual analysis */
@@ -207,10 +210,11 @@ public class MacroModelManager {
      * percentage. Null until the trend is initialised, and reset to null whenever
      * the Ramsey layer falls back.
      *
-     * <p>This was eight parallel scalars latched from the same TrendState. Adding a
-     * variable to the trend layer meant four synchronised edits (declare, latch,
-     * reset, divide), and missing one yielded a silent 0.0 column rather than an
-     * error. Holding the whole state keeps them in step by construction.</p>
+     * <p>Holding the whole TrendState, rather than one latched scalar per variable,
+     * keeps every trend column in step by construction: with separate scalars, a
+     * variable added to the trend layer needs four synchronised edits (declare,
+     * latch, reset, divide), and missing one yields a silent 0.0 column rather than
+     * an error.</p>
      */
     private RamseyTrendModel.TrendState ramseyBaseline;
 
@@ -246,7 +250,7 @@ public class MacroModelManager {
      * the <b>same</b> mode, or compare growth rates rather than levels. Do not
      * read an early-year gap between a macro-on and a recorder-only run as a
      * treatment effect. The series is a diagnostic; nothing in the model
-     * consumes it. (Audit §6, item 2c.)</p>
+     * consumes it.</p>
      */
     private double startYearAtRiskWage = 0.0;
 
@@ -304,8 +308,8 @@ public class MacroModelManager {
      *   <li>Storing wage/inflation deviations for use in individual wage equations</li>
      * </ol>
      *
-     * <p>Dynamic-only coupling: the DSGE never re-runs the labour market within a
-     * tick, so there is no callback and no within-period iteration.</p>
+     * <p>The macro layer never re-runs the labour market within a tick, so there is
+     * no callback and no within-period iteration.</p>
      *
      * @param year            Current simulation year
      * @param startYear       First year of simulation (for baseline detection)
@@ -371,7 +375,7 @@ public class MacroModelManager {
             runRamseyOnlyPass(year, persons);
             if (firstCall && logMacroState) {
                 log.info(String.format(
-                        "Macro year %d: DSGE disabled (mm_useDSGE=false), Ramsey-only trend applied.",
+                        "Macro year %d: mm_macroModel runs no DSGE layer; Ramsey trend only.",
                         year));
             }
             return;
@@ -497,10 +501,10 @@ public class MacroModelManager {
     /**
      * Return the path recorder that is currently receiving rows, or null if
      * none is active. Rows go to {@link #trendOnlyPathRecorder} whenever the
-     * dynamic DSGE model is absent — that covers both recorder-only mode
+     * DSGE model is absent — that covers both recorder-only mode
      * (macro off) and the macro-on/DSGE-off Ramsey-only configuration, both of
      * which are emitted by {@link #runRamseyOnlyPass} / {@link #runRecorderOnlyPass}
-     * into {@link #trendOnlyPathRecorder}. Only when the dynamic DSGE model
+     * into {@link #trendOnlyPathRecorder}. Only when the DSGE model
      * is loaded do rows go to its embedded recorder.
      */
     private MacroPathRecorder getActivePathRecorder() {
@@ -519,15 +523,15 @@ public class MacroModelManager {
     private Map<String, Double> buildPostAlignmentLevelUpdates(
             LaborSupplyAggregator.LaborSupplyAggregates aggs, Set<Person> persons) {
         // Exactly the formulas the in-year pass uses, applied to post-alignment
-        // aggregates. Shared rather than mirrored: a divergence here would have
-        // corrupted only the end-of-year level columns, which no single-pass
+        // aggregates. Shared rather than mirrored: a divergence here would
+        // corrupt only the end-of-year level columns, which no single-pass
         // test compares against the in-year ones.
         Map<String, Double> m = new LinkedHashMap<>(demographicIndexUpdates(aggs));
         m.putAll(labourCategoryUpdates(aggs));
 
         // Realised-wage index: mean of full-time hourly earnings potential over
         // the post-alignment at-risk pool, expressed as % from the start-year
-        // anchor. Per-person wages do not move between the DSGE step and
+        // anchor. Per-person wages do not move between the macro update and
         // alignment; only the pool composition changes, so a mid-run re-anchor
         // is impossible by construction here (startYearAtRiskWage was latched
         // at the first call from runDsgePass / runRamseyOnlyPass / runRecorderOnlyPass).
@@ -571,7 +575,9 @@ public class MacroModelManager {
     // ========== Internal Methods ==========
     
     /**
-     * Initialize the dynamic DSGE model by loading state-space files from CSV exports.
+     * Initialize the macro layers from the bundle in {@code input/<CC>/MacroModel}: the
+     * labour-supply aggregator, the Ramsey trend when configured and, with the DSGE layer on,
+     * the state-space DSGE model and its shock scenario.
      */
     private void initialize(String countryCode, Set<Person> persons) {
         // Catch an invalid flag combination before loading any macro artefacts.
@@ -612,9 +618,9 @@ public class MacroModelManager {
 
                 if (useRamseyTrend) {
                     initializeRamseyTrend(macroModelPath);
-                    // ramseyTrend is now loaded (or null via self-disable): re-check so a
-                    // silent artefact fallback becomes fatal instead of quietly running
-                    // without the feedback channel.
+                    // Re-check after loading and require a solved planner, so a Ramsey layer
+                    // that failed to solve is fatal instead of quietly running without its
+                    // trend and the feedback channel.
                     validateRamseyFeedbackConfig();
                     requireRamseyTrendSolved();
                 }
@@ -663,9 +669,8 @@ public class MacroModelManager {
             // Load Ramsey growth model for structural wage trend (if enabled)
             if (useRamseyTrend) {
                 initializeRamseyTrend(macroModelPath);
-                // Re-check after loading: initializeRamseyTrend can self-disable, which makes
-                // the feedback inert, and the persistence bounds are re-validated. The DSGE
-                // combination itself only warns (it did once throw), so this repeats that warning.
+                // Re-check after loading and require a solved planner, as in the
+                // Ramsey-only branch above.
                 validateRamseyFeedbackConfig();
                 requireRamseyTrendSolved();
             } else {
@@ -729,9 +734,8 @@ public class MacroModelManager {
      * for the full forward horizon (~80 years).</p>
      * 
      * <p>Called only when {@code mm_macroModel} selects a Ramsey mode, so missing artefacts
-     * are fatal. The earlier behaviour cleared {@code useRamseyTrend} and continued with a zero
-     * secular trend, which ran a different model from the configured one while
-     * {@code saveRunParameters} still recorded the configured mode.</p>
+     * are fatal: continuing with a zero secular trend would run a different model from the
+     * configured one while {@code saveRunParameters} still records the configured mode.</p>
      * 
      * @param macroModelPath Directory containing growth_params_*.json and related files
      */
@@ -828,8 +832,8 @@ public class MacroModelManager {
         double[] extDemographic = RamseyTrendModel.extendExogenous(refN, totalExtended,
                 DEMOGRAPHIC_EXTENSION_WINDOW);
         // Hours are NOT extended here. The bundle carries the planner's hours path as an
-        // artefact (see the read below), because re-deriving it on this side made the
-        // trailing-growth window an unenforced convention across the repository boundary.
+        // artefact (see the read below), because re-deriving it on this side would make the
+        // trailing-growth window an unenforced convention across the MATLAB/Java boundary.
         // refH still serves the in-sample portion of the reference CSV.
         double[] extGY = RamseyTrendModel.extendShare(refGY, totalExtended);
         double[] extNXY = RamseyTrendModel.extendShare(refNXY, totalExtended);
@@ -840,11 +844,10 @@ public class MacroModelManager {
         // estimation country's historical growth rate.
         int startIdx = refSize - 1;
         // The projection MUST carry this bundle's country tag. There is deliberately no
-        // fallback to a country-agnostic population_projection.csv: that name dates from
-        // the period when the German macro model was run inside Polish SimPaths, and in a
-        // per-country layout it can only ever feed one country's demographics into
-        // another country's trend. A wrong demographic path invalidates the whole trend
-        // layer silently, so a missing or unreadable projection fails loudly instead.
+        // fallback to a country-agnostic population_projection.csv: in a per-country layout
+        // such a file can only ever feed one country's demographics into another country's
+        // trend. A wrong demographic path invalidates the whole trend layer silently, so a
+        // missing or unreadable projection fails loudly instead.
         Path popProjPath = refPath.resolveSibling("population_projection_" + countryTag + ".csv");
 
         if (!popProjPath.toFile().exists()) {
@@ -853,7 +856,7 @@ public class MacroModelManager {
                     + "Without it the trend extrapolates the estimation country's historical "
                     + "demographic growth instead of the SimPaths-consistent projection. "
                     + "Re-export the macro files (run_full_workflow without "
-                    + "skip_population_projection) or disable mm_useRamseyTrend.",
+                    + "skip_population_projection) or choose an mm_macroModel without the Ramsey layer.",
                     countryTag, popProjPath.getFileName(), popProjPath.getParent()));
         }
 
@@ -878,8 +881,8 @@ public class MacroModelManager {
         // Align the two series by DATE, not by row position. extDemographic[startIdx]
         // is the handoff quarter (the last reference row), so the projection must be
         // copied from ITS handoff row - which is not necessarily row 0. Assuming row 0
-        // was the handoff is how a start-year change silently shifted the whole
-        // demographic path while every other check still passed.
+        // is the handoff would let a start-year change shift the whole demographic path
+        // silently while every other check still passes.
         int popStartIdx = indexOfHandoffQuarter(popProjection.times(), popProjPath, refTerminalTime);
 
         int maxOverride = Math.min(popDemographic.length - popStartIdx, totalExtended - startIdx);
@@ -962,10 +965,9 @@ public class MacroModelManager {
     }
 
     /**
-     * A requested Ramsey trend that fails to load is fatal. {@link #initializeRamseyTrend(String)}
-     * has three fallbacks that clear {@code useRamseyTrend} and continue with a zero secular
-     * trend; continuing would mean running a different model from the configured one while
-     * {@code saveRunParameters} still records the configured mode.
+     * A requested Ramsey trend that is not solved after {@link #initializeRamseyTrend(String)}
+     * is fatal: continuing with a zero secular trend would mean running a different model from
+     * the configured one while {@code saveRunParameters} still records the configured mode.
      */
     private void requireRamseyTrendSolved() {
         if (ramseyTrend == null || !ramseyTrend.isSolved()) {
@@ -978,19 +980,19 @@ public class MacroModelManager {
     /**
      * Forward horizon of the Ramsey handoff contract, as declared by the export bundle.
      *
-     * <p>Bundles written before the exporter declared it fall back to the historical 320
-     * quarters with a warning, so an old bundle still runs but does not do so silently.</p>
+     * <p>A bundle that does not declare it falls back to 320 quarters (80 years) with a
+     * warning, so it still runs but not silently.</p>
      */
     private int readProjectionQuarters(Path terminalPath) throws IOException {
         String terminalJson = Files.readString(terminalPath);
         Matcher matcher = PROJECTION_QUARTERS_PATTERN.matcher(terminalJson);
         if (!matcher.find()) {
             log.warn(String.format(
-                    "%s does not declare projection_quarters; assuming the legacy %d. "
+                    "%s does not declare projection_quarters; assuming %d. "
                     + "Re-export the macro files so the forward horizon is pinned by the "
                     + "bundle rather than by a constant on each side.",
-                    terminalPath.getFileName(), LEGACY_PROJECTION_QUARTERS));
-            return LEGACY_PROJECTION_QUARTERS;
+                    terminalPath.getFileName(), DEFAULT_PROJECTION_QUARTERS));
+            return DEFAULT_PROJECTION_QUARTERS;
         }
 
         int quarters = Integer.parseInt(matcher.group(1));
@@ -1021,7 +1023,7 @@ public class MacroModelManager {
         if (!matcher.find()) {
             throw new IllegalStateException(String.format(
                     "Macro model enabled for simulation start year %d, but %s is missing handoff_time. "
-                    + "Expected handoff_time=%s. Re-export the macro files or disable mm_useMacroModel.",
+                    + "Expected handoff_time=%s. Re-export the macro files or set mm_macroModel: off.",
                     simulationStartYear, terminalPath.getFileName(), expectedHandoff));
         }
 
@@ -1030,7 +1032,7 @@ public class MacroModelManager {
             throw new IllegalStateException(String.format(
                     "Macro model handoff mismatch: simulation start year %d implies %s, "
                     + "but %s declares handoff_time=%s. Re-export the macro files for the requested start year "
-                    + "or disable mm_useMacroModel.",
+                    + "or set mm_macroModel: off.",
                     simulationStartYear, expectedHandoff, terminalPath.getFileName(), actualHandoff));
         }
         // Retained so the CSV merges can align on this quarter by DATE rather than
@@ -1078,17 +1080,16 @@ public class MacroModelManager {
 
     /**
      * Trailing-growth window for extending the demographic path past the estimation sample.
-     * MUST match {@code extend_level_path(N_trend(} / {@code extend_level_path(WAP_trend(} in
-     * the upstream WELLSIM_SVEC {@code macromodel/ramsey_trend.m}, which builds the same
-     * projection on the MATLAB side.
+     * MUST match the window of {@code extend_level_path(N_trend(...), ..., 20)} and
+     * {@code extend_level_path(handoff_labor_proj, ..., 20)} in
+     * {@code input_processing/macromodel/ramsey_trend.m}, which builds the same projection on
+     * the MATLAB side.
      *
-     * <p>Nothing enforces this across the repository boundary; the population projection file
+     * <p>Nothing enforces this across the MATLAB/Java boundary; the population projection file
      * overrides the extrapolated path over the years it covers, but this window still governs
-     * the stretch beyond it. The hours window that used to live here is gone: the bundle now
-     * carries {@code hours_projection_*.csv}, so the hours path has one owner rather than two
-     * implementations. The terminal-tail windows are still duplicated on both sides and are
-     * pinned in {@link RamseyTrendModel}.
-     * See docs/superpowers/plans/2026-08-18-ramsey-hours-handoff-contract.md.</p>
+     * the stretch beyond it. Hours have no window here: the bundle carries
+     * {@code hours_projection_*.csv}, so the hours path has one owner. The terminal-tail
+     * windows are duplicated on both sides and are pinned in {@link RamseyTrendModel}.</p>
      */
     static final int DEMOGRAPHIC_EXTENSION_WINDOW = 20;
 
@@ -1319,7 +1320,7 @@ public class MacroModelManager {
             return;
         }
 
-        // Fallback: no reduced-form capital-deepening approximation.
+        // Without a solved planner (mode dsge) the secular trend is zero.
         currentRamseyTrends.clear();
         capitalDeepeningWageAdjustment = 0.0;
         currentRamseyTrends.put("w", capitalDeepeningWageAdjustment);
@@ -1337,7 +1338,7 @@ public class MacroModelManager {
      * Parsed population projection data: quarter labels and the N path.
      *
      * @param times quarter labels ("2023q1", ...), one per row. Carried so the splice
-     *              can align on DATE; merging this file by row position is what let a
+     *              can align on DATE; merged by row position, this file would let a
      *              start-year change corrupt a run silently.
      */
     private record PopulationProjectionData(String[] times, double[] n) {}
@@ -1347,14 +1348,13 @@ public class MacroModelManager {
     /**
      * Read the planner's hours path for the forward horizon from the bundle.
      *
-     * <p>Mandatory, with no fallback to extrapolating the reference CSV here. That fallback
-     * is what this method exists to remove: until 2026-08-18 both sides derived the hours
-     * path independently, and they used different trailing-growth windows (MATLAB
-     * {@code extend_level_path(handoff_h_hist, ..., 1)}, Java 20). The divergence was
-     * invisible only because {@code hours_trend_method} is {@code log_linear}, which makes
-     * the exported {@code h} column a pure exponential so every window recovers the same
-     * rate. A silent fallback would reopen exactly that gap, so a missing file fails loudly
-     * — the same rule the population projection already follows.</p>
+     * <p>Mandatory, with no fallback to extrapolating the reference CSV here. Such a fallback
+     * would be a second derivation of the hours path with its own trailing-growth window
+     * (MATLAB uses {@code extend_level_path(handoff_h_hist, ..., 1)}). Any divergence would
+     * stay invisible while {@code hours_trend_method} is {@code log_linear}, which makes the
+     * exported {@code h} column a pure exponential so every window recovers the same rate.
+     * A missing file therefore fails loudly — the same rule the population projection
+     * follows.</p>
      *
      * @param refPath           the reference CSV, whose sibling the projection is
      * @param countryTag        bundle country tag, e.g. {@code Poland}
@@ -1473,7 +1473,7 @@ public class MacroModelManager {
         String handoff = ramseyHandoffQuarter != null ? ramseyHandoffQuarter : referenceTerminal;
         if (handoff == null) {
             // No declared handoff to align on (no simulation start year set, e.g. in a
-            // bare unit test). Fall back to the historical row-0 assumption rather than
+            // bare unit test). Fall back to assuming row 0 is the handoff rather than
             // failing, but say so.
             log.warn(String.format(
                     "No handoff quarter available to align %s; assuming its first row is "
@@ -1498,10 +1498,10 @@ public class MacroModelManager {
                 : times[0] + " to " + times[times.length - 1];
         throw new IllegalStateException(String.format(
                 "Macro artifacts are not aligned: the Ramsey handoff is %s, but %s covers "
-                + "%s and does not contain that quarter. This is what a start-year change "
-                + "looks like when only some upstream artifacts were regenerated. Re-run "
-                + "the MATLAB workflow for the requested start year, or disable "
-                + "mm_useMacroModel.",
+                + "%s and does not contain that quarter. That happens when only some "
+                + "artifacts were regenerated after a start-year change. Re-run "
+                + "the MATLAB workflow for the requested start year, or set "
+                + "mm_macroModel: off.",
                 handoff, csvPath.getFileName(), span));
     }
 
@@ -1536,7 +1536,7 @@ public class MacroModelManager {
             throw new IOException("Population projection CSV missing mandatory N column: " + csvPath);
         }
         // Mandatory: without it the splice can only guess that row 0 is the handoff
-        // quarter, which is precisely the failure this loader now prevents.
+        // quarter, which is the failure the date alignment exists to prevent.
         if (timeCol < 0) {
             throw new IOException("Population projection CSV missing mandatory time column: "
                     + csvPath + ". The splice aligns on the handoff quarter by date; "
@@ -1654,13 +1654,6 @@ public class MacroModelManager {
     }
 
     /**
-     * Run one simulation year with DSGE bypassed (Ramsey-only).
-     *
-     * <p>All DSGE cycle variables and shocks are exported as zeros, while trend
-     * and total columns are exported from Ramsey trend values. This guarantees
-     * x_total == x_trend when DSGE is disabled.</p>
-     */
-    /**
      * Verbose-only diagnostic: log the labour-supply category distribution and
      * mean hours per category for the year. Gated on
      * {@code logMacroState && verboseMacroLogging} (the same convention as the
@@ -1677,6 +1670,13 @@ public class MacroModelManager {
                 laborSupplyAggregator.formatLabourCategoryDistribution(aggregates)));
     }
 
+    /**
+     * Run one simulation year with DSGE bypassed (Ramsey-only).
+     *
+     * <p>All DSGE cycle variables and shocks are exported as zeros, while trend
+     * and total columns are exported from Ramsey trend values. This guarantees
+     * x_total == x_trend when DSGE is disabled.</p>
+     */
     private void runRamseyOnlyPass(int year, Set<Person> persons) {
         if (useRamseyTrend && ramseyTrend != null && ramseyTrend.isSolved()) {
             advanceRamseyTrend();
@@ -1853,10 +1853,10 @@ public class MacroModelManager {
      * <p>Pure: reads only the aggregator's latched start-year anchors and the
      * supplied aggregates. Both writers use it — the in-year pass through
      * {@link #populateDemographicIndices} and the end-of-year re-expression in
-     * {@link #buildPostAlignmentLevelUpdates} — which is the point: the two used
-     * to hold near-verbatim copies of these formulas, and a divergence would have
-     * silently corrupted the post-alignment level columns of MacroPaths.csv while
-     * the in-year ones stayed right.</p>
+     * {@link #buildPostAlignmentLevelUpdates} — which is the point: with two
+     * copies of these formulas, a divergence would silently corrupt the
+     * post-alignment level columns of MacroPaths.csv while the in-year ones stay
+     * right.</p>
      *
      * <p>participation_rate and workers_over_atRiskPool are workers/L-derived:
      * they are only meaningful once L comes from the SimPaths labour-supply model,
@@ -1915,7 +1915,7 @@ public class MacroModelManager {
      * <p>The series is intentionally always constructed — including in
      * recorder-only and Ramsey-only modes — so the wage faced by labour-supply
      * decisions remains visible alongside (or in the absence of) the macro
-     * multiplier (see SP_CHATS_107 / SP_CHATS_108). Averaging over the at-risk
+     * multiplier. Averaging over the at-risk
      * pool aligns the wage diagnostic with the participation / hours / labour-
      * category panels in the same MacroPaths.csv, which all use the same gate.
      * Units (% from first year) match {@code w_trend} / {@code w_total} so the
@@ -2027,7 +2027,7 @@ public class MacroModelManager {
     }
 
     /**
-     * Log dynamic DSGE state evolution (for dynamic integration mode).
+     * Log the year's DSGE state and wage decomposition (DSGE layer on).
      */
     private void logDynamicEquilibrium(
             int year,
@@ -2054,7 +2054,7 @@ public class MacroModelManager {
             System.out.println(String.format("  Hours deviation:     %+.4f%%", state.getHoursDeviation()));
             System.out.println("--- Wage Decomposition ---");
             System.out.println(String.format("  DSGE cycle:          %+.4f%%", state.getWageDeviation()));
-            String trendLabel = (useRamseyTrend && ramseyTrend != null) ? "Ramsey trend" : "Capital deepening";
+            String trendLabel = (useRamseyTrend && ramseyTrend != null) ? "Ramsey trend" : "No trend layer";
             System.out.println(String.format("  %s:   %+.4f%%", trendLabel, capitalDeepeningWageAdjustment));
             System.out.println(String.format("  Total wage dev:      %+.4f%%", wageDeviation));
             System.out.println("--- Wage Multiplier for Individuals ---");
@@ -2169,7 +2169,7 @@ public class MacroModelManager {
     }
     
     /**
-     * Backward compatibility overload without person details.
+     * Overload without person details: counts the adjustment for the summary only.
      */
     public void trackWageAdjustment(double originalWage, double adjustedWage) {
         wageAdjustmentCount.incrementAndGet();
@@ -2406,7 +2406,7 @@ public class MacroModelManager {
     }
     
     /**
-     * Export recorded dynamic DSGE paths to CSV.
+     * Export the recorded macro paths to {@code csv/MacroPaths.csv}.
      * 
      * @param outputFolder The experiment's output folder (where csv/ subdirectory will be created)
      */

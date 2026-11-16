@@ -6,16 +6,14 @@
 //   - National accounts: Destatis VGR
 //   - Monetary policy: ECB, Bundesbank
 //
-// To convert to ANNUAL frequency for microsim:
-//   rho_annual = rho_quarterly^4
-//   beta_annual = beta_quarterly^4
-//   delta_annual = 1 - (1-delta_quarterly)^4
+// The model is quarterly; SimPaths steps it four quarters per simulated year,
+// so no parameter is converted to annual frequency.
 // =========================================================================
 
 // ----- PREFERENCES & TECHNOLOGY -----
 beta     = 0.99;    // quarterly discount factor → ~4% annual real rate
 sigma    = 2.0;     // IES = 1/sigma = 0.5 (halves R→c sensitivity vs sigma=1)
-                    // Motivation: sigma=1 (log utility) gave 49% monetary share
+                    // Motivation: sigma=1 (log utility) gives a 49% monetary share
                     // because 1/sigma=1.0 makes R→c channel too potent.
                     // Estimates for Germany: Pytlarczyk (2005) ~1.4, Smets-Wouters
                     // (2003, Euro area) ~1.6, Christiano et al. (2005) ~1.4-2.0.
@@ -38,26 +36,26 @@ rho_r    = 0.85;    // interest rate smoothing (ECB is quite persistent)
 // ----- SHOCK PERSISTENCE -----
 rho_a    = 0.95;    // technology persistence (annual: 0.81)
 rho_L    = 0.95;    // labor force persistence - CALIBRATED to resolve collinearity
-                    // (Perplexity fix: rho_L and SE_eps_L were perfectly collinear)
+                    // (rho_L and SE_eps_L are collinear when both are estimated)
 rho_v    = 0.9;     // vacancy persistence (Germany: slow hiring adjustment)
 rho_sep  = 0.8;     // separation shock persistence
 rho_d    = 0.8;     // preference/demand shock persistence (confidence cycles)
 
-// ----- HABIT PERSISTENCE (V14) -----
+// ----- HABIT PERSISTENCE -----
 hab      = 0.5;     // external habit formation (Smets-Wouters: 0.5-0.7 for Euro area)
 
 // ----- NEW KEYNESIAN PARAMETERS -----
 lambda_p = 0.02;    // Phillips curve slope (Pytlarczyk 2005, Hristov 2016 for Germany)
 phi_mc   = 1.0;     // output gap effect on marginal cost (increased for demand→inflation)
-phi_v_y  = 5.0;     // vacancy response to demand conditions (ITERATION 9: high to amplify demand→n channel)
+phi_v_y  = 5.0;     // vacancy response to demand conditions (high, to amplify the demand→n channel)
 
-// ----- INFLATION INDEXATION (V15: Smets-Wouters style) -----
+// ----- INFLATION INDEXATION (Smets-Wouters style) -----
 // Firms that cannot re-optimize prices index to lagged inflation.
-// iota_p = 0: purely forward-looking NKPC (V14 baseline)
+// iota_p = 0: purely forward-looking NKPC
 // iota_p = 1: full indexation (Christiano et al. 2005)
 // Smets-Wouters (2003) Euro area posterior: ~0.2-0.5
-// Effect: reduces impact of cost-push shocks by factor 1/(1+iota_p*beta),
-// adds inflation persistence, dampens the R→c→gap→v amplification chain.
+// Effect: scales the marginal-cost term by 1/(1+iota_p*beta) (eps_p enters
+// unscaled), adds inflation persistence, dampens the R→c→gap→v amplification chain.
 iota_p   = 0.35;    // partial indexation (SW2003 range for Euro area)
 
 // ----- WAGE RIGIDITY (Gertler-Trigari 2009) -----
@@ -72,15 +70,13 @@ lambda_w = 0.75;    // baseline: 1-year average wage duration
 // Germany adjusts 70-90% of labor input via hours (not employment) in recessions
 // Sources: IAB, Möller (2010), Burda & Hunt (2011)
 rho_h    = 0.85;    // hours persistence - CALIBRATED to resolve collinearity
-                    // (Perplexity fix: rho_h and SE_eps_h were perfectly collinear)
+                    // (rho_h and SE_eps_h are collinear when both are estimated)
                     // Kurzarbeit contracts average ~6 months (quarterly ρ ≈ 0.85)
 omega_h  = 0.35;    // hours weight in production: total labor = n + omega_h * h
                     // < 1.0 because headcount matters more than marginal hours
                     // Matches production function literature (Chetty et al. 2012)
-// NOTE (Option B): psi_hy and psi_hw REMOVED - h is now pure AR(1)
-// Rationale: h comes from SimPaths (household discrete choice), not from
-// macro demand conditions. The gap→h channel was a business cycle mechanism
-// inappropriate for annual policy analysis.
+// h is a pure AR(1): no output-gap or wage term moves hours. The DSGE has no
+// hours choice; on the micro side SimPaths' household choice sets hours.
 
 // ----- DIRECT LABOR FORCE → WAGE EFFECT (CALIBRATED) -----
 // Rationale: Reduced-form "wage drift" capturing competitive pressure from
@@ -90,11 +86,10 @@ omega_h  = 0.35;    // hours weight in production: total labor = n + omega_h * h
 // wages due to increased competition, independent of formal bargaining.
 // Calibration target: Long-run wage elasticity to labor supply ~ -0.2 to -0.4
 // (Borjas 2003, Dustmann et al. 2017 for Germany)
-// NOTE (Option B): L is now OBSERVED, so this effect could potentially be
-// estimated. However, we keep it calibrated for stability.
+// L is observed, so psi_wL could be estimated; it is calibrated for stability.
 psi_wL   = -0.05;     // direct L→w elasticity (negative: ↑L → ↓w)
 
-// ----- DEMAND COMPOSITION (Option C: Smets-Wouters-style) -----
+// ----- DEMAND COMPOSITION (Smets-Wouters-style) -----
 // GDP expenditure decomposition: Y = C + I + G + NX
 // In log-deviations: d = (1-s_inv)*c + s_inv*inv
 // Government + net exports (~30% of GDP) lumped with consumption behavior.
@@ -102,18 +97,18 @@ psi_wL   = -0.05;     // direct L→w elasticity (negative: ↑L → ↓w)
 s_inv    = 0.20;    // investment share of GDP (Destatis VGR: ~20% for Germany)
                     // Residual (1-s_inv)=0.80 captures C + G + NX
 
-// ----- CAPITAL EXTENSION (Phase 2: Approach B) -----
+// ----- CAPITAL -----
 // Capital stock with reduced-form investment rule.
 // Captures capital deepening: as L declines, K/L rises, boosting MPL and wages.
 // Sources: Destatis VGR, Smets & Wouters (2003), Merz (1995), Andolfatto (1996)
 alpha_k  = 0.35;    // capital share (Destatis VGR: ~35% for Germany)
                     // Note: alpha_k + alpha_n = 0.35 + 0.65 = 1.0 (CRS)
 delta_k  = 0.025;   // quarterly depreciation ≈ 10% annual (standard)
-rho_inv  = 0.85;    // investment persistence - CALIBRATED at v11b posterior mode (0.848)
-                    // Perplexity Chat 087: cosn(rho_inv, phi_inv_r) = 0.9973 → fix to resolve
-                    // Option C hit unit root (0.9888) → singular Hessian
-phi_inv_y = 0.3;    // V15: Restored to small positive value as structural floor.
-                    // Estimation rejected accelerator (posterior 0.085 vs prior 1.5),
+rho_inv  = 0.85;    // investment persistence - CALIBRATED near its estimated mode (0.848)
+                    // Estimated with phi_inv_r it is collinear (cosn 0.9973) and runs to
+                    // a unit root (0.9888) with a singular Hessian.
+phi_inv_y = 0.3;    // small positive value as a structural floor.
+                    // Estimated, the accelerator is rejected (posterior 0.085 vs prior 1.5),
                     // but setting exactly 0 produces absurd conditional responses:
                     // negative demand shock → R↓ → inv↑ (investment rises in recessions).
                     // 0.3 ensures weak demand co-movement without dominating unconditional VD.

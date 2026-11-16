@@ -81,10 +81,8 @@ class MacroModelManagerTest {
      * CONTRACT: a scenario shock lands in the year it declares, the start year included.
      *
      * <p>The DSGE runs the same annual step in every year, driven through
-     * {@code updateEquilibrium} as the schedule drives it. Until 2026-08 the first two
-     * years returned before the scenario was consulted, so a scenario declared from
-     * startYear silently lost its first eight quarters and began two years late at
-     * decayed magnitude.</p>
+     * {@code updateEquilibrium} as the schedule drives it, so a scenario declared from
+     * startYear moves the wage in startYear, not later and not at a decayed magnitude.</p>
      */
     @Test
     void testScenarioShocksApplyFromTheStartYear() throws Exception {
@@ -94,9 +92,8 @@ class MacroModelManagerTest {
         // shocks in whichever year they were authored for (the 1sd/20q energy file
         // starts in 2030), and this test is specifically about the START year.
         // A mild 0.5-sigma cost-push shock keeps the DSGE inside its stability
-        // bounds — the shipped 1.5sd/60-quarter energy shock, once it actually
-        // reaches the model in the start year, drives the state past the default
-        // +/-10 bound, which is itself a consequence of this fix worth knowing.
+        // bounds — the shipped 1.5sd/60-quarter energy shock, applied from the
+        // start year, drives the state past the default +/-10 bound.
         Path scenarioFile = Files.createTempDirectory("macro-scenario-startyear")
                 .resolve("_macroScenario_startyear_costpush.csv");
         scenarioFile.toFile().deleteOnExit();
@@ -124,8 +121,8 @@ class MacroModelManagerTest {
 
         manager.updateEquilibrium(2023, 2023, "PL", Collections.emptySet(), Collections.emptySet(), false);
 
-        // The cost-push shock moves inflation on impact. Before the fix this was
-        // exactly zero, because the scenario was never consulted in this year.
+        // The cost-push shock moves inflation on impact. Inflation stays exactly zero
+        // if the scenario is not consulted in the start year.
         double inflation = getDoubleField(manager, "inflationDeviation");
         assertTrue(Math.abs(inflation) > 1e-6,
                 "Scenario shock declared for the start year must reach the DSGE, "
@@ -135,12 +132,12 @@ class MacroModelManagerTest {
     /**
      * CONTRACT: macro artifacts are merged by DATE, not by row position.
      *
-     * <p>The population projection and the reference CSV both carry a time column and
-     * were both consumed positionally: the splice assumed row 0 of the projection was
-     * the handoff quarter. Changing the simulation start year without regenerating
-     * every upstream artifact then shifted the entire demographic path while
+     * <p>The population projection and the reference CSV both carry a time column. Fails
+     * if they are consumed positionally, with the splice assuming row 0 of the projection
+     * is the handoff quarter: changing the simulation start year without regenerating
+     * every upstream artifact would then shift the entire demographic path while
      * validateRamseyHandoffTime — which only checks a scalar in the terminal JSON —
-     * still passed. This is the "silently wrong downstream simulation" footgun.</p>
+     * still passes. This is the "silently wrong downstream simulation" footgun.</p>
      */
     @Test
     void testMisalignedPopulationProjectionFailsLoudly() throws Exception {
@@ -347,8 +344,8 @@ class MacroModelManagerTest {
         assertEquals(expectedNetExportsTrend, currentTrends.get("nx"), 1e-12,
                 "Net exports trend should use the same baseline-relative rule as the manager");
         assertEquals(java.util.Set.of("w", "y", "c", "inv", "k", "g", "nx", "n_ramsey"), currentTrends.keySet(),
-                "The trend map carries exactly these keys; the Ramsey participation entry went with "
-                + "the endogenous-labour variant (JuergenWiemers/SimPathsEU#28)");
+                "The trend map carries exactly these keys, with no participation entry: the planner "
+                + "takes labour input as exogenous");
         assertFalse(Math.abs(wageTrend) < 1e-12,
                 "The first stepped year should already produce a non-zero wage trend because the baseline is quarter 0");
     }
@@ -380,10 +377,9 @@ class MacroModelManagerTest {
 
     /**
      * The hours projection is a required bundle artefact, with no fallback to extrapolating
-     * the reference CSV locally. That fallback is precisely what the file replaces: while both
-     * sides derived the hours path independently they used different trailing-growth windows,
-     * and nothing detected it. A silent fallback would reopen the gap on any bundle exported
-     * before 2026-08-18, so a missing file must fail the run.
+     * the reference CSV locally: a local extrapolation would be a second derivation of the
+     * hours path, with its own trailing-growth window, and nothing would detect a divergence
+     * between the two. A missing file must therefore fail the run.
      */
     @Test
     void testInitializeRamseyTrendFailsWhenHoursProjectionIsMissing(@TempDir Path tempDir) throws Exception {
@@ -468,8 +464,8 @@ class MacroModelManagerTest {
             path[i] = path[i - 1] * 0.99;
         }
 
-        // window=20 clamps to lastProjectionIdx=5 internally, reproducing the old
-        // hard-coded Math.min(20, lastProjectionIdx) behaviour this test asserts on.
+        // window=20 clamps to lastProjectionIdx=5 internally, so the seed window is
+        // Math.min(20, lastProjectionIdx), the case this test asserts on.
         MacroModelManager.applySmoothTerminalDemographicClosure(path, 5, path.length, 20);
 
         double firstTailGrowth = Math.log(path[6] / path[5]);
@@ -486,35 +482,35 @@ class MacroModelManagerTest {
     }
 
     /**
-     * Tripwire for the cross-repository conventions that no artefact carries. The upstream
-     * MATLAB {@code input_processing/macromodel/ramsey_trend.m} extends the demographic path with window 20 and
-     * the hours path with window 1; Java must match, or the two sides build different paths
-     * from the same bundle. Java used 20 for hours until 2026-08-18, which was invisible only
-     * because the exported {@code h} column is a pure exponential under
-     * {@code hours_trend_method: log_linear}.
+     * Tripwire for the MATLAB/Java conventions that no artefact carries.
+     * {@code input_processing/macromodel/ramsey_trend.m} extends the demographic path with
+     * window 20 and the hours tail with window 1; Java must match, or the two sides build
+     * different paths from the same bundle. A wrong hours window stays invisible while the
+     * exported {@code h} column is a pure exponential under
+     * {@code hours_trend_method: log_linear}, so only this test catches it.
      *
-     * <p>The forward hours projection no longer appears here: it is carried by
+     * <p>The forward hours projection is not pinned here: it is carried by
      * {@code hours_projection_*.csv} and read rather than recomputed, which is a real contract
-     * rather than a tripwire. The terminal tail is still built on both sides for both series,
-     * so those two windows stay pinned. Change them only together with ramsey_trend.m.</p>
+     * rather than a tripwire. The terminal tail is built on both sides for both series, so
+     * those two windows stay pinned. Change them only together with ramsey_trend.m.</p>
      */
     @Test
     public void testHandoffExtensionWindowsMatchUpstreamMatlab() {
         assertEquals(20, MacroModelManager.DEMOGRAPHIC_EXTENSION_WINDOW,
-                "must match extend_level_path(N_trend(, ..., 20) in ramsey_trend.m");
+                "must match extend_level_path(N_trend(1:handoff_idx), ..., 20) in ramsey_trend.m");
         assertEquals(20, RamseyTrendModel.TAIL_DEMOGRAPHIC_WINDOW,
                 "must match extend_level_path(handoff_labor_proj, ..., 20) in ramsey_trend.m");
         assertEquals(1, RamseyTrendModel.TAIL_HOURS_WINDOW,
-                "must match extend_level_path(handoff_h_proj, ..., 1) in ramsey_trend.m");
+                "must match apply_smooth_terminal_demographic_closure(handoff_h_ext, ..., 1) in ramsey_trend.m");
     }
 
     /**
      * MATLAB bounds the taper's seed window by the override length:
-     * {@code tail_window = min(20, n_avail - 1)} in ramsey_trend.m. Java bounded it
-     * by array position only, which coincides while the population projection covers
+     * {@code tail_window = min(20, n_avail - 1)} in ramsey_trend.m, and Java must too. A
+     * bound by array position alone coincides while the population projection covers
      * more than 21 quarters past the handoff and silently diverges when it does not
      * (the seed rate would then be measured across the splice, on pre-override
-     * extrapolated data). (2026-08-19 boundary audit, C3.)
+     * extrapolated data).
      */
     @Test
     void taperWindowIsBoundedByTheOverrideLength() {

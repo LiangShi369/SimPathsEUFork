@@ -14,11 +14,11 @@ function plot_custom_irfs(nrows, ncols)
 %   - Must be called after stoch_simul has been run
 %   - oo_.irfs structure must exist in the workspace
 %
-% V9 Note (Feb 2026):
+% Model note:
 %   - L (labor force) and h (hours) are EXOGENOUS AR(1) processes
 %   - L responds ONLY to eps_L; h responds ONLY to eps_h
 %   - IRFs of L and h to other shocks will be zero (correct behavior)
-%   - rho_L = 0.95, rho_h = 0.85 (both CALIBRATED)
+%   - rho_L and rho_h are CALIBRATED per country in country_params/{C}_calibration.mod
 %
 % Author: Generated for WELLSIM_SVEC project
 % =========================================================================

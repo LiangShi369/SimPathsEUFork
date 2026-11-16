@@ -49,13 +49,13 @@ import simpaths.model.enums.Labour;
  *       is expanded by cloning and every person's weight is reset to exactly
  *       {@code 1.0} ({@code Household.resetWeights(1.0)}), newborns inheriting
  *       the mother's weight. Weighted sums then reduce identically to head
- *       counts, so behaviour is unchanged.</li>
+ *       counts.</li>
  *   <li><b>Weighted</b> ({@code useWeights = true}): survey households are kept
  *       with heterogeneous survey weights. A head count would bias L, h and
  *       the level indices; weighting removes that bias.</li>
  * </ul>
  * <p>Because weighting by {@code getWeight()} is correct in <em>both</em> modes,
- * the aggregator no longer has a hidden coupling to the run mode. Invalid
+ * the aggregator does not depend on the run mode. Invalid
  * weights (null, non-finite, non-positive) are rejected loudly rather than
  * silently degrading the aggregates (see {@code personWeight}).</p>
  *
@@ -168,7 +168,7 @@ public class LaborSupplyAggregator {
         // Demographic anchors are labour-market-invariant. If they were not
         // already latched eagerly in year 1 (latchDemographicAnchors), latch
         // them here as a fallback so callers that never call the eager path
-        // still behave as before. If the eager latch already ran, its values
+        // still get them. If the eager latch already ran, its values
         // are kept (they are numerically identical — no demographic process
         // runs between the eager point and here within the first year).
         if (!startYearDemogSet) {
@@ -452,8 +452,8 @@ public class LaborSupplyAggregator {
      * — the exact predicate the labour market uses to decide who enters the
      * discrete-choice labour-supply model. It excludes not only students and
      * retirees but also the long-term disabled and persons with a non-finite
-     * inverse Mills ratio ("will not work for any wage"). Using the looser
-     * Les_c4-only test previously made the at-risk pool — and hence the
+     * inverse Mills ratio ("will not work for any wage"). A looser
+     * Les_c4-only test would make the at-risk pool — and hence the
      * participation/employment-rate denominator and the exported demographic
      * series — diverge from the population SimPaths actually sends through the
      * labour market, with a bias that grows as disability prevalence rises with
