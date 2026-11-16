@@ -2362,18 +2362,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                         Parameters.getTimeSeriesIndex(startYear, UpratingCase.ModelInitialise) /
                                 Parameters.getTimeSeriesIndex(Parameters.getMaxStartYear(), UpratingCase.ModelInitialise);
                 //Modify the underlying initial population being used by applying the upratingFactor to its monetary values
-                String[] columnsToUprate = new String[]{"YPNBIHS_DV", "YPTCIIHS_DV", "YPNCP", "YPNOAB", "YPLGRS_DV"};
-                for (String columnToUprateName : columnsToUprate) {
-                    stat.execute(
-                            "ALTER TABLE PERSON ALTER COLUMN " + columnToUprateName + " NUMERIC(30,6);"
-                                    + "UPDATE PERSON SET " + columnToUprateName + " = SINH(" + columnToUprateName + ") * " + upratingFactor + ";"
-                                    + "UPDATE PERSON SET " + columnToUprateName + " = LOG(" + columnToUprateName + " + SQRT(POWER(" + columnToUprateName + ",2) + 1));"
-                    );
-                }
-                stat.execute(
-                        "UPDATE PERSON SET SIMULATION_TIME = " + startYear + ";"
-                                + "UPDATE PERSON SET SYSTEM_YEAR = " + startYear + ";"
-                );
+                moveStartingPopulationToStartYear(stat, startYear, upratingFactor);
                 System.out.println("Completed amending Person table");
             }
         }
@@ -2396,6 +2385,36 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                 e.printStackTrace();
             }
         }
+    }
+
+    /**
+     * The monetary columns of the starting population's PERSON table that a start year past the last
+     * available population uprates. Each holds the inverse hyperbolic sine of a monthly amount. The
+     * names are those of {@link Parameters#PERSON_VARIABLES_INITIAL}, the CSV header the table is built
+     * from; they go into the SQL unquoted, so H2 matches them whatever their case.
+     */
+    static final String[] ASINH_MONETARY_PERSON_COLUMNS = {
+            "yNonBenPersGrossMonth", "yMiscPersGrossMonth", "yCapitalPersMonth",
+            "yPensPersGrossMonth", "yEmpPersGrossMonth"};
+
+    /**
+     * Turns the last available starting population, copied into table PERSON, into one for
+     * {@code startYear}: scales the monthly amount behind each of {@link #ASINH_MONETARY_PERSON_COLUMNS}
+     * by {@code upratingFactor} ({@code x -> asinh(sinh(x) * upratingFactor)}) and sets the simulation
+     * time and the survey year ({@code statInterviewYear}) to {@code startYear}.
+     */
+    static void moveStartingPopulationToStartYear(Statement stat, int startYear, double upratingFactor) throws SQLException {
+        for (String column : ASINH_MONETARY_PERSON_COLUMNS) {
+            stat.execute(
+                    "ALTER TABLE PERSON ALTER COLUMN " + column + " NUMERIC(30,6);"
+                            + "UPDATE PERSON SET " + column + " = SINH(" + column + ") * " + upratingFactor + ";"
+                            + "UPDATE PERSON SET " + column + " = LOG(" + column + " + SQRT(POWER(" + column + ",2) + 1));"
+            );
+        }
+        stat.execute(
+                "UPDATE PERSON SET simulation_time = " + startYear + ";"
+                        + "UPDATE PERSON SET statInterviewYear = " + startYear + ";"
+        );
     }
 
 
