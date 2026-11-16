@@ -9,7 +9,10 @@ popSize: 20000
 
 model_args:
     alignPopulation:   true
-    alignRetirement:   true
+    # Off: in a run that starts in 2023, the last year with alignment targets, the retirement
+    # alignment solves once, for the start year, and SimPaths applies that one-year catch-up
+    # in every later year (three quarters of the people aged 55-64 are retired by 2029)
+    alignRetirement:   false
     alignDisability:   true
     alignEducation:    true
     alignInSchool:     true
@@ -17,7 +20,7 @@ model_args:
     # Inert for startYear >= 2023: LabourMarket gates employment alignment on
     # year <= EMPLOYMENT_ALIGNMENT_END_YEAR (=2023), and the labour market first
     # runs in startYear+1. Kept only for parity with the other config files.
-    # alignRetirement/alignDisability above have NO end year and do run to 2060.
+    # alignDisability above also searches only up to 2023 and keeps that year's adjustment.
     alignEmployment:   true
     alignFertility:    true
 

@@ -10,7 +10,10 @@ popSize: 20000
 
 model_args:
     alignPopulation: true
-    alignRetirement: true
+    # Off: in a run that starts in 2023, the last year with alignment targets, the retirement
+    # alignment solves once, for the start year, and SimPaths applies that one-year catch-up
+    # in every later year (three quarters of the people aged 55-64 are retired by 2029)
+    alignRetirement: false
     alignDisability: true
     alignEducation: true
     alignInSchool: true
