@@ -106,14 +106,6 @@ public class States {
         if (DecisionParams.flagDisability && ageYears >= DecisionParams.minAgeForPoorHealth && ageYears <= DecisionParams.maxAgeForDisability())
             populate(Axis.Disability, (double)refPerson.getDisability());
 
-        // social care receipt
-        if (Parameters.flagSocialCare && ageYears >= DecisionParams.minAgeReceiveFormalCare)
-            populate(Axis.SocialCareReceipt, (double)refPerson.getSocialCareReceiptState().getValue());
-
-        // social care provision
-        if (Parameters.flagSocialCare)
-            populate(Axis.SocialCareProvision, refPerson.getSocialCareProvisionState());
-
         // region
         if ( DecisionParams.flagRegion )
             populate(Axis.Region, benefitUnit.getRegionIndex());
@@ -335,12 +327,6 @@ public class States {
             // one of the labour options in the respective state combination where a wage offer is received
             loopConsider = false;
         }
-
-        // check care provision
-        if (!getCohabitation() &&
-                ( SocialCareProvision.OnlyPartner.equals(getSocialCareProvisionCode()) ||
-                        SocialCareProvision.PartnerAndOther.equals(getSocialCareProvisionCode()) ))
-            loopConsider = false;
 
         // return result
         return loopConsider;
@@ -628,44 +614,6 @@ public class States {
     }
 
     /**
-     * METHOD TO RETURN SOCIAL CARE RECEIPT
-     * @return integer (0 none needed, 1 no formal (needed but not received or only informal), 2 formal and informal, 3 only formal
-     */
-    int getSocialCareReceipt() {
-        if (Parameters.flagSocialCare && ageYears >= DecisionParams.minAgeReceiveFormalCare) {
-            return (int)states[scale.getIndex(Axis.SocialCareReceipt, ageYears)];
-        } else {
-            return 0;
-        }
-    }
-
-    /**
-     * METHOD TO INDICATE IF PRINCIPAL IS ELIGIBLE FOR WORK
-     * @return boolean
-     */
-    public boolean getPrincipalEligibleForWork() {
-        if (!Parameters.flagSuppressSocialCareCosts) {
-            if (getDisability()==1)
-                return false;
-            if (getSocialCareReceipt()>0)
-                return false;
-        }
-        return true;
-    }
-
-    /**
-     * METHOD TO RETURN SOCIAL CARE PROVISION
-     * @return integer (0 no care, 1 only to partner, 2 to partner and other, 3 only to other
-     */
-    int getSocialCareProvision() {
-        if (Parameters.flagSocialCare) {
-            return (int)states[scale.getIndex(Axis.SocialCareProvision, ageYears)];
-        } else {
-            return 0;
-        }
-    }
-
-    /**
      * METHOD TO RETURN EDUCATION STATUS IMPLIED BY STATE COMBINATION
      * @return integer
      */
@@ -892,42 +840,6 @@ public class States {
     }
 
     /**
-     * METHOD TO IDENTIFY SOCIAL CARE RECEIPT STATE CODE IMPLIED BY STATE COMBINATION
-     */
-    SocialCareReceiptState getSocialCareReceiptStateCode() {
-        SocialCareReceiptState code;
-        if (Parameters.flagSocialCare && ageYears >= DecisionParams.minAgeReceiveFormalCare)
-            code = SocialCareReceiptState.getCode(getVal(Axis.SocialCareReceipt));
-        else
-            code = SocialCareReceiptState.NoneNeeded;
-        return code;
-    }
-
-    /**
-     * METHOD TO IDENTIFY SOCIAL CARE RECEIPT STATE CODE IMPLIED BY STATE COMBINATION
-     */
-    SocialCareReceipt getSocialCareReceiptCode() {
-        SocialCareReceipt code;
-        if (Parameters.flagSocialCare && ageYears >= DecisionParams.minAgeReceiveFormalCare)
-            code = SocialCareReceipt.getCode(getVal(Axis.SocialCareReceipt));
-        else
-            code = SocialCareReceipt.None;
-        return code;
-    }
-
-    /**
-     * METHOD TO IDENTIFY SOCIAL CARE PROVISION CODE IMPLIED BY STATE COMBINATION
-     */
-    SocialCareProvision getSocialCareProvisionCode() {
-        SocialCareProvision code;
-        if (Parameters.flagSocialCare)
-            code = SocialCareProvision.getCode(getVal(Axis.SocialCareProvision));
-        else
-            code = SocialCareProvision.None;
-        return code;
-    }
-
-    /**
      * METHOD TO IDENTIFY HEALTH MEASURE USED BY SimPaths AS IMPLIED BY STATE COMBINATION
      * @return double
      */
@@ -1036,22 +948,6 @@ public class States {
             stateIndex = scale.getIndex(Axis.Disability, ageYears);
             printOutOfBounds(stateIndex);
             msg = "disability: " + String.format(fmtIndicator,states[stateIndex]);
-            System.out.println(msg);
-        }
-
-        // social care receipt
-        if (Parameters.flagSocialCare && ageYears >= DecisionParams.minAgeReceiveFormalCare) {
-            stateIndex = scale.getIndex(Axis.SocialCareReceipt, ageYears);
-            printOutOfBounds(stateIndex);
-            msg = "social care receipt: " + String.format(fmtIndicator,states[stateIndex]);
-            System.out.println(msg);
-        }
-
-        // social care provision
-        if (Parameters.flagSocialCare) {
-            stateIndex = scale.getIndex(Axis.SocialCareProvision, ageYears);
-            printOutOfBounds(stateIndex);
-            msg = "social care provision: " + String.format(fmtIndicator,states[stateIndex]);
             System.out.println(msg);
         }
 

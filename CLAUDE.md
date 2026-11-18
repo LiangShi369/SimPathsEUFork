@@ -29,7 +29,6 @@ ES is a first-class country in the Java code: `Country.ES("Spain", 13)`, `Region
 - The `reg_*.xlsx`, `reg_RMSE.xlsx` and `scenario_parametricMatching.xlsx` are estimated by the do-files in `input_processing/regression_estimates/ES/with_time_trend/` (master `00_master_regression_estimates_ES.do`, steps `01`–`11`, shared programs in `programs.do`). They save the workbooks to `$dir_work`, a CeMPA Box folder set in the master, and `90_cleaning_excel_inputs.do` then cleans them in place there, keeping only `Info`, `Gof` and the model sheets. Nothing copies them into `input/ES/`.
 - `align_popProjections.xlsx` is keyed on `ES1`–`ES7`; `time_series_factor.xlsx` is Spain's uprating series.
 - `scenario_retirementAgeFixed.xlsx` follows `Parameters.getStatePensionAge` case `"ES"`: 65 to 2017, 66 for 2018–2023, 67 from 2024, gender-neutral.
-- There is no `social_care_parameters.xlsx`. It is optional and read only when `projectSocialCare` is on (off by default); turning it on for ES fails with an explicit error.
 - `alignment_adjustment_factors.xlsx` is byte-identical to PL's on purpose, so don't flag it as a copy. All 13 data sheets are zero-filled: zero is the neutral cold start for a fresh calibration. Aligned runs search for the adjustment path and overwrite only the in-memory map. The workbook is never written back, so to reuse calibrated values, copy them in by hand (see the file's own `Info` sheet).
 - `src/main/resources/images/ES.png` supplies the GUI flag.
 

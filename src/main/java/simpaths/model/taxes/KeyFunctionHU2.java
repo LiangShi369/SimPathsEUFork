@@ -31,6 +31,10 @@ public class KeyFunctionHU2 implements IKeyFunction {
     private final double LO_INCOME = KEY_FUNCTION_HU2_LO_INCOME;
     private final double HI_INCOME = KEY_FUNCTION_HU2_HI_INCOME;
 
+    // Disability is not a matching characteristic: its units below stay at 0. It used to be
+    // switched on only together with social care costs, which SimPathsEU does not model.
+    private static final boolean MATCH_ON_DISABILITY = false;
+
 
     /**
      * CONSTRUCTORS
@@ -51,7 +55,9 @@ public class KeyFunctionHU2 implements IKeyFunction {
      * @param hoursWorkedPerWeekWoman employment hours per week of adult female
      * @param dlltsdMan disability status of man
      * @param dlltsdWoman disability status of woman
-     * @param careProvision indicator that at least one member of household provides social care
+     * @param careProvision indicator that at least one member of household provides social care; always 0 in
+     *                      SimPathsEU, which has no social care module (the dimension is kept so that the
+     *                      donor keys stored in existing input databases stay valid)
      * @param originalIncomePerWeek original income per week of family (possibly negative)
      * @return Integer list of keys, ordered from most fine (0) to most coarse (2)
      */
@@ -194,7 +200,7 @@ public class KeyFunctionHU2 implements IKeyFunction {
 
         // long-term sick and disabled
         localMap = new HashMap<>();
-        if ((dlltsdMan > 0 || dlltsdWoman > 0) && !Parameters.flagSuppressSocialCareCosts) {
+        if ((dlltsdMan > 0 || dlltsdWoman > 0) && MATCH_ON_DISABILITY) {
             // one adult disabled and one able-bodied
             localMap.put(0,1);
             localMap.put(1,1);
@@ -213,9 +219,9 @@ public class KeyFunctionHU2 implements IKeyFunction {
         }
         units.put(MatchFeature.Disability, localMap);
 
-        // social care provision
+        // social care provision (careProvision is always 0, so the units below are always 0)
         localMap = new HashMap<>();
-        if (careProvision > 0 && !Parameters.flagSuppressSocialCareCosts) {
+        if (careProvision > 0) {
             localMap.put(0,1);
             localMap.put(1,1);
             localMap.put(2,1);

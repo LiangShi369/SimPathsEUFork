@@ -182,7 +182,6 @@ public class Parameters {
 
     public static int MIN_AGE_TO_RETIRE = 50; //Minimum age to consider retirement
     public static int DEFAULT_AGE_TO_RETIRE = 67; //if pension included, but retirement decision not
-    public static int MIN_AGE_FORMAL_SOCARE = 65; //Minimum age to receive formal social care
     public static int MIN_AGE_FLEXIBLE_LABOUR_SUPPLY = 16; //Used when filtering people who can be "flexible in labour supply"
     public static int MAX_AGE_FLEXIBLE_LABOUR_SUPPLY = 75;
     public static double SHARE_OF_WEALTH_TO_ANNUITISE_AT_RETIREMENT = 0.25;
@@ -194,8 +193,6 @@ public class Parameters {
                                                 // and fewer hours convert to Labour.ZERO. Must equal the lower limit of the country's first positive band in Labour (checkLabourBandLimits)
     public static double MIN_HOURLY_WAGE_RATE = 0.0;
     public static double MAX_HOURLY_WAGE_RATE = 75.0;
-    public static double MAX_HOURS_WEEKLY_FORMAL_CARE = 150.0;
-    public static double MAX_HOURS_WEEKLY_INFORMAL_CARE = 16 * 7;
     public static double CHILDCARE_COST_EARNINGS_CAP = 0.5;  // maximum share of earnings payable as childcare (for benefit units with some earnings)
 
     // thresholds of the tax-donor key function (KeyFunctionHU2): applied to the donors at setup and to simulated benefit units in the run
@@ -409,10 +406,10 @@ public class Parameters {
     //Uprating factor
     private static boolean flagDefaultToTimeSeriesAverages;
     private static Double averageSavingReturns, averageDebtCostLow, averageDebtCostHigh;
-    private static MultiKeyCoefficientMap upratingIndexMapRealGDP, upratingIndexMapInflation, socialCareProvisionTimeAdjustment,
+    private static MultiKeyCoefficientMap upratingIndexMapRealGDP, upratingIndexMapInflation,
             partnershipTimeAdjustment, retirementTimeAdjustment, fertilityTimeAdjustment, disabilityTimeAdjustment, studentsTimeAdjustment, utilityTimeAdjustment, utilityTimeAdjustmentSingleMales, utilityTimeAdjustmentSingleFemales,
             utilityTimeAdjustmentCouples, utilityTimeAdjustmentACMales, utilityTimeAdjustmentACFemales, utilityTimeAdjustmentMaleWithDep, utilityTimeAdjustmentFemaleWithDep, upratingIndexMapRealWageGrowth, priceMapRealSavingReturns, priceMapRealDebtCostLow, priceMapRealDebtCostHigh,
-            wageRateFormalSocialCare, socialCarePolicy, partneredShare, retiredShare, disabledShare, studentShare, employedShare, employedShareSingleMales, employedShareACMales, employedShareSingleFemales, employedShareACFemales, employedShareCouples, employedShareMaleWithDep, employedShareFemaleWithDep;
+            partneredShare, retiredShare, disabledShare, studentShare, employedShare, employedShareSingleMales, employedShareACMales, employedShareSingleFemales, employedShareACFemales, employedShareCouples, employedShareMaleWithDep, employedShareFemaleWithDep;
     public static Map<Integer, Double> partnershipAlignAdjustment, fertilityAlignAdjustment, retirementAlignAdjustment, studentsAlignAdjustment, disabilityAlignAdjustment;
     // Snapshot of initial utility adjustment values loaded from alignment_adjustment_factors.xlsx,
     // preserved so that activity alignment can cold-start from xlsx values each year
@@ -474,30 +471,6 @@ public class Parameters {
     //Health
     private static MultiKeyCoefficientMap coeffCovarianceHealthH1;
     private static MultiKeyCoefficientMap coeffCovarianceHealthH2; //Prob. long-term sick or disabled
-
-    //Social care
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS1a; // prob of needing social care under 65
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS1b;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2a; // prob of needing social care 65+
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2b;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2c;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2d;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2e;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2f;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2g;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2h;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2i;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2j;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2k;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS3a;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS3b;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS3c;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS3d;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS3e;
-    private static Map<SocialCareReceiptS2c, MultiKeyCoefficientMap> coeffCovarianceSocialCareS2cMap;
-    private static Map<PartnerSupplementaryCarer, MultiKeyCoefficientMap> coeffCovarianceSocialCareS2eMap;
-    private static Map<NotPartnerInformalCarer, MultiKeyCoefficientMap> coeffCovarianceSocialCareS2fMap;
-    private static Map<SocialCareProvision, MultiKeyCoefficientMap> coeffCovarianceSocialCareS3dMap;
 
     //Unemployment
     private static MultiKeyCoefficientMap coeffCovarianceUnemploymentU1a;
@@ -674,26 +647,6 @@ public class Parameters {
     private static GeneralisedOrderedRegression regHealthH1;
     private static BinomialRegression regHealthH2;
 
-    //Social care
-    private static BinomialRegression regReceiveCareS1a;
-    private static LinearRegression regCareHoursS1b;
-    private static BinomialRegression regNeedCareS2a;
-    private static BinomialRegression regReceiveCareS2b;
-    private static MultinomialRegression<SocialCareReceiptS2c> regSocialCareMarketS2c;
-    private static BinomialRegression regReceiveCarePartnerS2d;
-    private static MultinomialRegression<PartnerSupplementaryCarer> regPartnerSupplementaryCareS2e;
-    private static MultinomialRegression<NotPartnerInformalCarer> regNotPartnerInformalCareS2f;
-    private static LinearRegression regPartnerCareHoursS2g;
-    private static LinearRegression regDaughterCareHoursS2h;
-    private static LinearRegression regSonCareHoursS2i;
-    private static LinearRegression regOtherCareHoursS2j;
-    private static LinearRegression regFormalCareHoursS2k;
-    private static BinomialRegression regCarePartnerProvCareToOtherS3a;
-    private static BinomialRegression regNoCarePartnerProvCareToOtherS3b;
-    private static BinomialRegression regNoPartnerProvCareToOtherS3c;
-    private static MultinomialRegression<SocialCareProvision> regInformalCareToS3d;
-    private static LinearRegression regCareHoursProvS3e;
-
     //Unemployment
     private static BinomialRegression regUnemploymentMaleGraduateU1a;
     private static BinomialRegression regUnemploymentMaleNonGraduateU1b;
@@ -812,9 +765,7 @@ public class Parameters {
     public static Integer timeTrendStopsInE1b;
     public static Integer timeTrendStopsInE2a;
     public static boolean flagFormalChildcare;
-    public static boolean flagSocialCare;
     public static boolean flagSuppressChildcareCosts;
-    public static boolean flagSuppressSocialCareCosts;
     public static boolean donorPoolAveraging;
 
     public static double realInterestRateInnov;
@@ -959,13 +910,13 @@ public class Parameters {
      */
 
     public static void loadParameters(Country country, int maxAgeModel, boolean enableIntertemporalOptimisations,
-                                      boolean projectFormalChildcare, boolean projectSocialCare, boolean donorPoolAveraging1,
+                                      boolean projectFormalChildcare, boolean donorPoolAveraging1,
                                       boolean fixTimeTrend, boolean fixTimeTrendR1a, boolean fixTimeTrendR1b, boolean fixTimeTrendE1a, boolean fixTimeTrendE1b, boolean fixTimeTrendE2a,
                                       boolean defaultToTimeSeriesAverages, boolean taxDBMatches,
                                       Integer timeTrendStops, Integer timeTrendStopsR1a, Integer timeTrendStopsR1b,  Integer timeTrendStopsE1a, Integer timeTrendStopsE1b, Integer timeTrendStopsE2a,
                                       int startYearModel, int endYearModel, double interestRateInnov1,
                                       double disposableIncomeFromLabourInnov1, boolean flagSuppressChildcareCosts1,
-                                      boolean flagSuppressSocialCareCosts1, MacroScenarioPopulation macroShockPopulation,
+                                      MacroScenarioPopulation macroShockPopulation,
                                       MacroScenarioProductivity macroShockProductivity, MacroScenarioGreenPolicy macroShockGreenPolicy, boolean macroShocksOn) {
 
         // display a dialog box to let the user know what is happening
@@ -1017,9 +968,7 @@ public class Parameters {
         timeTrendStopsInE1b = timeTrendStopsE1b;
         timeTrendStopsInE2a = timeTrendStopsE2a;
         flagFormalChildcare = projectFormalChildcare;
-        flagSocialCare = projectSocialCare;
         flagSuppressChildcareCosts = flagSuppressChildcareCosts1;
-        flagSuppressSocialCareCosts = flagSuppressSocialCareCosts1;
         donorPoolAveraging = donorPoolAveraging1;
         realInterestRateInnov = interestRateInnov1;
         disposableIncomeFromLabourInnov = disposableIncomeFromLabourInnov1;
@@ -1604,24 +1553,6 @@ public class Parameters {
     public static GeneralisedOrderedRegression getRegHealthH1() { return regHealthH1; }
     public static BinomialRegression getRegHealthH2() { return regHealthH2; }
 
-    public static BinomialRegression getRegReceiveCareS1a() { return regReceiveCareS1a; }
-    public static LinearRegression getRegCareHoursS1b() { return regCareHoursS1b; }
-    public static BinomialRegression getRegNeedCareS2a() { return regNeedCareS2a; }
-    public static BinomialRegression getRegReceiveCareS2b() { return regReceiveCareS2b; }
-    public static MultinomialRegression getRegSocialCareMarketS2c() { return regSocialCareMarketS2c; }
-    public static BinomialRegression getRegReceiveCarePartnerS2d() { return regReceiveCarePartnerS2d; }
-    public static MultinomialRegression getRegPartnerSupplementaryCareS2e() { return regPartnerSupplementaryCareS2e; }
-    public static MultinomialRegression getRegNotPartnerInformalCareS2f() { return regNotPartnerInformalCareS2f; }
-    public static LinearRegression getRegPartnerCareHoursS2g() { return regPartnerCareHoursS2g; }
-    public static LinearRegression getRegDaughterCareHoursS2h() { return regDaughterCareHoursS2h; }
-    public static LinearRegression getRegSonCareHoursS2i() { return regSonCareHoursS2i; }
-    public static LinearRegression getRegOtherCareHoursS2j() { return regOtherCareHoursS2j; }
-    public static LinearRegression getRegFormalCareHoursS2k() { return regFormalCareHoursS2k; }
-    public static BinomialRegression getRegCarePartnerProvCareToOtherS3a() { return regCarePartnerProvCareToOtherS3a; }
-    public static BinomialRegression getRegNoCarePartnerProvCareToOtherS3b() { return regNoCarePartnerProvCareToOtherS3b; }
-    public static BinomialRegression getRegNoPartnerProvCareToOtherS3c() { return regNoPartnerProvCareToOtherS3c; }
-    public static MultinomialRegression getRegInformalCareToS3d() { return regInformalCareToS3d; }
-    public static LinearRegression getRegCareHoursProvS3e() { return regCareHoursProvS3e; }
 
     public static BinomialRegression getRegUnemploymentMaleGraduateU1a() { return regUnemploymentMaleGraduateU1a; }
     public static BinomialRegression getRegUnemploymentMaleNonGraduateU1b() { return regUnemploymentMaleNonGraduateU1b; }
@@ -2065,18 +1996,6 @@ public class Parameters {
         rebaseIndexMap(TimeSeriesVariable.Inflation);
         rebaseIndexMap(TimeSeriesVariable.WageGrowth);
 
-        // load year-specific fiscal policy parameters
-        // Social care is optional: the workbook is only consulted when flagSocialCare is on
-        // (TaxEvaluation -> SocialCareExpenditureSupport -> getSocialCarePolicyValue), and countries
-        // that do not model it need not ship the file. The guard tests for the file rather than the
-        // flag because this method runs before flagSocialCare is assigned in loadParameters, and is
-        // also called standalone from SimPathsStart where the flag is not set at all.
-        String socialCareParametersFile = resolveCountryFile(country, "social_care_parameters.xlsx");
-        if (new File(socialCareParametersFile).exists()) {
-            socialCarePolicy = ExcelAssistant.loadCoefficientMap(socialCareParametersFile, "social care", 1);
-        } else {
-            socialCarePolicy = null;
-        }
         partneredShare = ExcelAssistant.loadCoefficientMap(resolveCountryFile(country, "alignment_targets_partnered_share.xlsx"), "partnered", 1);
         retiredShare = ExcelAssistant.loadCoefficientMap(resolveCountryFile(country, "alignment_targets_retirement.xlsx"), "retirement", 1);
         disabledShare = ExcelAssistant.loadCoefficientMap(resolveCountryFile(country, "alignment_targets_disability.xlsx"), "disability", 1);
@@ -2158,12 +2077,6 @@ public class Parameters {
             }
             case WageGrowth -> {
                 map = upratingIndexMapRealWageGrowth;
-            }
-            case CarerWageRate -> {
-                map = wageRateFormalSocialCare;
-            }
-            case CareProvisionAdjustment -> {
-                map = socialCareProvisionTimeAdjustment;
             }
             case PartnershipAdjustment -> {
                 map = partnershipTimeAdjustment;
@@ -2672,73 +2585,6 @@ public static void putPrevOrNewTarget(int year, Object newTarget, TimeSeriesVari
         if (val == null)
             val = extendRateTimeSeries(year, map);
         return ((Number) val).doubleValue();
-    }
-
-    public static double getSocialCarePolicyValue(int year, String param) {
-
-        if (socialCarePolicy == null)
-            throw new RuntimeException("social care projection is enabled, but input/" + COUNTRY_STRING
-                    + "/social_care_parameters.xlsx was not found - supply the workbook or disable projectSocialCare");
-        Object val = socialCarePolicy.getRowColumnValue(year, param);
-        if (val == null)
-            val = extendSocialCarePolicy(year, param);
-        return ((Number) val).doubleValue();
-    }
-
-    public synchronized static Object extendSocialCarePolicy(int year, String param) {
-
-        Object val = socialCarePolicy.getRowColumnValue(year, param);
-        if (val==null) {
-            // assume that series is capped at end by assumed geometric growth rate
-
-            int minYear = 9999, maxYear=0;
-            for (Object key : socialCarePolicy.keySet()) {
-                if (key.hashCode()>0) {
-                    if (key.hashCode()<1900 || key.hashCode()>2500)
-                        throw new RuntimeException("problem extending time series for social policy parameters");
-                    if (key.hashCode() < minYear)
-                        minYear = key.hashCode();
-                    if (key.hashCode() > maxYear)
-                        maxYear = key.hashCode();
-                }
-            }
-            if (year < minYear) {
-                // extend backward through time
-
-                Object[] values0 = (Object[]) socialCarePolicy.getValue(minYear+1);
-                Object[] values1 = (Object[]) socialCarePolicy.getValue(minYear);
-                for( int yy=minYear-1; yy>=year; yy--) {
-                    Object[] values2 = new Object[values1.length];
-                    for (int ii=0; ii<values1.length; ii++) {
-                        double val0 = ((Number) values0[ii]).doubleValue();
-                        double val1 = ((Number) values1[ii]).doubleValue();
-                        values2[ii] = val1 * val1 / val0;
-                    }
-                    socialCarePolicy.putValue(yy, values2);
-                    values0 = values1;
-                    values1 = values2;
-                }
-            }
-            else {
-                // extend forward through time
-
-                Object[] values0 = (Object[]) socialCarePolicy.getValue(maxYear-1);
-                Object[] values1 = (Object[]) socialCarePolicy.getValue(maxYear);
-                for( int yy=maxYear+1; yy<=year; yy++) {
-                    Object[] values2 = new Object[values1.length];
-                    for (int ii=0; ii<values1.length; ii++) {
-                        double val0 = ((Number) values0[ii]).doubleValue();
-                        double val1 = ((Number) values1[ii]).doubleValue();
-                        values2[ii] = val1 * val1 / val0;
-                    }
-                    socialCarePolicy.putValue(yy, values2);
-                    values0 = values1;
-                    values1 = values2;
-                }
-            }
-            val = socialCarePolicy.getRowColumnValue(year, param);
-        }
-        return val;
     }
 
     public static Map<MatchFeature, Map<Integer, Integer>> getTaxdbCounter() {

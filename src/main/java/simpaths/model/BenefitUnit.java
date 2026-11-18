@@ -75,8 +75,6 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
     @Transient private Indicator i_demNChild0to2L1;                //Lag(1) of d_children_3under;
     @Transient private Indicator dem4to12L1;                //Lag(1) of d_children_4_12;
     private Double xChildCareWeek;
-    private Double xCareWeek;
-    private Integer careProvidedFlag;
     private Long idtaxDbDonor;
     @Transient private Match taxDbMatch;
     @Enumerated(EnumType.STRING) private Region demRgn;        //Region of household.  Also used in findDonorHouseholdsByLabour method
@@ -193,8 +191,6 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
         this.i_demNChild0to2L1 = Indicator.False;
         this.dem4to12L1 = Indicator.False;
         this.xChildCareWeek = 0.0;
-        this.xCareWeek = 0.0;
-        this.careProvidedFlag = 0;
         this.yDispMonth = 0.;
         this.yGrossMonth = 0.;
         this.yDispEquivYear = 0.;
@@ -285,8 +281,6 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
         this.i_demNChild0to2L1 = originalBenefitUnit.i_demNChild0to2L1;
         this.dem4to12L1 = originalBenefitUnit.dem4to12L1;
         this.xChildCareWeek = originalBenefitUnit.xChildCareWeek;
-        this.xCareWeek = originalBenefitUnit.xCareWeek;
-        this.careProvidedFlag = originalBenefitUnit.careProvidedFlag;
         this.demRgn = originalBenefitUnit.demRgn;
         this.yHhQuintilesMonthC5 = originalBenefitUnit.getYdses_c5();
         this.wealthPrptyFlag = originalBenefitUnit.wealthPrptyFlag;
@@ -598,24 +592,14 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
             childcareCostPerMonth = xChildCareWeek * Parameters.WEEKS_PER_MONTH;
         }
 
-        xCareWeek = 0.0;
-        careProvidedFlag = 0;
-        double socialCareCostPerMonth = 0.0;
-        if (Parameters.flagSocialCare && !Parameters.flagSuppressSocialCareCosts) {
-            updateSocialCareProvision();
-            updateSocialCareCostPerWeek();
-            socialCareCostPerMonth = xCareWeek * Parameters.WEEKS_PER_MONTH;
-        }
-
-        if (Parameters.flagSuppressSocialCareCosts) {
-            dlltsdF = 0;
-            dlltsdM = 0;
-        }
+        // disability is not a tax-donor matching characteristic (see KeyFunctionHU2)
+        dlltsdF = 0;
+        dlltsdM = 0;
 
         // update disposable income
         TaxEvaluation evaluatedTransfers;
         double taxInnov = (Parameters.donorPoolAveraging) ? -1.0 : innovations.getDoubleDraw(8);
-        evaluatedTransfers = new TaxEvaluation(model.getYear(), getRefPersonForDecisions().getDag(), getRefPersonForDecisions().getDgn(), getIntValue(Regressors.NumberMembersOver17), getIntValue(Regressors.NumberChildren04), getIntValue(Regressors.NumberChildren59), getIntValue(Regressors.NumberChildren1017), hoursWorkedPerWeekM, hoursWorkedPerWeekF, dlltsdM, dlltsdF, careProvidedFlag, originalIncomePerMonth, secondIncomePerMonth, childcareCostPerMonth, socialCareCostPerMonth, getLiquidWealth(Parameters.enableIntertemporalOptimisations), taxInnov);
+        evaluatedTransfers = new TaxEvaluation(model.getYear(), getRefPersonForDecisions().getDag(), getRefPersonForDecisions().getDgn(), getIntValue(Regressors.NumberMembersOver17), getIntValue(Regressors.NumberChildren04), getIntValue(Regressors.NumberChildren59), getIntValue(Regressors.NumberChildren1017), hoursWorkedPerWeekM, hoursWorkedPerWeekF, dlltsdM, dlltsdF, 0, originalIncomePerMonth, secondIncomePerMonth, childcareCostPerMonth, taxInnov);
 
         return evaluatedTransfers;
     }
@@ -1297,12 +1281,9 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
             female.setLabourSupplyWeekly(labourSupplyChoice.getKey(1));
         }
 
-        // childcare / social care (kept consistent)
+        // childcare
         if (Parameters.flagFormalChildcare && !Parameters.flagSuppressChildcareCosts) {
             updateChildcareCostPerWeek(model.getYear(), getRefPersonForDecisions().getDag(), getRefPersonForDecisions().getDgn());
-        }
-        if (Parameters.flagSocialCare && !Parameters.flagSuppressSocialCareCosts) {
-            updateSocialCareCostPerWeek();
         }
 
         // populate final incomes from cache (NO taxWrapper)
@@ -1328,7 +1309,7 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
      *
      * If IO is disabled, enumerates all feasible discrete labour options (single or couple), evaluates
      * taxes/benefits for each, computes regression utilities, samples a labour choice, applies optional
-     * childcare/social care costs, and stores the chosen disposable/gross income, benefits and tax DB match.
+     * childcare costs, and stores the chosen disposable/gross income, benefits and tax DB match.
      *
      * Always finishes by recalculating BU/occupant income aggregates via calculateBUIncome().
      */
@@ -1591,9 +1572,6 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
             // allow for formal childcare costs
             if (Parameters.flagFormalChildcare && !Parameters.flagSuppressChildcareCosts) {
                 updateChildcareCostPerWeek(model.getYear(), getRefPersonForDecisions().getDag(), getRefPersonForDecisions().getDgn());
-            }
-            if (Parameters.flagSocialCare && !Parameters.flagSuppressSocialCareCosts) {
-                updateSocialCareCostPerWeek();
             }
 
             // populate disposable income
@@ -4144,21 +4122,6 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
         }
     }
 
-    public double getSocialCareCostPerWeek() {
-        return getSocialCareCostPerWeek(true);
-    }
-    public double getSocialCareCostPerWeek(boolean throwError) {
-        if (xCareWeek == null) {
-            if (throwError) {
-                throw new RuntimeException("Call to get benefit unit social care cost before it is initialised.");
-            } else {
-                return 0.0;
-            }
-        } else {
-            return xCareWeek;
-        }
-    }
-
     public Household getHousehold() {
         return household;
     }
@@ -4370,8 +4333,6 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
         double cost = 0.0;
         if (Parameters.flagFormalChildcare)
             cost += xChildCareWeek;
-        if (Parameters.flagSocialCare)
-            cost += xCareWeek;
         if (Math.abs(cost) > 0.01)
             cost *= Parameters.WEEKS_PER_MONTH / Parameters.getTimeSeriesValue(model.getYear(), TimeSeriesVariable.Inflation);
         return cost;
@@ -4402,12 +4363,10 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
             // reference person defined as:
             //	man if man is disabled (even if woman is also disabled)
             //	woman if woman is disabled and man is not
-            //  man if man is in need of social care
-            //  woman if woman is in need of social care and man is not
             //	person with highest age if both retired
             //	person retired if one is retired
             //	student if one is student (and under maximum age threshold)
-            //	person with highest full-time wage potential if neither is disabled or receiving social care and both not retired or students
+            //	person with highest full-time wage potential if neither is disabled and both not retired or students
 
             if (male==null) {
                 throw new IllegalStateException("ERROR - benefit unit identified as couple, but missing male adult");
@@ -4416,10 +4375,6 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
             } else if (male.getDlltsd() == Indicator.True) {
                 ref = male;
             } else if (female.getDlltsd() == Indicator.True) {
-                ref = female;
-            } else if (Indicator.True.equals(male.getNeedSocialCare())) {
-                ref = male;
-            } else if (Indicator.True.equals(female.getNeedSocialCare())) {
                 ref = female;
             } else if (male.getLes_c4()==Les_c4.Retired && female.getLes_c4()==Les_c4.Retired) {
                 if (male.getDag() >= female.getDag()) {
@@ -4636,9 +4591,6 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
         if (Parameters.flagFormalChildcare) {
             nonDiscretionaryConsumptionPerYear += getChildcareCostPerWeek() * Parameters.WEEKS_PER_YEAR;
         }
-        if (Parameters.flagSocialCare) {
-            nonDiscretionaryConsumptionPerYear += getSocialCareCostPerWeek() * Parameters.WEEKS_PER_YEAR;
-        }
         return nonDiscretionaryConsumptionPerYear;
     }
     public double getDiscretionaryConsumptionPerYear() {
@@ -4689,23 +4641,6 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
                     xChildCareWeek = costCap;
                 }
             }
-        }
-    }
-
-    private void updateSocialCareCostPerWeek() {
-
-        xCareWeek = 0.0;
-        for (Person person : getMembers()) {
-            xCareWeek += person.getSocialCareCostWeekly();
-        }
-    }
-
-    private void updateSocialCareProvision() {
-
-        careProvidedFlag = 0;
-        for (Person person : getMembers()) {
-            if (!SocialCareProvision.None.equals(person.getSocialCareProvision()))
-                careProvidedFlag = 1;
         }
     }
 
