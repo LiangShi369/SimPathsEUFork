@@ -18,6 +18,7 @@ import java.util.*;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityTransaction;
 import jakarta.persistence.Persistence;
+import microsim.data.db.DatabaseUtils;
 import simpaths.data.FormattedDialogBox;
 import simpaths.data.Parameters;
 import simpaths.model.enums.Country;
@@ -35,6 +36,26 @@ import simpaths.model.taxes.*;
  *
  */
 public class TaxDonorDataParser {
+
+    public static String getInputDatabasePath() {
+
+        String databasePath = DatabaseUtils.databaseInputUrl;
+        if (databasePath == null || databasePath.isBlank()) {
+            databasePath = "." + File.separator + "input" + File.separator + "input";
+        }
+        return databasePath;
+    }
+
+    public static String getInputDatabaseJdbcUrl() {
+        return "jdbc:h2:file:" + getInputDatabasePath() + ";TRACE_LEVEL_FILE=0;TRACE_LEVEL_SYSTEM_OUT=0;AUTO_SERVER=TRUE";
+    }
+
+    private static EntityManager createTaxDatabaseEntityManager() {
+
+        Map<String, Object> propertyMap = new HashMap<>();
+        propertyMap.put("hibernate.connection.url", "jdbc:h2:file:" + getInputDatabasePath());
+        return Persistence.createEntityManagerFactory("tax-database", propertyMap).createEntityManager();
+    }
 
 
     /**
@@ -64,7 +85,7 @@ public class TaxDonorDataParser {
         Connection conn = null;
         try {
             Class.forName("org.h2.Driver");
-            conn = DriverManager.getConnection("jdbc:h2:file:./input" + File.separator + "input;TRACE_LEVEL_FILE=0;TRACE_LEVEL_SYSTEM_OUT=0;AUTO_SERVER=TRUE", "sa", "");
+            conn = DriverManager.getConnection(getInputDatabaseJdbcUrl(), "sa", "");
 
             createTaxDonorTables(conn, country, startYear);
             updateDefaultDonorTables(conn, country);
@@ -328,14 +349,12 @@ public class TaxDonorDataParser {
             //---------------------------------------------------------------------------
             String	taxUnitTableName = "DONORTAXUNIT_" + country;
             stat.execute(
-                // make copy of person table, using tuid
-                "DROP TABLE IF EXISTS TEMP CASCADE;"
-                + "CREATE TABLE TEMP AS (SELECT TUID, WEIGHT FROM " + personTableName + ");"
-
-                // extract only unique values of tuid
-                +"DROP TABLE IF EXISTS " + taxUnitTableName + " CASCADE;"
-                + "CREATE TABLE " + taxUnitTableName + " AS SELECT DISTINCT * FROM TEMP ORDER BY TUID;"
-                + "DROP TABLE IF EXISTS TEMP CASCADE;"
+                // one row per tuid, carrying the tax unit's weight.
+                // EUROMOD output normally holds a household-level weight in dwt, which is constant within a tax
+                // unit; some country datasets (e.g. ES) supply a person-level weight instead, so the weight is
+                // averaged over the members of the tax unit rather than assumed unique.
+                "DROP TABLE IF EXISTS " + taxUnitTableName + " CASCADE;"
+                + "CREATE TABLE " + taxUnitTableName + " AS (SELECT TUID, AVG(WEIGHT) AS WEIGHT FROM " + personTableName + " GROUP BY TUID ORDER BY TUID);"
 
                 // establish primary key
                 + "ALTER TABLE " + taxUnitTableName + " ALTER COLUMN TUID RENAME TO ID;"
@@ -604,7 +623,7 @@ public class TaxDonorDataParser {
         EntityTransaction txn = null;
         try {
 
-            EntityManager em = Persistence.createEntityManagerFactory("tax-database").createEntityManager();
+            EntityManager em = createTaxDatabaseEntityManager();
             txn = em.getTransaction();
             txn.begin();
 
@@ -633,8 +652,8 @@ public class TaxDonorDataParser {
 
                 counter++;
                 int age = 0, numberMembersOver17 = 0, numberChildrenUnder5 = 0, numberChildren5To9 = 0;
-                Gender dgn = Gender.Male;  //it is default gender value for Tax unit; needed only to evaluate flagSPA
-                int numberChildren10To17 = 0, dlltsd1 = 0, dlltsd2 = 0, careProvision = -1;
+                Gender dgn = Gender.Male;  // gender of the oldest member, which sets the state pension age of the donor keys
+                int numberChildren10To17 = 0, dlltsd1 = 0, dlltsd2 = 0;
                 double hoursWorkedPerWeek1 = 0.0, hoursWorkedPerWeek2 = 0.0;
                 boolean flagInitialiseDemographics = true;
                 for (int fromYear : Parameters.EUROMODpolicyScheduleSystemYearMap.keySet()) {
@@ -664,11 +683,10 @@ public class TaxDonorDataParser {
 
 
                         if (flagInitialiseDemographics) {
-                            // need to instantiate variables to evaluate key
-                            if (Parameters.getStatePensionAge(systemYear, dgn) <= age) {dgn = genderPerson;} // if flagSPA = 1 then update dgn
-
-                            // update age and dgn together using the same selection rule (max age)
-                            if (agePerson > age) {
+                            // need to instantiate variables to evaluate key:
+                            // age and gender of the oldest member, a man if a man and a woman are equally old, as
+                            // BenefitUnit's MaximumAge and MaximumAgeGender give them in the simulation
+                            if (agePerson > age || (agePerson == age && Gender.Male.equals(genderPerson))) {
                                 age = agePerson;
                                 dgn = genderPerson;
                             }
@@ -698,9 +716,6 @@ public class TaxDonorDataParser {
                                     dlltsd2 = dlltsd;
                                 }
                             }
-                            int cphere = person.getCarer();
-                            if (cphere>careProvision)
-                                careProvision = cphere;
                         } else {
                             // recompute tests for invariance on later years
                             if (agePerson > ageTest) {
@@ -727,7 +742,7 @@ public class TaxDonorDataParser {
                         DonorKeys keys = new DonorKeys();
                         KeyFunction keyFunction = new KeyFunction(systemYear, systemYear, age, dgn, numberMembersOver17, numberChildrenUnder5,
                                 numberChildren5To9, numberChildren10To17, hoursWorkedPerWeek1, hoursWorkedPerWeek2, dlltsd1, dlltsd2,
-                                careProvision, originalIncomePerWeek, secondIncomePerWeek, childcareCostPerWeek);
+                                originalIncomePerWeek, secondIncomePerWeek, childcareCostPerWeek);
                         keys.evaluate(keyFunction);
 
                         // set all taxUnitPolicy attributes

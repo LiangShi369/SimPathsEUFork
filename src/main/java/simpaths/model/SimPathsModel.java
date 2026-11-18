@@ -15,6 +15,7 @@ import java.util.random.RandomGenerator;
 
 // import plug-in packages
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.EntityTransaction;
 import jakarta.persistence.Persistence;
 import jakarta.persistence.Transient;
@@ -54,7 +55,6 @@ import simpaths.model.taxes.Match;
 import simpaths.model.taxes.Matches;
 import simpaths.model.taxes.database.TaxDonorDataParser;
 
-import static simpaths.data.Parameters.FERTILITY_ALIGNMENT_BOUND;
 
 
 /**
@@ -76,6 +76,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
 
     // default simulation parameters
     private static Logger log = Logger.getLogger(SimPathsModel.class);
+    private static EntityManagerFactory emfStartingPopulation = null;
 
     //@GUIparameter(description = "Country to be simulated")
     private Country country;
@@ -96,9 +97,21 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
 
     //@GUIparameter(description = "Fix year used in the regressions to one specified below")
     private boolean fixTimeTrend = true;
+    private boolean fixTimeTrendR1a = true;
+    private boolean fixTimeTrendR1b = true;
+
+    private boolean fixTimeTrendE1a = true;
+    private boolean fixTimeTrendE1b = true;
+    private boolean fixTimeTrendE2a = true;
 
     @GUIparameter(description = "Fix year used in the regressions to")
-    private Integer timeTrendStopsIn = 2022;
+    private Integer timeTrendStopsIn = 2023;
+    private Integer timeTrendStopsInR1a = 2023;
+    private Integer timeTrendStopsInR1b = 2023;
+
+    private Integer timeTrendStopsInE1a = 2023;
+    private Integer timeTrendStopsInE1b = 2023;
+    private Integer timeTrendStopsInE2a = 2023;
 
     private Integer timeTrendStopsInMonetaryProcesses = 2022; // For monetary processes, time trend always continues to 2017 (last observed year in the estimation sample) and then values are grown at the growth rate read from Excel
 
@@ -158,20 +171,24 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
     @GUIparameter(description = "tick to project mortality based on gender, age, and year specific probabilities")
     private boolean projectMortality = true;
 
-    private boolean alignPopulation = true; //TODO: routine fails to replicate results for minor variations between simulations
+    private boolean alignPopulation = true; // routine fails to replicate results for minor variations between simulations
 
-    //	@GUIparameter(description = "If checked, will align fertility")
-    private boolean alignFertility = true;
-    private boolean alignRetirement = false;
+    private boolean alignFertility = false; // Align births to fertility targets.
+    private boolean alignCohabitation = true; // Align couple/cohabitation shares.
+    private boolean alignInSchool = false; // Align student shares within the 16-29 age group.
+    private boolean alignEmployment = false; // Align employment prevalence to target employment shares.
 
-    private boolean alignDisability = false;
-    private boolean alignEducation = false; //Set to true to align level of education
+    private boolean alignRetirement = false; // Align retirement prevalence to target retired shares.
+    private boolean alignDisability = false; // Align disability prevalence to target disabled shares.
 
-    private boolean alignInSchool = false; //Set to true to align share of students among 16-29 age group
+    private boolean alignEducation = false; // Align educational attainment to target education shares.
+    
 
-    private boolean alignCohabitation = true; //Set to true to align share of couples (cohabiting individuals)
-
-    private boolean alignEmployment = true; //true; //Set to true to align employment share
+    private Double lastInSchoolAdjustment = null;
+    private Double lastPartnershipAdjustment = null;
+    private Double lastFertilityAdjustment = null;
+    private Double lastRetirementAdjustment = null;
+    private Double lastDisabilityAdjustment = null;
 
     public boolean addRegressionStochasticComponent = true; //If set to true, and regression contains ResStanDev variable, will evaluate the regression score including stochastic part, and omits the stochastic component otherwise.
 
@@ -218,8 +235,6 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
 
     private double scalingFactor;
 
-    private Map<Long, Double> initialHoursWorkedWeekly;
-
     private LabourMarket labourMarket;
 
     public int tmpPeopleAssigned = 0;
@@ -227,6 +242,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
     public int lowEd = 0;
     public int medEd = 0;
     public int highEd = 0;
+    public int naEd = 0;
     public int nothing = 0;
 
     Map<String, Double> policyNameIncomeMedianMap = new LinkedHashMap<>(); // Initialise a <String, Double> map to store names of policies and median incomes
@@ -239,12 +255,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
     EventGroup firstYearSched = new EventGroup();
     EventGroup yearlySchedule = new EventGroup();
 
-    @GUIparameter(description = "tick to project social care")
-    private boolean projectSocialCare = false;
-
     private boolean flagSuppressChildcareCosts = true;
-
-    private boolean flagSuppressSocialCareCosts = true;
 
     @GUIparameter(description = "tick to enable intertemporal optimised consumption and labour decisions")
     private boolean enableIntertemporalOptimisations = false;
@@ -359,9 +370,12 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
 
         // load model parameters
         Parameters.loadParameters(country, maxAge, enableIntertemporalOptimisations, projectFormalChildcare,
-                projectSocialCare, donorPoolAveraging, fixTimeTrend, flagDefaultToTimeSeriesAverages, saveImperfectTaxDBMatches,
-                timeTrendStopsIn, startYear, endYear, interestRateInnov, disposableIncomeFromLabourInnov, flagSuppressChildcareCosts,
-                flagSuppressSocialCareCosts, macroShockPopulation, macroShockProductivity, macroShockGreenPolicy, macroShocksOn);
+                donorPoolAveraging,
+                fixTimeTrend, fixTimeTrendR1a, fixTimeTrendR1b,  fixTimeTrendE1a, fixTimeTrendE1b, fixTimeTrendE2a,
+                flagDefaultToTimeSeriesAverages, saveImperfectTaxDBMatches,
+                timeTrendStopsIn, timeTrendStopsInR1a, timeTrendStopsInR1b, timeTrendStopsInE1a, timeTrendStopsInE1b, timeTrendStopsInE2a,
+                startYear, endYear, interestRateInnov, disposableIncomeFromLabourInnov, flagSuppressChildcareCosts,
+                macroShockPopulation, macroShockProductivity, macroShockGreenPolicy, macroShocksOn);
         if (enableIntertemporalOptimisations) {
 
             alignEmployment = false;
@@ -474,27 +488,35 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         //yearlySchedule.addEvent(this, Processes.CheckForEmptyHouseholds);
 
         // Check whether persons have reached retirement Age
-        yearlySchedule.addEvent(this, Processes.RetirementAlignment);
+        addEventToAllYears(Processes.RetirementAlignment);
         yearlySchedule.addCollectionEvent(persons, Person.Processes.ConsiderRetirement, false);
 
         // EDUCATION MODULE
         // Documentation: diagram "SimPathsEU education module - MR2"
+        // Quintiles of co-resident parents' lagged income (E1a regressors Parents_ypnb_Q*_L1); needed by the
+        // in-school alignment as well as by InSchool itself
+        yearlySchedule.addEvent(this, Processes.ParentsIncomeQuintiles);
+
+        // In School alignment — runs before InSchool decisions so the adjustment applies in the same year
+        yearlySchedule.addEvent(this, Processes.InSchoolAlignment);
+
         // Check In School - check whether still in education, and if leaving school, reset Education Level
         yearlySchedule.addCollectionEvent(persons, Person.Processes.InSchool);
-
-        // In School alignment
-        yearlySchedule.addEvent(this, Processes.InSchoolAlignment);
         yearlySchedule.addCollectionEvent(persons, Person.Processes.LeavingSchool);
 
         // Align the level of education if required
-        yearlySchedule.addEvent(this, Processes.EducationLevelAlignment);
+        addEventToAllYears(Processes.EducationLevelAlignment);
+
+        // Consider leaving home process
+        // Scheduled after Education module, because it applies to those who are not in continuous education
+        yearlySchedule.addCollectionEvent(persons, Person.Processes.ConsiderLeavingHome);
 
         // Homeownership status
         yearlySchedule.addCollectionEvent(benefitUnits, BenefitUnit.Processes.Homeownership);
 
         // HEALTH MODULE
         // Update Health - determine health (continuous) based on regression models: done here because health depends on education
-        yearlySchedule.addEvent(this, Processes.DisabilityAlignment);
+        addEventToAllYears(Processes.DisabilityAlignment);
         yearlySchedule.addCollectionEvent(persons, Person.Processes.Health);
 
         // HOUSEHOLD COMPOSITION MODULE: Decide whether to enter into a union (marry / cohabit), and then perform union matching (marriage) between a male and female
@@ -518,23 +540,23 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         yearlySchedule.addCollectionEvent(persons, Person.Processes.GiveBirth, false);        //Cannot use read-only collection schedule as newborn children cause concurrent modification exception.  Need to specify false in last argument of Collection event.
 
         // TIME USE MODULE
-        addEventToAllYears(Processes.LabourMarketAndIncomeUpdate);
+        yearlySchedule.addEvent(this, Processes.LabourMarketAndIncomeUpdate);
 
         // Assign benefit status to individuals in benefit units, from donors. Based on donor tax unit status.
-        addCollectionEventToAllYears(benefitUnits, BenefitUnit.Processes.ReceivesBenefits);
+        yearlySchedule.addCollectionEvent(benefitUnits, BenefitUnit.Processes.ReceivesBenefits);
 
         // CONSUMPTION AND SAVINGS MODULE
-        addCollectionEventToAllYears(persons, Person.Processes.ProjectEquivConsumption);
+        yearlySchedule.addCollectionEvent(persons, Person.Processes.ProjectEquivConsumption);
 
         // equivalised disposable income
-        addCollectionEventToAllYears(benefitUnits, BenefitUnit.Processes.CalculateChangeInEDI);
+        yearlySchedule.addCollectionEvent(benefitUnits, BenefitUnit.Processes.CalculateChangeInEDI);
 
         // mortality (migration) and population alignment at year's end
         addCollectionEventToAllYears(persons, Person.Processes.ConsiderMortality);
         addEventToAllYears(Processes.PopulationAlignment);
 
         // END OF YEAR PROCESSES
-        addEventToAllYears(Processes.CheckForImperfectTaxDBMatches);
+        yearlySchedule.addEvent(this, Processes.CheckForImperfectTaxDBMatches);
         addEventToAllYears(tests, Tests.Processes.RunTests); //Run tests
         addCollectionEventToAllYears(persons, Person.Processes.UpdateOutputVariables); // Update idPartner, dhhtp_c4
         addCollectionEventToAllYears(benefitUnits, BenefitUnit.Processes.UpdateOutputVariables); // Update dhhtp_c4
@@ -677,11 +699,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
             pw.println(line);
             line = "responsesToDisability: " + responsesToDisability;
             pw.println(line);
-            line = "projectSocialCare: " + projectSocialCare;
-            pw.println(line);
             line = "flagSuppressChildcareCosts: " + flagSuppressChildcareCosts;
-            pw.println(line);
-            line = "flagSuppressSocialCareCosts: " + flagSuppressSocialCareCosts;
             pw.println(line);
             line = "responsesToRegion: " + responsesToRegion;
             pw.println(line);
@@ -710,7 +728,6 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         EndYear,
         UnionMatching,
         LabourMarketAndIncomeUpdate,
-        SocialCareMarketClearing,
 
         //Alignment Processes
         FertilityAlignment,
@@ -723,6 +740,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         EducationLevelAlignment,
 
         //Other processes
+        ParentsIncomeQuintiles,
         Timer,
         UpdateParameters,
         RationalOptimisation,
@@ -801,9 +819,6 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                 }
                 if (commentsOn) log.info("Union matching complete.");
             }
-            case SocialCareMarketClearing -> {
-                socialCareMarketClearing();
-            }
             case FertilityAlignment -> {
 
                 if (alignFertility) {
@@ -811,11 +826,14 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                     if (commentsOn) log.info("Fertility alignment complete.");
                 }
             }
+            case ParentsIncomeQuintiles -> {
+
+                updateParentsIncomeQuintiles();
+            }
             case InSchoolAlignment -> {
 
                 if (alignInSchool) {
                     inSchoolAlignment();
-                    System.out.println("Proportion of students will be aligned.");
                 }
             }
             case EducationLevelAlignment -> {
@@ -1319,6 +1337,51 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
     }
 
 
+    /**
+     * Assigns each person the quintile of their co-resident parents' lagged non-benefit income.
+     * Replicates the ES estimation (01_reg_education_ES.do): quintiles are cut each year with Stata's xtile,
+     * unweighted, over everyone aged 15+ with a co-resident parent at t-1; persons without one get none.
+     */
+    private void updateParentsIncomeQuintiles() {
+
+        List<Person> sample = new ArrayList<>();
+        for (Person person : persons) {
+            person.setParentsYpnbQuintileL1(null);
+            if (person.getDag() >= 15 && person.getParentsYpnbL1() != null)
+                sample.add(person);
+        }
+        if (sample.isEmpty())
+            return;
+
+        double[] values = new double[sample.size()];
+        for (int ii = 0; ii < values.length; ii++)
+            values[ii] = sample.get(ii).getParentsYpnbL1();
+        Arrays.sort(values);
+
+        // Stata _pctile default definition: with P = n*p/100, the percentile is x(P) if P is not an
+        // integer (rounded up), and the mean of x(P) and x(P+1) if it is
+        int nn = values.length;
+        double[] cutoffs = new double[4];
+        for (int qq = 1; qq <= 4; qq++) {
+            long numerator = (long) nn * qq * 20;
+            int pos = (int) (numerator / 100);
+            if (numerator % 100 == 0)
+                cutoffs[qq-1] = (pos < nn) ? 0.5 * (values[pos-1] + values[pos]) : values[nn-1];
+            else
+                cutoffs[qq-1] = values[pos];
+        }
+
+        Ydses_c5[] quintiles = {Ydses_c5.Q1, Ydses_c5.Q2, Ydses_c5.Q3, Ydses_c5.Q4, Ydses_c5.Q5};
+        for (Person person : sample) {
+            double value = person.getParentsYpnbL1();
+            int group = 0;
+            while (group < 4 && value > cutoffs[group])
+                group++;    // xtile: value <= k-th cut-off falls in group k
+            person.setParentsYpnbQuintileL1(quintiles[group]);
+        }
+    }
+
+
     /**********************************************************
      *
      * METHOD TO CLONE EXISTING HOUSEHOLD AND ADD TO SIMULATED POPULATION
@@ -1440,56 +1503,51 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         }
     }
 
-    private void socialCareMarketClearing() {
-
-        // adjust provision so that aggregate provision broadly matches aggregate receipt
-        double careProvisionAdjustment = Parameters.getTimeSeriesValue(getYear(),TimeSeriesVariable.CareProvisionAdjustment);
-        SocialCareAlignment socialCareAlignment = new SocialCareAlignment(persons, careProvisionAdjustment);
-        double[] startVal = new double[] {careProvisionAdjustment};
-        double[] lowerBound = new double[] {careProvisionAdjustment - 1.5};
-        double[] upperBound = new double[] {careProvisionAdjustment + 1.5};
-        RootSearch search = new RootSearch(lowerBound, upperBound, startVal, socialCareAlignment, 1.0E-2, 0.001);
-        search.evaluate();
-        if (search.isTargetAltered()) {
-            Parameters.putTimeSeriesValue(getYear(), search.getTarget()[0], TimeSeriesVariable.CareProvisionAdjustment);
-        }
-    }
-
     public void retirementAlignment() {
         RetirementAlignment retirementAlignment = new RetirementAlignment(persons);
-        double retirementAdjustment = Parameters.getTimeSeriesValue(getYear(), TimeSeriesVariable.RetirementAdjustment);
-        RootSearch search = getRootSearch(retirementAdjustment, retirementAlignment, 1.0E-2, 1.0E-2, 10); // epsOrdinates and epsFunction determine the stopping condition for the search. For retirementAlignment error term is the difference between target and observed share of partnered individuals.
+        if (getYear() > Parameters.RETIREMENT_ALIGNMENT_END_YEAR) {
+            double frozen = getFrozenRetirementAdjustmentAtEnd();
+            // alignment period ended; hold at frozen value
+            return;
+        }
+        // Warm-start from the previously solved year to stabilise/accelerate yearly root search.
+        double retirementAdjustment;
+        if (getYear() > startYear) {
+            retirementAdjustment = Parameters.getTimeSeriesValue(getYear() - 1, TimeSeriesVariable.RetirementAdjustment);
+        } else {
+            retirementAdjustment = Parameters.getTimeSeriesValue(getYear(), TimeSeriesVariable.RetirementAdjustment);
+        }
+        RootSearch search = getRootSearch(retirementAdjustment, retirementAlignment, 1.0E-6, 1.0E-6, Parameters.RETIREMENT_ALIGNMENT_BOUND);
 
         // update and exit
-        if (search.isTargetAltered()) {
-            Parameters.putTimeSeriesValue(getYear(), search.getTarget()[0], TimeSeriesVariable.RetirementAdjustment); // If adjustment is altered from the initial value, update the map
-            System.out.println("Retirement adjustment value was " + search.getTarget()[0]);
+        Parameters.putTimeSeriesValue(getYear(), search.getTarget()[0], TimeSeriesVariable.RetirementAdjustment);
+        if (Parameters.LOG_ALIGNMENT_DETAILS) {
+            System.out.printf("[Alignment] Retirement               | year=%d | adjustment=%.6f%n", getYear(), search.getTarget()[0]);
         }
     }
 
     public void disabilityAlignment() {
         DisabilityAlignment disabilityAlignment = new DisabilityAlignment(persons);
-        double disabilityAdjustment = Parameters.getTimeSeriesValue(getYear(), TimeSeriesVariable.DisabilityAdjustment);
-
-        System.out.println("Disability alignment has started");
-        // start timer
-        Instant beforeDsbltRS2 = Instant.now();
-
-        RootSearch search = getRootSearch(disabilityAdjustment, disabilityAlignment, 5.0E-3, 5.0E-3, 2);
-
-        // update and exit
-        if (search.isTargetAltered()) {
-            Parameters.putTimeSeriesValue(getYear(), search.getTarget()[0], TimeSeriesVariable.DisabilityAdjustment); // If adjustment is altered from the initial value, update the map
-            System.out.println("Disability adjustment value was " + search.getTarget()[0]);
+        if (getYear() > Parameters.DISABILITY_ALIGNMENT_END_YEAR) {
+            double frozen = getFrozenDisabilityAdjustmentAtEnd();
+            // alignment period ended; hold at frozen value
+            return;
+        }
+        // Warm-start from the previously solved year to stabilise/accelerate yearly root search.
+        double disabilityAdjustment;
+        if (getYear() > startYear) {
+            disabilityAdjustment = Parameters.getTimeSeriesValue(getYear() - 1, TimeSeriesVariable.DisabilityAdjustment);
+        } else {
+            disabilityAdjustment = Parameters.getTimeSeriesValue(getYear(), TimeSeriesVariable.DisabilityAdjustment);
         }
 
-        // stop timer
-        Instant afterDsbltRS2 = Instant.now();
+        RootSearch search = getRootSearch(disabilityAdjustment, disabilityAlignment, 1.0E-6, 1.0E-6, Parameters.DISABILITY_ALIGNMENT_BOUND);
 
-        // display time to complete
-        Duration durationTotalRS2 = Duration.between(beforeDsbltRS2, afterDsbltRS2);
-        System.out.println("Disability alignment completed in " +
-                String.format("%.3f", (double)durationTotalRS2.toSeconds()/60.0) + " minutes");
+        // update and exit
+        Parameters.putTimeSeriesValue(getYear(), search.getTarget()[0], TimeSeriesVariable.DisabilityAdjustment);
+        if (Parameters.LOG_ALIGNMENT_DETAILS) {
+            System.out.printf("[Alignment] Disability               | year=%d | adjustment=%.6f%n", getYear(), search.getTarget()[0]);
+        }
     }
 
     public void activityAlignmentMacroShock() {
@@ -1517,12 +1575,11 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                 persons, benefitUnits, coefficientMaps, regressorsToModify, initialUtilityAdjustment
         );
 
-        RootSearch search = getRootSearch(initialUtilityAdjustment, activityAlignment, 5.0E-1, 5.0E-3, Parameters.MAX_EMPLOYMENT_ALIGNMENT);
+        RootSearch search = getRootSearch(initialUtilityAdjustment, activityAlignment, 5.0E-1, 5.0E-3, Parameters.EMPLOYMENT_ALIGNMENT_BOUND);
 
         if (search.isTargetAltered()) {
             double newAdjustment = search.getTarget()[0];
             Parameters.putTimeSeriesValue(getYear(), newAdjustment, TimeSeriesVariable.UtilityAdjustment);
-            System.out.println("Utility adjustment for all types was " + newAdjustment);
         }
     }
 
@@ -1536,41 +1593,31 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
             OccupancyExtended occupancy, // benefit unit occupancy extended to allow all types used in labour supply module
             String occupancyLabel // displays the type of benefit unit to which adjustment is applied
     ) {
-        //double utilityAdjustment = Parameters.getValuePreferPrev(getYear(), adjustmentMap);
-        double utilityAdjustment = Parameters.getTimeSeriesValue(getYear(), adjustmentMap);
-        System.out.println("Utility adjustment for " + occupancyLabel + " has started");
+        // Use the initial value from alignment_adjustment_factors.xlsx as the cold start each year,
+        // rather than the previous year's alignment result, to prevent whiplash oscillation
+        // where overshooting in one year causes overcorrection in the next.
+        double utilityAdjustment = Parameters.getInitialUtilityAdjustment(getYear(), adjustmentMap);
 
-        // start timer
-        Instant beforeRS2 = Instant.now();
-
-
-        ActivityAlignmentV2 activityAlignment = new ActivityAlignmentV2(benefitUnits, coefficientMap, regressionCoefficientName, occupancy);
-        RootSearch2 search = getRootSearch2(utilityAdjustment, activityAlignment, 0.5, 5.0E-3, Parameters.MAX_EMPLOYMENT_ALIGNMENT);
-        // epsFunction tolerance is set to 0.5% seem to be sufficient
-
-        System.out.println("=== Root Search Summary ===");
-        System.out.println("Root found at: " + search.getTarget()[0]);
-        System.out.println("Target altered: " + search.isTargetAltered());
-        System.out.println("Iterations: " + search.getIterationCount());
-
-        for (RootSearch2.IterationInfo it : search.getIterationHistory()) {
-            System.out.printf("Iter %3d | x=% .6f | f(x)=% .3e | step=% .3e | funcTol=%-5s | ordTol=%-5s%n",
-                    it.getIteration(), it.getX(), it.getFx(), it.getStep(),
-                    it.isFuncTolMet(), it.isOrdTolMet());
+        if (Parameters.LOG_ALIGNMENT_DETAILS) {
+            System.out.printf("[Alignment] Activity %-20s | year=%d | cold-start=%.4f%n",
+                    occupancyLabel, getYear(), utilityAdjustment);
         }
 
-        // stop timer
-        Instant afterRS2 = Instant.now();
+        ActivityAlignmentV2 activityAlignment = new ActivityAlignmentV2(benefitUnits, coefficientMap, regressionCoefficientName, occupancy);
+        RootSearch2 search = getRootSearch2(utilityAdjustment, activityAlignment, 0.5, 5.0E-3, Parameters.EMPLOYMENT_ALIGNMENT_BOUND);
 
-        // display time to complete
-        Duration durationTotalRS2 = Duration.between(beforeRS2, afterRS2);
-        System.out.println("Utility adjustment for " + occupancyLabel + " completed in " +
-                String.format("%.3f", (double)durationTotalRS2.toSeconds()/60.0) + " minutes");
-
+        if (Parameters.LOG_ALIGNMENT_DETAILS) {
+            System.out.printf("[Alignment] Activity %-20s | result=%.6f | altered=%s | iters=%d%n",
+                    occupancyLabel, search.getTarget()[0], search.isTargetAltered(), search.getIterationCount());
+            for (RootSearch2.IterationInfo it : search.getIterationHistory()) {
+                System.out.printf("  iter %2d | x=% .6f | f(x)=% .3e | step=% .3e | funcTol=%-5s | ordTol=%-5s%n",
+                        it.getIteration(), it.getX(), it.getFx(), it.getStep(),
+                        it.isFuncTolMet(), it.isOrdTolMet());
+            }
+        }
 
         if (search.isTargetAltered()) {
             Parameters.putTimeSeriesValue(getYear(), search.getTarget()[0], adjustmentMap);
-            System.out.println("Utility adjustment for " + occupancyLabel + " was " + search.getTarget()[0]);
         }
 
     }
@@ -1651,21 +1698,32 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         // Instantiate alignment object
         PartnershipAlignment partnershipAlignment = new PartnershipAlignment(persons);
 
-        // define limits of search algorithm
-        double partnershipAdjustment = Parameters.getTimeSeriesValue(getYear(), TimeSeriesVariable.PartnershipAdjustment);
-        double minVal = Math.max(-4.0, - partnershipAdjustment - 4.0);
-        double maxVal = Math.min(4.0, - partnershipAdjustment + 4.0);
+        if (getYear() > Parameters.PARTNERSHIP_ALIGNMENT_END_YEAR) {
+            double frozen = getFrozenPartnershipAdjustmentAtEnd();
+            // alignment period ended; hold at frozen value
+            return;
+        }
+
+        // Warm-start from the previously solved year to stabilise/accelerate yearly root search.
+        double partnershipAdjustment;
+        if (getYear() > startYear) {
+            partnershipAdjustment = Parameters.getTimeSeriesValue(getYear() - 1, TimeSeriesVariable.PartnershipAdjustment);
+        } else {
+            partnershipAdjustment = Parameters.getTimeSeriesValue(getYear(), TimeSeriesVariable.PartnershipAdjustment);
+        }
+        double minVal = Math.max(-Parameters.PARTNERSHIP_ALIGNMENT_BOUND, - partnershipAdjustment - Parameters.PARTNERSHIP_ALIGNMENT_BOUND);
+        double maxVal = Math.min(Parameters.PARTNERSHIP_ALIGNMENT_BOUND, - partnershipAdjustment + Parameters.PARTNERSHIP_ALIGNMENT_BOUND);
 
         // run search
-        RootSearch search = getRootSearch(0.0, minVal, maxVal, partnershipAlignment, 5.0E-3, 5.0E-3); // epsOrdinates and epsFunction determine the stopping condition for the search. For partnershipAlignment error term is the difference between target and observed share of partnered individuals.
+        RootSearch search = getRootSearch(partnershipAdjustment, minVal, maxVal, partnershipAlignment, 5.0E-3, 5.0E-3); // epsOrdinates and epsFunction determine the stopping condition for the search. For partnershipAlignment error term is the difference between target and observed share of partnered individuals.
 
         // check result
         //double val = partnershipAlignment.evaluate(search.getTarget());
 
         // update and exit
-        if (search.isTargetAltered()) {
-            Parameters.setAlignmentValue(getYear(), search.getTarget()[0], AlignmentVariable.PartnershipAlignment); // If adjustment is altered from the initial value, update the map
-            System.out.println("Partnership adjustment value was " + search.getTarget()[0]);
+        Parameters.putTimeSeriesValue(getYear(), search.getTarget()[0], TimeSeriesVariable.PartnershipAdjustment);
+        if (Parameters.LOG_ALIGNMENT_DETAILS) {
+            System.out.printf("[Alignment] Partnership               | year=%d | adjustment=%.6f%n", getYear(), search.getTarget()[0]);
         }
     }
 
@@ -1759,14 +1817,166 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
     private void inSchoolAlignment() {
 
         InSchoolAlignment inSchoolAlignment = new InSchoolAlignment(persons);
-        double inSchoolAdjustment = Parameters.getTimeSeriesValue(getYear(), TimeSeriesVariable.InSchoolAdjustment);
-        RootSearch search = getRootSearch(inSchoolAdjustment, inSchoolAlignment, 1.0E-2, 1.0E-2, 4); // epsOrdinates and epsFunction determine the stopping condition for the search. For inSchoolAlignment error term is the difference between target and observed share of partnered individuals.
+        if (getYear() > Parameters.IN_SCHOOL_ALIGNMENT_END_YEAR) {
+            double frozen = getFrozenInSchoolAdjustmentAtEnd();
+            // alignment period ended; hold at frozen value
+            return;
+        }
+        // Warm-start from the previously solved year to stabilise/accelerate yearly root search.
+        double inSchoolAdjustment;
+        if (getYear() > startYear) {
+            inSchoolAdjustment = Parameters.getTimeSeriesValue(getYear() - 1, TimeSeriesVariable.InSchoolAdjustment);
+        } else {
+            inSchoolAdjustment = Parameters.getTimeSeriesValue(getYear(), TimeSeriesVariable.InSchoolAdjustment);
+        }
+        RootSearch search = getRootSearch(inSchoolAdjustment, inSchoolAlignment, 1.0E-6, 1.0E-6, Parameters.IN_SCHOOL_ALIGNMENT_BOUND);
 
         // update and exit
-        if (search.isTargetAltered()) {
-            Parameters.putTimeSeriesValue(getYear(), search.getTarget()[0], TimeSeriesVariable.InSchoolAdjustment); // If adjustment is altered from the initial value, update the map
-            System.out.println("InSchool adjustment value was " + search.getTarget()[0]);
+        Parameters.putTimeSeriesValue(getYear(), search.getTarget()[0], TimeSeriesVariable.InSchoolAdjustment);
+        if (Parameters.LOG_ALIGNMENT_DETAILS) {
+            System.out.printf("[Alignment] InSchool                  | year=%d | adjustment=%.6f%n", getYear(), search.getTarget()[0]);
         }
+    }
+
+
+    public double getInSchoolAdjustment() {
+        return getInSchoolAdjustment(year);
+    }
+
+    public double getInSchoolAdjustment(int year) {
+        if (!alignInSchool) {
+            return 0.0;
+        }
+        if (year > Parameters.IN_SCHOOL_ALIGNMENT_END_YEAR) {
+            return getFrozenInSchoolAdjustmentAtEnd();
+        }
+        if (year < startYear) {
+            return getFrozenInSchoolAdjustmentAtStart();
+        }
+        return Parameters.getTimeSeriesValue(year, TimeSeriesVariable.InSchoolAdjustment);
+    }
+
+    private double getFrozenInSchoolAdjustmentAtStart() {
+        return Parameters.getTimeSeriesValue(startYear, TimeSeriesVariable.InSchoolAdjustment);
+    }
+
+    private double getFrozenInSchoolAdjustmentAtEnd() {
+        if (lastInSchoolAdjustment == null) {
+            lastInSchoolAdjustment = Parameters.getTimeSeriesValue(Parameters.IN_SCHOOL_ALIGNMENT_END_YEAR, TimeSeriesVariable.InSchoolAdjustment);
+        }
+        return lastInSchoolAdjustment;
+    }
+
+    public double getPartnershipAdjustment() {
+        return getPartnershipAdjustment(year);
+    }
+
+    public double getPartnershipAdjustment(int year) {
+        if (!alignCohabitation) {
+            return 0.0;
+        }
+        if (year > Parameters.PARTNERSHIP_ALIGNMENT_END_YEAR) {
+            return getFrozenPartnershipAdjustmentAtEnd();
+        }
+        if (year < startYear) {
+            return getFrozenPartnershipAdjustmentAtStart();
+        }
+        return Parameters.getTimeSeriesValue(year, TimeSeriesVariable.PartnershipAdjustment);
+    }
+
+    private double getFrozenPartnershipAdjustmentAtStart() {
+        return Parameters.getTimeSeriesValue(startYear, TimeSeriesVariable.PartnershipAdjustment);
+    }
+
+    private double getFrozenPartnershipAdjustmentAtEnd() {
+        if (lastPartnershipAdjustment == null) {
+            lastPartnershipAdjustment = Parameters.getTimeSeriesValue(Parameters.PARTNERSHIP_ALIGNMENT_END_YEAR, TimeSeriesVariable.PartnershipAdjustment);
+        }
+        return lastPartnershipAdjustment;
+    }
+
+    public double getFertilityAdjustment() {
+        return getFertilityAdjustment(year);
+    }
+
+    public double getFertilityAdjustment(int year) {
+        if (!alignFertility) {
+            return 0.0;
+        }
+        if (year > Parameters.FERTILITY_ALIGNMENT_END_YEAR) {
+            return getFrozenFertilityAdjustmentAtEnd();
+        }
+        if (year < startYear) {
+            return getFrozenFertilityAdjustmentAtStart();
+        }
+        return Parameters.getTimeSeriesValue(year, TimeSeriesVariable.FertilityAdjustment);
+    }
+
+    private double getFrozenFertilityAdjustmentAtStart() {
+        return Parameters.getTimeSeriesValue(startYear, TimeSeriesVariable.FertilityAdjustment);
+    }
+
+    private double getFrozenFertilityAdjustmentAtEnd() {
+        if (lastFertilityAdjustment == null) {
+            lastFertilityAdjustment = Parameters.getTimeSeriesValue(Parameters.FERTILITY_ALIGNMENT_END_YEAR, TimeSeriesVariable.FertilityAdjustment);
+        }
+        return lastFertilityAdjustment;
+    }
+
+    public double getRetirementAdjustment() {
+        return getRetirementAdjustment(year);
+    }
+
+    public double getRetirementAdjustment(int year) {
+        if (!alignRetirement) {
+            return 0.0;
+        }
+        if (year > Parameters.RETIREMENT_ALIGNMENT_END_YEAR) {
+            return getFrozenRetirementAdjustmentAtEnd();
+        }
+        if (year < startYear) {
+            return getFrozenRetirementAdjustmentAtStart();
+        }
+        return Parameters.getTimeSeriesValue(year, TimeSeriesVariable.RetirementAdjustment);
+    }
+
+    private double getFrozenRetirementAdjustmentAtStart() {
+        return Parameters.getTimeSeriesValue(startYear, TimeSeriesVariable.RetirementAdjustment);
+    }
+
+    private double getFrozenRetirementAdjustmentAtEnd() {
+        if (lastRetirementAdjustment == null) {
+            lastRetirementAdjustment = Parameters.getTimeSeriesValue(Parameters.RETIREMENT_ALIGNMENT_END_YEAR, TimeSeriesVariable.RetirementAdjustment);
+        }
+        return lastRetirementAdjustment;
+    }
+
+    public double getDisabilityAdjustment() {
+        return getDisabilityAdjustment(year);
+    }
+
+    public double getDisabilityAdjustment(int year) {
+        if (!alignDisability) {
+            return 0.0;
+        }
+        if (year > Parameters.DISABILITY_ALIGNMENT_END_YEAR) {
+            return getFrozenDisabilityAdjustmentAtEnd();
+        }
+        if (year < startYear) {
+            return getFrozenDisabilityAdjustmentAtStart();
+        }
+        return Parameters.getTimeSeriesValue(year, TimeSeriesVariable.DisabilityAdjustment);
+    }
+
+    private double getFrozenDisabilityAdjustmentAtStart() {
+        return Parameters.getTimeSeriesValue(startYear, TimeSeriesVariable.DisabilityAdjustment);
+    }
+
+    private double getFrozenDisabilityAdjustmentAtEnd() {
+        if (lastDisabilityAdjustment == null) {
+            lastDisabilityAdjustment = Parameters.getTimeSeriesValue(Parameters.DISABILITY_ALIGNMENT_END_YEAR, TimeSeriesVariable.DisabilityAdjustment);
+        }
+        return lastDisabilityAdjustment;
     }
 
 
@@ -1797,10 +2007,10 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
             for(Person person : persons) {
                 if( person.getDgn().equals(gender) && person.getDag() >= 16 && person.getDag() <= 45) {        //Alignment projections are based only on persons younger than 66 years old
                     if (person.isToLeaveSchool()) { //Align only people leaving school?
-                        if(person.getDeh_c3() != null) {
-                            if (person.getDeh_c3().equals(Education.Low)) {
+                        if(person.getDeh_c4() != null) {
+                            if (person.getDeh_c4().equals(Education.Low)) {
                                 numPersonsOfThisGenderWithLowEduPreAlignment++;
-                            } else if (person.getDeh_c3().equals(Education.High)) {
+                            } else if (person.getDeh_c4().equals(Education.High)) {
                                 numPersonsOfThisGenderWithHighEduPreAlignment++;
                             }
                             numPersonsOfThisGender++;
@@ -1831,7 +2041,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
             int countHigh = 0, countLow = 0;
             for(Person schoolLeaver : personsLeavingEducation.get(gender)) {        //This tries to maintain the naturally generated number of school-leavers with medium education, so that an increase in the number of school-leavers with high education is achieved through a reduction in the number of school-leavers with low education.  However, in the event that the number of school-leavers with either high or medium education are more than the total number of school leavers (in this year), we end up having no school leavers with low education and we have to reduce the number of school leavers with medium education
 
-                if (schoolLeaver.getDeh_c3().equals(Education.Medium)) {
+                if (schoolLeaver.getDeh_c4().equals(Education.Medium)) {
                     if(numPersonsOfThisGenderWithHighEduPreAlignment + countHigh < numPersonsWithHighEduAlignmentTarget) {                //Only align if number of people in population with high education is too low.
                         schoolLeaver.setEducation(Education.High);            //As the personsLeavingEducation list is sorted by descending age, the oldest people leaving education are assigned to have high education levels
                         countHigh++;
@@ -1839,12 +2049,12 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                         schoolLeaver.setEducation(Education.Low);        //When the number of high education level people have been assigned, the next oldest people are assigned to have medium education levels
                         countLow++;
                     }
-                } else if (schoolLeaver.getDeh_c3().equals(Education.High)) {
+                } else if (schoolLeaver.getDeh_c4().equals(Education.High)) {
                     if (numPersonsOfThisGenderWithHighEduPreAlignment + countHigh > numPersonsWithHighEduAlignmentTarget) { //If too many people with high education
                         schoolLeaver.setEducation(Education.Medium);
                         countHigh--;
                     }
-                } else if (schoolLeaver.getDeh_c3().equals(Education.Low)) {
+                } else if (schoolLeaver.getDeh_c4().equals(Education.Low)) {
                     if (numPersonsOfThisGenderWithLowEduPreAlignment + countLow > numPersonsWithLowEduAlignmentTarget) {
                         schoolLeaver.setEducation(Education.Medium);
                         countLow--;
@@ -1861,10 +2071,10 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                 for(Person person : persons) {
                     if( person.getDgn().equals(gender) && (person.getDag() <= 65) ) {        //Alignment projections are based only on persons younger than 66 years old
                         if (person.isToLeaveSchool()) {
-                            if(person.getDeh_c3() != null) {
-                                if(person.getDeh_c3().equals(Education.High)) {
+                            if(person.getDeh_c4() != null) {
+                                if(person.getDeh_c4().equals(Education.High)) {
                                     countHighEdPeople++;
-                                } else if(person.getDeh_c3().equals(Education.Medium)) {
+                                } else if(person.getDeh_c4().equals(Education.Medium)) {
                                     countMediumEdPeople++;
                                 }
                             }
@@ -1890,31 +2100,30 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         // Instantiate alignment object
         FertilityAlignment fertilityAlignment = new FertilityAlignment(persons);
 
-        // define limits of search algorithm
-        double fertilityAdjustment = Parameters.getTimeSeriesValue(getYear(), TimeSeriesVariable.FertilityAdjustment);
-        double minVal = Math.max(-FERTILITY_ALIGNMENT_BOUND, - fertilityAdjustment - FERTILITY_ALIGNMENT_BOUND);
-        double maxVal = Math.min(FERTILITY_ALIGNMENT_BOUND, - fertilityAdjustment + FERTILITY_ALIGNMENT_BOUND);
-
-        System.out.println("Fertility alignment has started");
-        // start timer
-        Instant beforeFrtltRS2 = Instant.now();
-
-        // run search
-        RootSearch search = getRootSearch(0.0, minVal, maxVal, fertilityAlignment, 5.0E-3, 5.0E-3); // epsOrdinates and epsFunction determine the stopping condition for the search. For partnershipAlignment error term is the difference between target and observed share of partnered individuals.
-
-        // update and exit
-        if (search.isTargetAltered()) {
-            Parameters.setAlignmentValue(getYear(), search.getTarget()[0], AlignmentVariable.FertilityAlignment); // If adjustment is altered from the initial value, update the map
-            System.out.println("Fertility adjustment value was " + search.getTarget()[0]);
+        if (getYear() > Parameters.FERTILITY_ALIGNMENT_END_YEAR) {
+            double frozen = getFrozenFertilityAdjustmentAtEnd();
+            // alignment period ended; hold at frozen value
+            return;
         }
 
-        // stop timer
-        Instant afterFrtltRS2 = Instant.now();
+        // Warm-start from the previously solved year to stabilise/accelerate yearly root search.
+        double fertilityAdjustment;
+        if (getYear() > startYear) {
+            fertilityAdjustment = Parameters.getTimeSeriesValue(getYear() - 1, TimeSeriesVariable.FertilityAdjustment);
+        } else {
+            fertilityAdjustment = Parameters.getTimeSeriesValue(getYear(), TimeSeriesVariable.FertilityAdjustment);
+        }
+        double minVal = Math.max(-Parameters.FERTILITY_ALIGNMENT_BOUND, - fertilityAdjustment - Parameters.FERTILITY_ALIGNMENT_BOUND);
+        double maxVal = Math.min(Parameters.FERTILITY_ALIGNMENT_BOUND, - fertilityAdjustment + Parameters.FERTILITY_ALIGNMENT_BOUND);
 
-        // display time to complete
-        Duration durationTotalRS2 = Duration.between(beforeFrtltRS2, afterFrtltRS2);
-        System.out.println("Fertiility alignment completed in " +
-                String.format("%.3f", (double)durationTotalRS2.toSeconds()/60.0) + " minutes");
+        // run search
+        RootSearch search = getRootSearch(fertilityAdjustment, minVal, maxVal, fertilityAlignment, 1.0E-6, 1.0E-6);
+
+        // update and exit
+        Parameters.putTimeSeriesValue(getYear(), search.getTarget()[0], TimeSeriesVariable.FertilityAdjustment);
+        if (Parameters.LOG_ALIGNMENT_DETAILS) {
+            System.out.printf("[Alignment] Fertility                 | year=%d | adjustment=%.6f%n", getYear(), search.getTarget()[0]);
+        }
     }
 
 
@@ -1947,7 +2156,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
             if (isFirstRun) {
 
                 Class.forName("org.h2.Driver");
-                conn = DriverManager.getConnection("jdbc:h2:file:./input" + File.separator + "input;TRACE_LEVEL_FILE=0;TRACE_LEVEL_SYSTEM_OUT=0;AUTO_SERVER=TRUE", "sa", "");
+                conn = DriverManager.getConnection(TaxDonorDataParser.getInputDatabaseJdbcUrl(), "sa", "");
                 TaxDonorDataParser.updateDefaultDonorTables(conn, country);
             }
         }
@@ -1998,15 +2207,6 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                     stat.execute("CREATE TABLE " + tableName + " AS SELECT * FROM " + tableName + "_" + country + "_" + year);
                     System.out.println("Completed reading from " + tableName + "_" + country + "_" + year);
                 }
-            }
-
-            initialHoursWorkedWeekly = new LinkedHashMap<Long, Double>();
-
-            //Add hours from initial population which is now different than donor
-            String query2 = "SELECT ID, " + Parameters.HOURS_WORKED_WEEKLY + " FROM PERSON";
-            ResultSet rs2 = stat.executeQuery(query2);
-            while (rs2.next()) {
-                initialHoursWorkedWeekly.put(rs2.getLong("ID"), rs2.getDouble(Parameters.HOURS_WORKED_WEEKLY));
             }
 
             //If start year is higher than the last available population, calculate the uprating factor and apply it to the monetary values in the database:
@@ -2221,7 +2421,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
 
             // save to processed repository
             System.out.println("Saving compiled input data for future reference");
-    //        persistProcessed();
+            persistProcessed();
 
             stopwatch.stop();
             System.out.println("Time elapsed " + stopwatch.getTime()/1000 + " seconds");
@@ -2229,7 +2429,6 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
 
         // finalise
         System.out.println("Number of simulated individuals (persons.size()) is " + persons.size() + " living in " + benefitUnits.size() + " simulated benefitUnits.");
-        initialHoursWorkedWeekly = null;
         System.gc();
     }
 
@@ -2603,10 +2802,6 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
 //		this.ageNonWorkPeopleRetire = ageNonWorkPeopleRetire;
 //	}
 
-    public Map<Long, Double> getInitialHoursWorkedWeekly() {
-        return initialHoursWorkedWeekly;
-    }
-
 //	public boolean isRefreshInputDatabase() {
 //		return refreshInputDatabase;
 //	}
@@ -2673,12 +2868,20 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         saveImperfectTaxDBMatches = flag;
     }
 
+    public boolean isAlignPopulation() {
+        return alignPopulation;
+    }
+
     public void setAlignPopulation(boolean flag) {
         alignPopulation = flag;
     }
 
     public void setAlignCohabitation(boolean flag) {
         alignCohabitation = flag;
+    }
+
+    public boolean isAlignEducation() {
+        return alignEducation;
     }
 
     public void setAlignEducation(boolean flag) {
@@ -2695,11 +2898,6 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
 
     public void setYear(int year) {
         this.year = year;
-    }
-
-    public boolean getProjectSocialCare() { return projectSocialCare; }
-    public void setProjectSocialCare(boolean projectSocialCare) {
-        this.projectSocialCare = projectSocialCare;
     }
 
     public boolean getEnableIntertemporalOptimisations() {
@@ -2871,7 +3069,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
 
                 // access database and obtain donor pool
                 Map propertyMap = new HashMap();
-                propertyMap.put("hibernate.connection.url", "jdbc:h2:file:" + DatabaseUtils.databaseInputUrl);
+                propertyMap.put("hibernate.connection.url", "jdbc:h2:file:" + TaxDonorDataParser.getInputDatabasePath());
                 EntityManager em = Persistence.createEntityManagerFactory("tax-database", propertyMap).createEntityManager();
                 txn = em.getTransaction();
                 txn.begin();
@@ -2964,7 +3162,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                 if (txn != null && txn.isActive()) {
                     txn.rollback();
                 }
-                e.printStackTrace();
+                throw new RuntimeException("Problem populating donor database indices from " + TaxDonorDataParser.getInputDatabasePath(), e);
             }
         }
     }
@@ -3000,10 +3198,12 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         try {
 
             // query database
-            EntityManager em = Persistence.createEntityManagerFactory("starting-population").createEntityManager();
+            if (emfStartingPopulation == null)
+                emfStartingPopulation = Persistence.createEntityManagerFactory("starting-population");
+            EntityManager em = emfStartingPopulation.createEntityManager();
             txn = em.getTransaction();
             txn.begin();
-            String query = "SELECT processed FROM Processed processed LEFT JOIN FETCH processed.households households LEFT JOIN FETCH households.benefitUnits benefitUnits LEFT JOIN FETCH benefitUnits.members members WHERE processed.startYear = " + startYear + " AND processed.popSize = " + popSize + " AND processed.country = " + country + " AND processed.noTargets = " + ignoreTargetsAtPopulationLoad + " ORDER BY households.key.id";
+            String query = "SELECT processed FROM Processed processed WHERE processed.startYear = " + startYear + " AND processed.popSize = " + popSize + " AND processed.country = " + country + " AND processed.noTargets = " + ignoreTargetsAtPopulationLoad;
 
             List<Processed> processedList = em.createQuery(query).getResultList();
             if (!processedList.isEmpty()) {
@@ -3011,6 +3211,13 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                 if (processedList.size()>1)
                     throw new RuntimeException("more than one relevant dataset returned from database");
                 processed = processedList.get(0);
+                // Force-initialize all collections within the session (triggers SUBSELECT fetches:
+                // one query per collection level, no Cartesian product)
+                for (Household hh : processed.getHouseholds()) {
+                    for (BenefitUnit bu : hh.getBenefitUnits()) {
+                        bu.getMembers().size();
+                    }
+                }
                 processed.resetDependents();
             }
 
@@ -3039,8 +3246,15 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
             EntityManager em = Persistence.createEntityManagerFactory("starting-population", propertyMap).createEntityManager();
             txn = em.getTransaction();
             txn.begin();
-            String query = "SELECT households FROM Household households LEFT JOIN FETCH households.benefitUnits benefitUnits LEFT JOIN FETCH benefitUnits.members members";
+            String query = "SELECT households FROM Household households";
             households = em.createQuery(query).getResultList();
+            // Force-initialize all collections within the session (triggers SUBSELECT fetches:
+            // one query per collection level, no Cartesian product)
+            for (Household hh : households) {
+                for (BenefitUnit bu : hh.getBenefitUnits()) {
+                    bu.getMembers().size();
+                }
+            }
 
             // close database connection
             em.close();
@@ -3064,7 +3278,9 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         EntityTransaction txn = null;
         try {
 
-            EntityManager em = Persistence.createEntityManagerFactory("starting-population").createEntityManager();
+            if (emfStartingPopulation == null)
+                emfStartingPopulation = Persistence.createEntityManagerFactory("starting-population");
+            EntityManager em = emfStartingPopulation.createEntityManager();
             txn = em.getTransaction();
             txn.begin();
 

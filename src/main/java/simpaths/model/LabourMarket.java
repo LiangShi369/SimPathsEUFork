@@ -3,7 +3,6 @@ package simpaths.model;
 import microsim.engine.SimulationEngine;
 import simpaths.data.Parameters;
 import simpaths.model.enums.Education;
-import simpaths.model.enums.MacroScenarioPopulation;
 import simpaths.model.enums.Region;
 
 import java.util.*;
@@ -68,8 +67,16 @@ public class LabourMarket {
                 }
             }
 
-            if (model.isAlignEmployment() && model.getYear() <= EMPLOYMENT_ALIGNMENT_END_YEAR & !model.isMacroShocksOn()) {
+            // Employment alignment phase (pre-alignment setup + subgroup-specific calibration)
+            if (model.isAlignEmployment() && model.getYear() <= EMPLOYMENT_ALIGNMENT_END_YEAR && !model.isMacroShocksOn()) {
+
+                // Precompute labour choices, utility scores (without fixed costs), and atRisk flags
+                benefitUnits.parallelStream().forEach(BenefitUnit::computeAtRiskOfWorkFlags);
                 benefitUnits.parallelStream().forEach(BenefitUnit::updateLabourChoices);
+                benefitUnits.parallelStream().forEach(BenefitUnit::updateUtilityRegressionScoresWithoutFC);
+
+
+                // Run alignment separately by b.u. subgroup
                 model.activityAlignmentSingleMales();
                 model.activityAlignmentSingleACMales();
                 model.activityAlignmentSingleFemales();
@@ -77,8 +84,6 @@ public class LabourMarket {
                 model.activityAlignmentCouples();
                 model.activityAlignmentMaleWithDependents();
                 model.activityAlignmentFemaleWithDependents();
-
-
             }
 
             if (model.isMacroShocksOn()) {
@@ -103,7 +108,7 @@ public class LabourMarket {
                     Person person = benefitUnit.getMale();
                     if (person.atRiskOfWork()) {
 
-                        Education ed = person.getDeh_c3();
+                        Education ed = person.getDeh_c4();
                         double newVal = person.getFullTimeHourlyEarningsPotential();
                         potentialHourlyEarningsByEdu.put(ed, potentialHourlyEarningsByEdu.get(ed) + newVal);
                         int oldCount = countByEdu.get(ed);
@@ -115,7 +120,7 @@ public class LabourMarket {
                     Person person = benefitUnit.getFemale();
                     if (person.atRiskOfWork()) {
 
-                        Education ed = person.getDeh_c3();
+                        Education ed = person.getDeh_c4();
                         double newVal = person.getFullTimeHourlyEarningsPotential();
                         potentialHourlyEarningsByEdu.put(ed, potentialHourlyEarningsByEdu.get(ed) + newVal);
                         int oldCount = countByEdu.get(ed);

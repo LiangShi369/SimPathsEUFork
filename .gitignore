@@ -194,6 +194,12 @@ input/~$scenario_uprating_factor.xlsx
 /input/PL/InitialPopulations/*.csv
 /input/EL/EUROMODoutput/*.txt
 /input/EL/InitialPopulations/*.csv
+/input/ES/EUROMODoutput/*.txt
+/input/ES/InitialPopulations/*.csv
+/input/*/EUROMODoutput/training/.DS_Store
+/input/*/InitialPopulations/training/.DS_Store
+!/input/*/EUROMODoutput/training/*.txt
+!/input/*/InitialPopulations/training/*.csv
 /input/InitialPopulations/*.csv
 /input/EUROMODoutput/*.txt
 /input/*.db
@@ -202,6 +208,7 @@ input/input.mv.db
 input/input.mv.db.new
 input/input.mv.db.old
 input/input.mv.db.original
+input/options.txt
 dependency-reduced-pom.xml
 .idea/vcs.xml
 input/EUROMODoutput/augmented1/
@@ -240,3 +247,13 @@ input/tax_donor_population_HU.csv
 input/tax_donor_population_PL.csv
 input/tax_donor_population_IT.csv
 input/tax_donor_population_EL.csv
+input/tax_donor_population_ES.csv
+
+# Integration-test golden CSVs for the REAL-DATA baselines — generated locally
+# per developer because real EUROMOD input data is not shareable. Do not commit.
+# The TRAINING-DATA baselines under expected_training_<CC>/ ARE committed and are
+# what CI diffs against. See each folder's INTEGRATION_TEST_REGENERATION.md for details.
+src/test/java/simpaths/integrationtest/expected_PL/*.csv
+src/test/java/simpaths/integrationtest/expected_ES/*.csv
+!src/test/java/simpaths/integrationtest/expected_training_PL/*.csv
+!src/test/java/simpaths/integrationtest/expected_training_ES/*.csv

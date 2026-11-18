@@ -1,6 +1,8 @@
 package simpaths.model;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
 import microsim.data.db.PanelEntityKey;
 import simpaths.data.Parameters;
 import simpaths.data.startingpop.Processed;
@@ -32,7 +34,8 @@ public class Household implements EventListener, IDoubleSource {
     @Transient public static long householdIdCounter = 1; //Because this is static all instances of a household access and increment the same counter
 
     @EmbeddedId @Column(unique = true, nullable = false) private final PanelEntityKey key;
-    @OneToMany(fetch = FetchType.EAGER, cascade = CascadeType.ALL, mappedBy = "household")
+    @OneToMany(fetch = FetchType.LAZY, cascade = CascadeType.ALL, mappedBy = "household")
+    @Fetch(FetchMode.SUBSELECT)
     @OrderBy("key ASC")
     private Set<BenefitUnit> benefitUnits = new LinkedHashSet<>();
     @ManyToOne(fetch = FetchType.EAGER, cascade=CascadeType.REFRESH)
@@ -41,7 +44,7 @@ public class Household implements EventListener, IDoubleSource {
     })
     private Processed processed;
 
-    private Long idOriginalHH;
+    private Long idHhOriginal;
 
 
     /*
@@ -61,13 +64,13 @@ public class Household implements EventListener, IDoubleSource {
                 model = (SimPathsModel) SimulationEngine.getInstance().getManager(SimPathsModel.class.getCanonicalName());
                 collector = (SimPathsCollector) SimulationEngine.getInstance().getManager(SimPathsCollector.class.getCanonicalName());
                 key  = new PanelEntityKey(originalHousehold.getId());
-                this.idOriginalHH = originalHousehold.getIdOriginalHH();
+                this.idHhOriginal = originalHousehold.getIdOriginalHH();
             }
             default -> {
                 model = (SimPathsModel) SimulationEngine.getInstance().getManager(SimPathsModel.class.getCanonicalName());
                 collector = (SimPathsCollector) SimulationEngine.getInstance().getManager(SimPathsCollector.class.getCanonicalName());
                 key  = new PanelEntityKey(householdIdCounter++);
-                idOriginalHH = originalHousehold.key.getId();
+                idHhOriginal = originalHousehold.key.getId();
             }
         }
     }
@@ -81,7 +84,7 @@ public class Household implements EventListener, IDoubleSource {
     /*
     METHODS
      */
-    public Long getIdOriginalHH() {return idOriginalHH;}
+    public Long getIdOriginalHH() {return idHhOriginal;}
 
     public void resetWeights(double newWeight) {
 

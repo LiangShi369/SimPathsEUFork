@@ -10,6 +10,8 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JInternalFrame;
@@ -22,16 +24,20 @@ import simpaths.model.SimPathsModel;
 import org.apache.commons.io.FileUtils;
 
 // import JAS-mine packages
+import microsim.data.ExperimentManager;
 import microsim.data.MultiKeyCoefficientMap;
+import microsim.data.db.DatabaseUtils;
 import microsim.data.excel.ExcelAssistant;
 import microsim.engine.ExperimentBuilder;
 import microsim.engine.SimulationEngine;
+import microsim.event.SystemEventType;
 import microsim.gui.shell.MicrosimShell;
 
 // import SimPaths packages
 import simpaths.model.enums.Country;
 import simpaths.data.*;
 import simpaths.model.taxes.database.TaxDonorDataParser;
+import simpaths.model.taxes.database.TaxDonorParserTraining;
 
 
 /**
@@ -42,14 +48,30 @@ import simpaths.model.taxes.database.TaxDonorDataParser;
 public class SimPathsStart implements ExperimentBuilder {
 
 	// default simulation parameters
-	private static Country country = Country.EL;
+	private static Country country = Country.PL;
 	private static int startYear = Parameters.getMaxStartYear();
+	private static int endYear = 2013;
+	private static int popSize = 30000;
 
 	private static boolean showGui = true;  // Show GUI by default
 
 	private static boolean setupOnly = false;
 
 	private static boolean rewritePolicySchedule = false;
+
+	private static boolean reuseExistingDatabase = true;
+	private static final boolean defaultReuseExistingDatabase = reuseExistingDatabase;
+
+	// Tracks whether -t/--training was given on the command line. When false, the
+	// auto-detect (empty InitialPopulations folder → flip to training) is allowed
+	// to run; when true, the explicit CLI value wins and auto-detect is skipped.
+	private static boolean trainingFlagExplicit = false;
+
+	// Tracks whether -s/--startYear was given on the command line. When false, runGUIlessSetup
+	// recomputes the default start year once the country workbook is loaded and training mode
+	// (explicit -t, or auto-detected) is resolved, instead of keeping the value resetCommandLineState
+	// assigned before those were known.
+	private static boolean startYearExplicit = false;
 
 
 	/**
@@ -58,7 +80,6 @@ public class SimPathsStart implements ExperimentBuilder {
 	 *
 	 */
 	public static void main(String[] args) {
-
 
 		if (!parseCommandLineArgs(args)) {
 			// If parseCommandLineArgs returns false (indicating help option is provided), exit main
@@ -89,7 +110,7 @@ public class SimPathsStart implements ExperimentBuilder {
 		MultiKeyCoefficientMap lastDatabaseCountryAndYear = null;
 		File dbFile = new File(dbCountryYearPath);
 		if (dbFile.exists()) {
-			lastDatabaseCountryAndYear = ExcelAssistant.loadCoefficientMap(dbCountryYearPath, "Data", 1, 1);
+			lastDatabaseCountryAndYear = ExcelAssistant.loadCoefficientMap(dbCountryYearPath, "Data", 1);
 		}
 
 		// If Excel file exists, read country and startYear; otherwise, use GUI to select
@@ -99,12 +120,14 @@ public class SimPathsStart implements ExperimentBuilder {
 				country = Country.EL;
 			} else if (lastDatabaseCountryAndYear.keySet().stream().anyMatch(key -> key.toString().equals("MultiKey[IT]"))) {
 				country = Country.IT;
+			} else if (lastDatabaseCountryAndYear.keySet().stream().anyMatch(key -> key.toString().equals("MultiKey[ES]"))) {
+				country = Country.ES;
 			} else if (lastDatabaseCountryAndYear.keySet().stream().anyMatch(key -> key.toString().equals("MultiKey[HU]"))) {
 				country = Country.HU;
 			} else if (lastDatabaseCountryAndYear.keySet().stream().anyMatch(key -> key.toString().equals("MultiKey[PL]"))) {
 				country = Country.PL;
 			} else {
-				throw new IllegalArgumentException("Country not recognised in Excel file. Please select one of the available countries (EL, IT, HU, PL).");
+				throw new IllegalArgumentException("Country not recognised in Excel file. Please select one of the available countries (EL, IT, ES, HU, PL).");
 			}
 
 			// Set startYear from Excel
@@ -119,6 +142,12 @@ public class SimPathsStart implements ExperimentBuilder {
 		// From here on, use countryInputPath for all future file reads/writes
 		// e.g., EUROMODpolicySchedule.xlsx: countryInputPath + File.separator + Parameters.EUROMODpolicyScheduleFilename + ".xlsx"
 
+		if (!showGui) {
+			// Keep headless single-run aligned with the database created during setup.
+			ExperimentManager.getInstance().copyInputFolderStructure = false;
+			DatabaseUtils.databaseInputUrl = "input" + File.separator + "input";
+		}
+
 		// start the JAS-mine simulation engine
 		final SimulationEngine engine = SimulationEngine.getInstance();
 		MicrosimShell gui = null;
@@ -129,9 +158,46 @@ public class SimPathsStart implements ExperimentBuilder {
 		SimPathsStart experimentBuilder = new SimPathsStart();
 		engine.setExperimentBuilder(experimentBuilder);
 		engine.setup();
+		if (!showGui) {
+			runHeadlessSimulation(engine);
+		}
+	}
+
+	private static void runHeadlessSimulation(SimulationEngine engine) {
+		CountDownLatch simulationFinished = new CountDownLatch(1);
+		AtomicReference<Throwable> simulationFailure = new AtomicReference<>();
+
+		// Headless JAS-mine runs are asynchronous, so wait for the model's End event before quitting.
+		engine.addEngineListener(type -> {
+			if (type == SystemEventType.End || type == SystemEventType.Shutdown) {
+				simulationFinished.countDown();
+			}
+		});
+		engine.setUncaughtExceptionHandler((thread, throwable) -> {
+			simulationFailure.compareAndSet(null, throwable);
+			simulationFinished.countDown();
+		});
+
+		engine.startSimulation();
+
+		try {
+			simulationFinished.await();
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new RuntimeException("Interrupted while waiting for the simulation to finish.", e);
+		}
+
+		Throwable failure = simulationFailure.get();
+		if (failure != null) {
+			throw new RuntimeException("Simulation failed before completion.", failure);
+		}
+
+		engine.quit();
 	}
 
 	private static boolean parseCommandLineArgs(String[] args) {
+		resetCommandLineState();
+
 		Options options = new Options();
 
 		Option countryOption = new Option("c", "country", true, "Country (by country code CC, e.g. 'UK'/'IT')");
@@ -142,15 +208,39 @@ public class SimPathsStart implements ExperimentBuilder {
 		startYearOption.setArgName("year");
 		options.addOption(startYearOption);
 
+		Option endYearOption = new Option("e", "endYear", true, "End year");
+		endYearOption.setArgName("year");
+		options.addOption(endYearOption);
+
+		Option popSizeOption = new Option("p", "popSize", true, "Population size");
+		popSizeOption.setArgName("int");
+		options.addOption(popSizeOption);
+
 		Option setupOption = new Option("Setup", "Setup only");
 		options.addOption(setupOption);
 
 		Option rewritePolicyScheduleOption = new Option("r", "rewrite-policy-schedule",false, "Re-write policy schedule from detected policy files");
 		options.addOption(rewritePolicyScheduleOption);
 
+		Option reuseExistingDatabaseOption = Option.builder()
+				.longOpt("reuse-existing-db")
+				.desc("Reuse input/input.mv.db instead of rebuilding it when running headless")
+				.build();
+		options.addOption(reuseExistingDatabaseOption);
+
+		Option rebuildDatabaseOption = Option.builder()
+				.longOpt("rebuild-db")
+				.desc("Force a rebuild of input/input.mv.db instead of reusing it when running headless")
+				.build();
+		options.addOption(rebuildDatabaseOption);
+
 		Option guiOption = new Option("g", "showGui", true, "Show GUI");
 		guiOption.setArgName("true/false");
 		options.addOption(guiOption);
+
+		Option trainingOption = new Option("t", "training", true, "Use training data subset (InitialPopulations/training, EUROMODoutput/training, TaxDonorParserTraining)");
+		trainingOption.setArgName("true/false");
+		options.addOption(trainingOption);
 
 		Option helpOption = new Option("h", "help", false, "Print help message");
 		options.addOption(helpOption);
@@ -171,6 +261,13 @@ public class SimPathsStart implements ExperimentBuilder {
 				showGui = Boolean.parseBoolean(cmd.getOptionValue("g"));
 			}
 
+			if (cmd.hasOption("t")) {
+				boolean trainingValue = Boolean.parseBoolean(cmd.getOptionValue("t"));
+				Parameters.setTrainingFlag(trainingValue);
+				trainingFlagExplicit = true;
+				System.out.println("Training-data flag set explicitly via CLI: -t " + trainingValue);
+			}
+
 			if (cmd.hasOption("c")) {
 				try {
 					country = Country.valueOf(cmd.getOptionValue("c"));
@@ -181,6 +278,15 @@ public class SimPathsStart implements ExperimentBuilder {
 
 			if (cmd.hasOption("s")) {
 				startYear = Integer.parseInt(cmd.getOptionValue("s"));
+				startYearExplicit = true;
+			}
+
+			if (cmd.hasOption("e")) {
+				endYear = Integer.parseInt(cmd.getOptionValue("e"));
+			}
+
+			if (cmd.hasOption("p")) {
+				popSize = Integer.parseInt(cmd.getOptionValue("p"));
 			}
 
 			if (cmd.hasOption("Setup")) {
@@ -189,6 +295,18 @@ public class SimPathsStart implements ExperimentBuilder {
 
 			if (cmd.hasOption("r")) {
 				rewritePolicySchedule = true;
+			}
+
+			if (cmd.hasOption("reuse-existing-db")) {
+				reuseExistingDatabase = true;
+			}
+
+			if (cmd.hasOption("rebuild-db")) {
+				reuseExistingDatabase = false;
+			}
+
+			if (setupOnly) {
+				reuseExistingDatabase = false;
 			}
 		} catch (ParseException | IllegalArgumentException e) {
 			System.err.println("Error parsing command line arguments: " + e.getMessage());
@@ -208,6 +326,19 @@ public class SimPathsStart implements ExperimentBuilder {
 		formatter.printHelp("SimPathsStart", header, options, footer, true);
 	}
 
+	private static void resetCommandLineState() {
+		country = Country.PL;
+		startYear = Parameters.getMaxStartYear();
+		endYear = 2013;
+		popSize = 30000;
+		showGui = true;
+		setupOnly = false;
+		rewritePolicySchedule = false;
+		reuseExistingDatabase = defaultReuseExistingDatabase;
+		trainingFlagExplicit = false;
+		startYearExplicit = false;
+	}
+
 
 	/**
 	 *
@@ -219,24 +350,61 @@ public class SimPathsStart implements ExperimentBuilder {
 	@Override
 	public void buildExperiment(SimulationEngine engine) {
 
+		Parameters.validateStartYear(startYear);
+
 		// instantiate simulation processes
 		SimPathsModel model = new SimPathsModel(country, startYear);
+		model.setEndYear(endYear);
+		model.setPopSize(popSize);
 		SimPathsCollector collector = new SimPathsCollector(model);
-		SimPathsObserver observer = new SimPathsObserver(model, collector);
 
 		engine.addSimulationManager(model);
 		engine.addSimulationManager(collector);
-		engine.addSimulationManager(observer);
+		if (showGui) {
+			SimPathsObserver observer = new SimPathsObserver(model, collector);
+			engine.addSimulationManager(observer);
+		}
 
 		model.setCollector(collector);
 	}
 
 	private static void runGUIlessSetup(int option) throws FileNotFoundException {
 
-		// Detect if data available; set to testing data if not
-		Collection<File> testList = FileUtils.listFiles(new File(Parameters.getInputDirectoryInitialPopulations(country)), new String[]{"csv"}, false);
-		if (testList.size()==0)
-			Parameters.setTrainingFlag(true);
+		// Load the country's parameters.xlsx first, so that validateStartYear below (and the second call in
+		// buildExperiment, run later via engine.setup()) agree on the same MIN/MAX_START_YEAR(_TRAINING) bounds as
+		// databaseSetup, instead of validating against the Java defaults here and the workbook values later
+		Parameters.loadCountrySpecificParameters(country);
+
+		// Auto-detect training mode only when -t/--training was NOT passed on the command line.
+		// If actual InitialPopulations/<country>/*.csv is empty, fall back to training data.
+		if (!trainingFlagExplicit) {
+			Collection<File> testList = FileUtils.listFiles(new File(Parameters.getInputDirectoryInitialPopulations(country)), new String[]{"csv"}, false);
+			if (testList.size() == 0) {
+				Parameters.setTrainingFlag(true);
+				System.out.println("No CSV files found under " + Parameters.getInputDirectoryInitialPopulations(country)
+						+ " — auto-switching to training data (Parameters.trainingFlag = true).");
+			}
+		}
+
+		// resetCommandLineState assigned this default before the country workbook was loaded and before
+		// training mode (explicit -t, or just auto-detected above) was known; recompute it now unless the
+		// caller explicitly supplied -s
+		if (!startYearExplicit) {
+			startYear = Parameters.getMaxStartYear();
+		}
+
+		Parameters.validateStartYear(startYear);
+
+		writeSelectedCountryAndYear();
+
+		if (reuseExistingDatabase) {
+			File inputDatabase = new File("input" + File.separator + "input.mv.db");
+			if (inputDatabase.exists()) {
+				Parameters.defineCountryString(country);
+				return;
+			}
+			System.out.println("Input database '" + inputDatabase.getPath() + "' not found. Rebuilding it.");
+		}
 
 		// Build path for the country-specific input folder
 		String countryInputPath = "input" + File.separator + country.toString();
@@ -256,27 +424,35 @@ public class SimPathsStart implements ExperimentBuilder {
 			writePolicyScheduleExcelFile();
 		}
 
-		// Save the last selected country and year to Excel to use in the model if GUI launched straight away
+		// load uprating factors
+		Parameters.loadTimeSeriesFactorMaps(country);
+		Parameters.instantiateAlignmentMaps();
+
+        // define country string for Parameters
+        Parameters.defineCountryString(country);
+		// set-up database
+		Parameters.databaseSetup(country, showGui, startYear);
+	}
+
+	private static void writeSelectedCountryAndYear() {
+		String rootInputPath = "input";
+		File rootFolder = new File(rootInputPath);
+		if (!rootFolder.exists()) {
+			rootFolder.mkdirs();
+		}
+
 		String[] columnNames = {"Country", "Year"};
 		Object[][] data = new Object[1][columnNames.length];
 		data[0][0] = country.toString();
 		data[0][1] = startYear;
 
-		// Save into the same country-specific folder
 		XLSXfileWriter.createXLSX(
-				countryInputPath,
+				rootInputPath,
 				Parameters.DatabaseCountryYearFilename,
 				"Data",
 				columnNames,
 				data
 		);
-
-		// load uprating factors
-		Parameters.loadTimeSeriesFactorMaps(country);
-		Parameters.instantiateAlignmentMaps();
-
-		// set-up database
-		Parameters.databaseSetup(country, showGui, startYear);
 	}
 
 	public static void writePolicyScheduleExcelFile() {
@@ -367,14 +543,26 @@ public class SimPathsStart implements ExperimentBuilder {
 
 		if (choices[0]) {
 			// choose the country and the simulation start year
-			Collection<File> testList = FileUtils.listFiles(new File(Parameters.getInputDirectoryInitialPopulations(country)), new String[]{"csv"}, false);
-			if (testList.size() == 0)
-				Parameters.setTrainingFlag(true);
+			if (!trainingFlagExplicit) {
+				Collection<File> testList = FileUtils.listFiles(new File(Parameters.getInputDirectoryInitialPopulations(country)), new String[]{"csv"}, false);
+				if (testList.size() == 0) {
+					Parameters.setTrainingFlag(true);
+					System.out.println("No CSV files found under " + Parameters.getInputDirectoryInitialPopulations(country)
+							+ " — auto-switching to training data (Parameters.trainingFlag = true).");
+				}
+			}
 			chooseCountryAndStartYear();
 		}
 
 		String taxDonorInputFilename = "tax_donor_population_" + country;
 		Parameters.setTaxDonorInputFileName(taxDonorInputFilename);
+
+		// this path (unlike runGUIlessSetup) never calls databaseSetup, so load the country's parameters.xlsx
+		// here, before either branch below: otherwise marginalEmploymentRecode would recode the starting
+		// population against the Java default MIN_HOURS_EMPLOYED instead of the country's workbook value
+		// (e.g. PL's 1, not the default 6), and a tax-only setup (choices[2]/[3]/[4] alone) would build donor
+		// matching keys from Java-default thresholds while the simulation later matches against workbook values
+		Parameters.loadCountrySpecificParameters(country);
 
 		if (choices[0] || choices[1]) {
 			DataParser.databaseFromCSV(country, showGui); // Initial database tables
@@ -391,8 +579,7 @@ public class SimPathsStart implements ExperimentBuilder {
 			MultiKeyCoefficientMap previousEUROMODfileInfo = ExcelAssistant.loadCoefficientMap(
 					countryInputPath + File.separator + Parameters.EUROMODpolicyScheduleFilename + ".xlsx",
 					country.toString(),
-					1,
-					3
+					1
 			);
 
 			Collection<File> euromodOutputTextFiles = FileUtils.listFiles(new File(Parameters.getEuromodOutputDirectory(country)), new String[]{"txt"}, false);
@@ -452,7 +639,11 @@ public class SimPathsStart implements ExperimentBuilder {
 
 			if (choices[0] || choices[2] || choices[3] || choices[4]) {
 				TaxDonorDataParser.constructAggregateTaxDonorPopulationCSVfile(country, showGui);
-				TaxDonorDataParser.databaseFromCSV(country, startYear, true);
+				if (Parameters.trainingFlag) {
+					TaxDonorParserTraining.databaseFromCSV(country, startYear, true);
+				} else {
+					TaxDonorDataParser.databaseFromCSV(country, startYear, true);
+				}
 				Parameters.loadTimeSeriesFactorForTaxDonor(country);
                 Parameters.defineCountryString(country);
 				TaxDonorDataParser.populateDonorTaxUnitTables(country, showGui);
@@ -494,28 +685,7 @@ public class SimPathsStart implements ExperimentBuilder {
 
 		country = cbCountry.getCountryEnum();
 		startYear = cbStartYear.getYear();
-
-		// Save the last selected country and year to Excel in the input folder
-		String countryInputPath = "input";
-
-		// Ensure the folder exists
-		File countryFolder = new File(countryInputPath);
-		if (!countryFolder.exists()) {
-			countryFolder.mkdirs();
-		}
-
-		String[] columnNames = {"Country", "Year"};
-		Object[][] data = new Object[1][columnNames.length];
-		data[0][0] = country.toString();
-		data[0][1] = startYear;
-
-		XLSXfileWriter.createXLSX(
-				countryInputPath,
-				Parameters.DatabaseCountryYearFilename,
-				"Data",
-				columnNames,
-				data
-		);
+		writeSelectedCountryAndYear();
 
 	}
 }

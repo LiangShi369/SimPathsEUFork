@@ -4,16 +4,11 @@ import simpaths.data.ManagerRegressions;
 import simpaths.data.Parameters;
 import simpaths.data.RegressionName;
 import simpaths.model.Person;
-import simpaths.model.enums.Dcpst;
 import simpaths.model.enums.Gender;
-import simpaths.model.enums.SocialCareReceiptS2c;
-import simpaths.model.enums.SocialCareReceiptState;
 
 import java.security.InvalidParameterException;
 import java.util.Arrays;
-import java.util.Map;
 
-import static simpaths.data.Parameters.FLAG_USE_F1A;
 
 /**
  * class to manage expansion of expectations to account for each successive state variable
@@ -35,8 +30,6 @@ public class ExpectationsFactory {
     boolean flagEducationVaries;
     boolean flagHealthVaries;
     boolean flagDisabilityVaries;
-    boolean flagSocialCareReceiptVaries;
-    boolean flagSocialCareProvisionVaries;
     boolean flagCohabitationVaries;
     boolean flagChildrenVaries;
 
@@ -197,11 +190,7 @@ public class ExpectationsFactory {
                         // expand expectations
                         if (Gender.Female == currentStates.getGenderCode() || anticipated[ii].getCohabitation()) {
                             // birth possible
-                            if (anticipated[ii].getStudent()==1 && FLAG_USE_F1A) {
-                                expandExpectationsFertility(ii, stateIndexNextPeriod, jj, options, RegressionName.FertilityF1a);
-                            } else {
-                                expandExpectationsFertility(ii, stateIndexNextPeriod, jj, options, RegressionName.FertilityF1b);
-                            }
+                            expandExpectationsFertility(ii, stateIndexNextPeriod, jj, options, RegressionName.FertilityF1);
 
                         } else {
                             // birth not possible
@@ -259,16 +248,6 @@ public class ExpectationsFactory {
         flagCohabitationVaries = true;
     }
 
-    public void updateSocialCareReceipt() {
-        updateCommon(Axis.SocialCareReceipt);
-        flagSocialCareReceiptVaries = true;
-    }
-
-    public void updateSocialCareProvision() {
-        updateCommon(Axis.SocialCareProvision);
-        flagSocialCareProvisionVaries = true;
-    }
-
     public void updateWagePotential() {
         updateCommon(Axis.WagePotential);
     }
@@ -304,16 +283,7 @@ public class ExpectationsFactory {
     private LocalExpectations lexpectEval(Axis axis) {
 
         LocalExpectations lexpectations = new LocalExpectations();
-        if (Axis.SocialCareReceipt.equals(axis)) {
-
-            lexpectations = compileSocialCareReceiptProbs();
-        } else if (Axis.SocialCareProvision.equals(axis)) {
-
-            if (Dcpst.Partnered.equals(personProxyNextPeriod.getDcpst()))
-                lexpectations.evaluateDiscrete(personProxyNextPeriod, personProxyNextPeriod.getRegressionName(axis));
-            else
-                lexpectations.evaluateLabelledIndicator(personProxyNextPeriod, personProxyNextPeriod.getRegressionName(axis), 3.0);
-        } else if (Axis.WagePotential.equals(axis)) {
+        if (Axis.WagePotential.equals(axis)) {
 
             lexpectations.evaluateGaussian(personProxyNextPeriod, personProxyNextPeriod.getRegressionName(axis),
                     Math.log(DecisionParams.MIN_WAGE_PHOUR), Math.log(DecisionParams.MAX_WAGE_PHOUR), DecisionParams.C_WAGE_POTENTIAL);
@@ -324,60 +294,9 @@ public class ExpectationsFactory {
         return lexpectations;
     }
 
-    private LocalExpectations compileSocialCareReceiptProbs() {
-
-        // raw inputs
-        double probNeedCare = Parameters.getRegNeedCareS2a().getProbability(personProxyNextPeriod, Person.DoublesVariables.class);
-        double probRecCare = Parameters.getRegReceiveCareS2b().getProbability(personProxyNextPeriod, Person.DoublesVariables.class);
-        Map<SocialCareReceiptS2c,Double> probsCareFrom = Parameters.getRegSocialCareMarketS2c().getProbabilities(personProxyNextPeriod, Person.DoublesVariables.class);
-
-        // compile and package outputs
-        int ii = 0;
-        double probHere, probCheck = 0.0;
-        double[] probs = new double[SocialCareReceiptState.values().length];
-        double[] vals = new double[SocialCareReceiptState.values().length];
-
-        // no care needed (may work; otherwise work may be limited)
-        probHere = 1.0 - probNeedCare;
-        probs[ii] = probHere;
-        vals[ii] = (double)SocialCareReceiptState.NoneNeeded.getValue();
-        probCheck += probHere;
-        ii++;
-
-        // no formal care
-        probHere = probNeedCare * ((1.0 - probRecCare) + probRecCare * probsCareFrom.get(SocialCareReceiptS2c.Informal));
-        probs[ii] = probHere;
-        vals[ii] = (double)SocialCareReceiptState.NoFormal.getValue();
-        probCheck += probHere;
-        ii++;
-
-        // mixed care
-        probHere = probNeedCare * probRecCare * probsCareFrom.get(SocialCareReceiptS2c.Mixed);
-        probs[ii] = probHere;
-        vals[ii] = (double)SocialCareReceiptState.Mixed.getValue();
-        probCheck += probHere;
-        ii++;
-
-        // formal care
-        probHere = probNeedCare * probRecCare * probsCareFrom.get(SocialCareReceiptS2c.Formal);
-        probs[ii] = probHere;
-        vals[ii] = (double)SocialCareReceiptState.Formal.getValue();
-        probCheck += probHere;
-        ii++;
-
-        // check results
-        if (Math.abs(probCheck-1.0)>1.0E-5)
-            throw new RuntimeException("problem evaluating probabilities for social care receipt");
-
-        // return
-        LocalExpectations localExpectations = new LocalExpectations();
-        localExpectations.screenAndAssign(probs, vals);
-        return localExpectations;
-    }
-
     private boolean anyVaries() {
-        if ( flagRegionVaries || flagEducationVaries || flagHealthVaries || flagDisabilityVaries || flagSocialCareReceiptVaries ||
-                flagSocialCareProvisionVaries || flagCohabitationVaries || flagChildrenVaries )
+        if ( flagRegionVaries || flagEducationVaries || flagHealthVaries || flagDisabilityVaries ||
+                flagCohabitationVaries || flagChildrenVaries )
             return true;
         else
             return false;
@@ -403,14 +322,6 @@ public class ExpectationsFactory {
             flagChange = updatePersonNextPeriod(anticipated[ii], Axis.Disability);
             if (flagChange) flagEval = true;
         }
-        if (flagSocialCareReceiptVaries) {
-            flagChange = updatePersonNextPeriod(anticipated[ii], Axis.SocialCareReceipt);
-            if (flagChange) flagEval = true;
-        }
-        if (flagSocialCareProvisionVaries) {
-            flagChange = updatePersonNextPeriod(anticipated[ii], Axis.SocialCareProvision);
-            if (flagChange) flagEval = true;
-        }
         if (flagCohabitationVaries) {
             flagChange = updatePersonNextPeriod(anticipated[ii], Axis.Cohabitation);
             if (flagChange) flagEval = true;
@@ -429,7 +340,7 @@ public class ExpectationsFactory {
             val0 = personProxyNextPeriod.getRegion();
             val1 = states.getRegionCode();
         } else if (Axis.Education.equals(axis)) {
-            val0 = personProxyNextPeriod.getDeh_c3();
+            val0 = personProxyNextPeriod.getDeh_c4();
             val1 = states.getEducationCode();
             if (val0==val1) {
                 val0 = personProxyNextPeriod.getDed();
@@ -441,12 +352,6 @@ public class ExpectationsFactory {
         } else if (Axis.Disability.equals(axis)) {
             val0 = personProxyNextPeriod.getDlltsd();
             val1 = states.getDlltsd();
-        } else if (Axis.SocialCareReceipt.equals(axis)) {
-            val0 = personProxyNextPeriod.getSocialCareReceipt();
-            val1 = states.getSocialCareReceiptCode();
-        } else if (Axis.SocialCareProvision.equals(axis)) {
-            val0 = personProxyNextPeriod.getSocialCareProvision();
-            val1 = states.getSocialCareProvisionCode();
         } else if (Axis.Cohabitation.equals(axis)) {
             val0 = personProxyNextPeriod.getDcpst();
             val1 = states.getDcpst();
@@ -470,16 +375,12 @@ public class ExpectationsFactory {
             if (Axis.Region.equals(axis)) {
                 personProxyNextPeriod.setRegion(states.getRegionCode());
             } else if (Axis.Education.equals(axis)) {
-                personProxyNextPeriod.setDeh_c3(states.getEducationCode());
+                personProxyNextPeriod.setDeh_c4(states.getEducationCode());
                 personProxyNextPeriod.setDed(states.getStudentIndicator());
             } else if (Axis.Health.equals(axis)) {
                 personProxyNextPeriod.setDhe(states.getHealthCode());
             } else if (Axis.Disability.equals(axis)) {
                 personProxyNextPeriod.setDlltsd(states.getDlltsd());
-            } else if (Axis.SocialCareReceipt.equals(axis)) {
-                personProxyNextPeriod.setSocialCareReceipt(states.getSocialCareReceiptCode());
-            } else if (Axis.SocialCareProvision.equals(axis)) {
-                personProxyNextPeriod.setSocialCareProvision(states.getSocialCareProvisionCode());
             } else if (Axis.Cohabitation.equals(axis)) {
                 personProxyNextPeriod.setDcpstLocal(states.getDcpst());
             } else if (Axis.Child.equals(axis)) {

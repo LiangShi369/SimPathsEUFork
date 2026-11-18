@@ -18,8 +18,6 @@ public enum Axis {
     Retirement,
     Health,
     Disability,
-    SocialCareReceipt,
-    SocialCareProvision,
     Region,
     Student,
     Education,

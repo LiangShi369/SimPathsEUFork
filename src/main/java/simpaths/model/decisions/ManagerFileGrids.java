@@ -178,8 +178,6 @@ public class ManagerFileGrids {
                 bean.setRetirement(currentStates.getRetirement());
                 bean.setHealth(currentStates.getHealthVal());
                 bean.setDisability(currentStates.getDisability());
-                bean.setSocialCareReceipt(currentStates.getSocialCareReceipt());
-                bean.setSocialCareProvision(currentStates.getSocialCareProvision());
                 bean.setRegion(currentStates.getRegion());
                 bean.setStudent(currentStates.getStudent());
                 bean.setEducation(currentStates.getEducation());
@@ -205,7 +203,7 @@ public class ManagerFileGrids {
         if (!dir.exists()) dir.mkdir();
         String filePath = DecisionParams.gridsOutputDirectory + File.separator + "grid_age_" + ageYears + ".csv";
         String[] HEADERS = {"wealth", "wageperhour", "pensionperyear", "birthyear", "wageoffer1", "retirement", "health", "disability",
-                "socialcarereceipt", "socialcareprovision", "region", "student", "education", "children0", "children1", "children2",
+                "region", "student", "education", "children0", "children1", "children2",
                 "married", "gender", "consumptionshare", "employment1", "employment2", "valuefunction"};
         try {
             BufferedWriter writer = Files.newBufferedWriter(Paths.get(filePath));
@@ -222,8 +220,6 @@ public class ManagerFileGrids {
                 record.add(bean.getRetirementString());
                 record.add(bean.getHealthString());
                 record.add(bean.getDisabilityString());
-                record.add(bean.getSocialCareReceiptString());
-                record.add(bean.getSocialCareProvisionString());
                 record.add(bean.getRegionString());
                 record.add(bean.getStudentString());
                 record.add(bean.getEducationString());

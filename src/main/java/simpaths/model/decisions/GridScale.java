@@ -42,8 +42,6 @@ public class GridScale {
         if (DecisionParams.flagRetirement) numberOfStates++;      // retirement status
         if (DecisionParams.flagHealth) numberOfStates++;          // health status
         if (DecisionParams.flagDisability) numberOfStates++;      // disability status
-        if (Parameters.flagSocialCare) numberOfStates++;          // social care receipt
-        if (Parameters.flagSocialCare) numberOfStates++;          // social care provision
         if (DecisionParams.flagRegion) numberOfStates++;          // region
         if (DecisionParams.flagEducation) numberOfStates++;       // student
         if (DecisionParams.flagEducation) numberOfStates++;       // education
@@ -76,7 +74,6 @@ public class GridScale {
          *      retirement status (o)
          *      health status (h)
          *      disability status (d)
-         *      social care (sc)
          *      region (r) based on (12) Government Office Regions in UK
          *      student status (s)
          *      highest education attainment (e) (integers for education categories, with higher number reflecting higher education)
@@ -204,26 +201,6 @@ public class GridScale {
                 dimIndex++;
             }
 
-            // social care receipt
-            if (Parameters.flagSocialCare && ageHh >= DecisionParams.minAgeReceiveFormalCare) {
-                axes[aa][dimIndex][0] = 4; // none needed, no formal, informal and formal, only formal (see Enum SocialCareReceiptState)
-                axes[aa][dimIndex][1] = 0;
-                axes[aa][dimIndex][2] = 3;
-                axes[aa][dimIndex][3] = 0;
-                axes[aa][dimIndex][4] = 0;
-                dimIndex++;
-            }
-
-            // social care provision
-            if (Parameters.flagSocialCare) {
-                axes[aa][dimIndex][0] = 4; // none, partner only, partner and non-partner, non-partner only (see Enum SocialCareProvision)
-                axes[aa][dimIndex][1] = 0;
-                axes[aa][dimIndex][2] = 3;
-                axes[aa][dimIndex][3] = 0;
-                axes[aa][dimIndex][4] = 0;
-                dimIndex++;
-            }
-
             //region
             if (DecisionParams.flagRegion) {
                 axes[aa][dimIndex][0] = DecisionParams.PTS_REGION;
@@ -235,7 +212,7 @@ public class GridScale {
             }
 
             //student
-            if (ageHh <= Parameters.MAX_AGE_TO_LEAVE_CONTINUOUS_EDUCATION && DecisionParams.flagEducation) {
+            if (ageHh <= Parameters.MAX_AGE_TO_STAY_IN_CONTINUOUS_EDUCATION && DecisionParams.flagEducation) {
                 axes[aa][dimIndex][0] = DecisionParams.PTS_STUDENT;
                 axes[aa][dimIndex][1] = 0;
                 axes[aa][dimIndex][2] = DecisionParams.PTS_STUDENT - 1;
@@ -497,22 +474,6 @@ public class GridScale {
             if (axisID==Axis.Disability) return -1;
         }
 
-        // social care receipt
-        if (Parameters.flagSocialCare && ageYears >= DecisionParams.minAgeReceiveFormalCare) {
-            if (axisID==Axis.SocialCareReceipt) return dimIndex;
-            dimIndex++;
-        } else {
-            if (axisID==Axis.SocialCareReceipt) return -1;
-        }
-
-        // social care provision
-        if (Parameters.flagSocialCare) {
-            if (axisID==Axis.SocialCareProvision) return dimIndex;
-            dimIndex++;
-        } else {
-            if (axisID==Axis.SocialCareProvision) return -1;
-        }
-
         // region
         if (DecisionParams.flagRegion) {
             if (axisID==Axis.Region) return dimIndex;
@@ -522,7 +483,7 @@ public class GridScale {
         }
 
         // student
-        if (ageYears <= Parameters.MAX_AGE_TO_LEAVE_CONTINUOUS_EDUCATION && DecisionParams.flagEducation) {
+        if (ageYears <= Parameters.MAX_AGE_TO_STAY_IN_CONTINUOUS_EDUCATION && DecisionParams.flagEducation) {
             if (axisID==Axis.Student) return dimIndex;
             dimIndex++;
         } else {

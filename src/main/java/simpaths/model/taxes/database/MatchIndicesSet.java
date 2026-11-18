@@ -25,7 +25,7 @@ public class MatchIndicesSet {
 
     private Set<MatchIndices> set = new HashSet<>();
     private final String[] HEADERS = {"candidateID", "gridAge", "simYear", "key0", "targetIncome", "Age", "Adults", "Children", "Employment", "Disability",
-    "CareProvision", "Income", "DualIncome", "Childcare"};
+    "Income", "DualIncome", "Childcare"};
 
 
     /**

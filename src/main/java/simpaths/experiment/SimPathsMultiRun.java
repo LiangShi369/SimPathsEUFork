@@ -2,11 +2,15 @@
 package simpaths.experiment;
 
 // import Java packages
+import microsim.data.db.DatabaseUtils;
+import microsim.data.db.Experiment;
+import org.apache.commons.io.FileUtils;
 import org.apache.log4j.Level;
 import org.apache.commons.cli.*;
 import org.yaml.snakeyaml.Yaml;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.Map;
 
@@ -24,6 +28,7 @@ import org.apache.log4j.FileAppender;
 import org.apache.log4j.Logger;
 import org.apache.log4j.PatternLayout;
 import java.io.*;
+import microsim.data.ExperimentManager;
 
 
 public class SimPathsMultiRun extends MultiRun {
@@ -43,10 +48,22 @@ public class SimPathsMultiRun extends MultiRun {
 	private static boolean labourSupplyElasticityInnov = false;
 	private static boolean flagDatabaseSetup = false;
 
+	// integration-test flag: when true, redirects simulation output into a fixed
+	// INTEGRATION_TESTS folder so regression tests can locate and diff the results.
+	// Intentionally does NOT flip the training-data flag (unlike the UK port) —
+	// EU runs the integration test against real input data until a training set exists.
+	private static boolean integrationTest = false;
+
+	// true once main() has run, i.e. this JVM is executing a multi-run rather than a
+	// single run through SimPathsStart. Read by OutputReadme, which reports how many runs
+	// the output folder is expected to hold.
+	private static boolean multiRunMode = false;
+
 	// passing args for config file
 	private static Map<String, Object> modelArgs;
 	private static Map<String, Object> innovationArgs;
 	private static Map<String, Object> collectorArgs;
+	private static Map<String, Object> parameterArgs;
 	public static String configFile = "default.yml";
 
 	// other working variables
@@ -63,19 +80,23 @@ public class SimPathsMultiRun extends MultiRun {
 	 */
 	public static void main(String[] args) {
 
+		multiRunMode = true;
+
 		// set default values for country and start year
-		MultiKeyCoefficientMap lastDatabaseCountryAndYear = ExcelAssistant.loadCoefficientMap("input" + File.separator + Parameters.DatabaseCountryYearFilename + ".xlsx", "Data", 1, 1);
+		MultiKeyCoefficientMap lastDatabaseCountryAndYear = ExcelAssistant.loadCoefficientMap("input" + File.separator + Parameters.DatabaseCountryYearFilename + ".xlsx", "Data", 1);
 		if (lastDatabaseCountryAndYear.keySet().stream().anyMatch(key -> key.toString().equals("MultiKey[EL]"))) {
 			countryString = "Greece";
 		} else if (lastDatabaseCountryAndYear.keySet().stream().anyMatch(key -> key.toString().equals("MultiKey[HU]"))) {
 			countryString = "Hungary";
 		} else if (lastDatabaseCountryAndYear.keySet().stream().anyMatch(key -> key.toString().equals("MultiKey[IT]"))) {
 			countryString = "Italy";
+		} else if (lastDatabaseCountryAndYear.keySet().stream().anyMatch(key -> key.toString().equals("MultiKey[ES]"))) {
+			countryString = "Spain";
 		} else if (lastDatabaseCountryAndYear.keySet().stream().anyMatch(key -> key.toString().equals("MultiKey[PL]"))) {
 			countryString = "Poland";
 		} else {
 			throw new IllegalArgumentException(
-					"Country not recognised. Restart the simulation and choose one of the available countries (EL, HU, IT, PL)."
+					"Country not recognised. Restart the simulation and choose one of the available countries (EL, HU, IT, ES, PL)."
 			);
 		}
 
@@ -91,6 +112,8 @@ public class SimPathsMultiRun extends MultiRun {
 		}
 		if (innovationArgs!=null)
 			updateLocalParameters(innovationArgs);
+		if (parameterArgs != null)
+			updateParameters(parameterArgs);
 
 		// Parse command line arguments to override defaults
 		if (!parseCommandLineArgs(args)) {
@@ -98,6 +121,26 @@ public class SimPathsMultiRun extends MultiRun {
 			return;
 		}
 		country = Country.getCountryFromNameString(countryString);
+
+		// Propagate the resolved country into the static Parameters.COUNTRY_STRING used by
+		// country-specific lookups (e.g. Labour.valuesForCountry). SimPathsStart does
+		// this implicitly via runGUIlessSetup(), but SimPathsMultiRun jumps straight into
+		// Parameters.databaseSetup on -DBSetup and into model construction otherwise, so
+		// it has to be set here.
+		Parameters.defineCountryString(country);
+
+		// Load the country's parameters.xlsx before validating startYear, so validation (and, on -DBSetup,
+		// Parameters.databaseSetup's own delete-then-load) use the same MIN/MAX_START_YEAR(_TRAINING) bounds as the
+		// database actually built, instead of validating here against the Java defaults
+		Parameters.loadCountrySpecificParameters(country);
+
+		Parameters.validateStartYear(startYear);
+
+        /*comment these lines if input folder needs to be saved in output*/
+        // Disable copying input folders into output
+        ExperimentManager.getInstance().copyInputFolderStructure = false;
+        // Ensure database files are loaded from the correct input directory
+        DatabaseUtils.databaseInputUrl = Experiment.inputFolder + File.separator + "input";
 
 		if (flagDatabaseSetup) {
 
@@ -112,6 +155,23 @@ public class SimPathsMultiRun extends MultiRun {
 			SimPathsMultiRun experimentBuilder = new SimPathsMultiRun();
 			engine.setExperimentBuilder(experimentBuilder);
 			engine.setup();		//This is needed to update model attributes (from model_args in config file)
+
+			if (integrationTest) {
+				// Write to a predictable folder the integration test can find, named per
+				// country and data mode so no two baselines collide. Wiped first so the
+				// diff never sees stale results.
+				File outputFolder = new File("." + File.separator + "output" + File.separator
+						+ "INTEGRATION_TESTS" + (Parameters.trainingFlag ? "_TRAINING" : "") + "_" + country);
+				Experiment.testOutputFolder = outputFolder.getPath();
+
+				try {
+					if (FileUtils.isDirectory(outputFolder)) {
+						FileUtils.deleteDirectory(outputFolder);
+					}
+				} catch (IOException e) {
+					throw new RuntimeException(e);
+				}
+			}
 
 			if (executeWithGui)
 				new MultiRunFrame(experimentBuilder, "SimPaths MultiRun", maxNumberOfRuns);
@@ -158,6 +218,10 @@ public class SimPathsMultiRun extends MultiRun {
 		Option fileOption = new Option("f", "Output to file");
 		options.addOption(fileOption);
 
+		Option trainingOption = new Option("t", "training", true, "Use training data subset (InitialPopulations/training, EUROMODoutput/training, TaxDonorParserTraining). Overrides parameter_args.trainingFlag from YAML.");
+		trainingOption.setArgName("true/false");
+		options.addOption(trainingOption);
+
 		Option helpOption = new Option("h", "help", false, "Print this help message");
 		options.addOption(helpOption);
 
@@ -194,6 +258,12 @@ public class SimPathsMultiRun extends MultiRun {
 
 			if (cmd.hasOption("DBSetup")) {
 				flagDatabaseSetup = true;
+			}
+
+			if (cmd.hasOption("t")) {
+				boolean trainingValue = Boolean.parseBoolean(cmd.getOptionValue("t"));
+				Parameters.setTrainingFlag(trainingValue);
+				System.out.println("Training-data flag set explicitly via CLI: -t " + trainingValue + " (overrides parameter_args.trainingFlag from YAML)");
 			}
 
 			if (cmd.hasOption("p")) {
@@ -278,6 +348,11 @@ public class SimPathsMultiRun extends MultiRun {
 					continue;
 				}
 
+				if ("parameter_args".equals(key)) {
+					parameterArgs = (Map<String, Object>) value;
+					continue;
+				}
+
 				// Use reflection to dynamically set the field based on the key
 				updateLocalParameters(key, value);
 			}
@@ -317,6 +392,34 @@ public class SimPathsMultiRun extends MultiRun {
 
 		for (Map.Entry<String, Object> entry : args.entrySet()) {
 			updateLocalParameters(entry.getKey(), entry.getValue());
+		}
+	}
+
+	/**
+	 * Update static fields on {@link simpaths.data.Parameters} from a YAML
+	 * {@code parameter_args:} block. Mirrors UK's mechanism but without UK's
+	 * directory-shuffling special cases (those setters don't all exist in EU).
+	 * Unknown keys produce a NoSuchFieldException stacktrace — same failure
+	 * mode as the other {@code updateLocalParameters} overloads.
+	 */
+	public static void updateParameters(Map<String, Object> parameter_args) {
+
+		for (Map.Entry<String, Object> entry : parameter_args.entrySet()) {
+			String key = entry.getKey();
+			Object value = entry.getValue();
+
+			try {
+				Field field = Parameters.class.getDeclaredField(key);
+				field.setAccessible(true);
+
+				Class<?> fieldType = field.getType();
+				Object convertedValue = convertToType(value, fieldType);
+
+				field.set(null, convertedValue);
+				field.setAccessible(false);
+			} catch (NoSuchFieldException | IllegalAccessException e) {
+				e.printStackTrace();
+			}
 		}
 	}
 
@@ -415,6 +518,21 @@ public class SimPathsMultiRun extends MultiRun {
 		}
 	}
 	
+	/** Whether this JVM is executing a multi-run (as opposed to a single run). */
+	public static boolean isMultiRunMode() {
+		return multiRunMode;
+	}
+
+	/** Whether the random seed is incremented by one for each run after the first. */
+	public static boolean isRandomSeedInnov() {
+		return randomSeedInnov;
+	}
+
+	/** Number of runs this experiment will execute. */
+	public static int getMaxNumberOfRuns() {
+		return maxNumberOfRuns;
+	}
+
 	@Override
 	public boolean nextModel() {
 		counter++;

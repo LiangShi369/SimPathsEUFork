@@ -11,16 +11,14 @@ public enum RegressionName {
     EducationE1b(RegressionType.Probit),
     EducationE2a(RegressionType.GenOrderedLogit),
 
-    FertilityF1a(RegressionType.Probit),
-    FertilityF1b(RegressionType.Probit),
+    FertilityF1(RegressionType.Probit),
 
-    PartnershipU1a(RegressionType.Probit),
-    PartnershipU1b(RegressionType.Probit),
-    PartnershipU2b(RegressionType.Probit),
+    PartnershipU1(RegressionType.Probit),
+    PartnershipU2(RegressionType.Probit),
 
-    HealthH1a(RegressionType.GenOrderedLogit),
-    HealthH1b(RegressionType.GenOrderedLogit),
-    HealthH2b(RegressionType.Probit),
+
+    HealthH1(RegressionType.GenOrderedLogit),
+    HealthH2(RegressionType.Probit),
 
     HealthHM1Level(RegressionType.Linear),
     HealthHM2LevelMales(RegressionType.Linear),
@@ -31,36 +29,17 @@ public enum RegressionName {
 
     RMSE(RegressionType.Linear),
 
-    SocialCareS1a(RegressionType.Probit),
-    SocialCareS1b(RegressionType.Linear),
-    SocialCareS2a(RegressionType.Probit),
-    SocialCareS2b(RegressionType.Probit),
-    SocialCareS2c(RegressionType.MultinomialLogit),
-    SocialCareS2d(RegressionType.Probit),
-    SocialCareS2e(RegressionType.MultinomialLogit),
-    SocialCareS2f(RegressionType.MultinomialLogit),
-    SocialCareS2g(RegressionType.Linear),
-    SocialCareS2h(RegressionType.Linear),
-    SocialCareS2i(RegressionType.Linear),
-    SocialCareS2j(RegressionType.Linear),
-    SocialCareS2k(RegressionType.Linear),
-    SocialCareS3a(RegressionType.Probit),
-    SocialCareS3b(RegressionType.Probit),
-    SocialCareS3c(RegressionType.Probit),
-    SocialCareS3d(RegressionType.MultinomialLogit),
-    SocialCareS3e(RegressionType.Linear),
-
     UnemploymentU1a(RegressionType.Probit),
     UnemploymentU1b(RegressionType.Probit),
     UnemploymentU1c(RegressionType.Probit),
     UnemploymentU1d(RegressionType.Probit),
 
     WagesMales(RegressionType.Linear),
-    WagesMalesE(RegressionType.Linear),
-    WagesMalesNE(RegressionType.Linear),
+    W1mb(RegressionType.Linear),
+    W1ma(RegressionType.Linear),
     WagesFemales(RegressionType.Linear),
-    WagesFemalesE(RegressionType.Linear),
-    WagesFemalesNE(RegressionType.Linear);
+    W1fb(RegressionType.Linear),
+    W1fa(RegressionType.Linear);
 
     private final RegressionType type;
 

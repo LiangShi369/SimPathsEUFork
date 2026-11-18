@@ -90,14 +90,17 @@ public class RootSearch2 {
             if (bounds.getBracketed()) {
                 target = zbrent(xn, xp, fn, fp);
             } else {
-                if (Math.abs(fn) < Math.abs(fp)) {
-                    target = xn;
-                } else {
-                    target = xp;
-                }
-                // log as a single “decision” step
-                double chosenX = target[0];
-                double fChosen = function.evaluate(target);
+                final boolean chooseNeg = Math.abs(fn) < Math.abs(fp);
+                target = chooseNeg ? xn : xp;
+
+                // Re-evaluate at the chosen bound so that person state is
+                // consistent with the stored factor.  CheckBoundsForRoot
+                // evaluated both bounds, leaving state from the *last* one;
+                // without this call the simulation would continue with state
+                // from the wrong bound.
+                final double chosenX = target[0];
+                final double fChosen = function.evaluate(target);
+
                 iterationHistory.add(new IterationInfo(
                         iterationHistory.size(), chosenX, fChosen, Double.NaN,
                         Math.abs(fChosen) <= epsFunction, true));

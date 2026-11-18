@@ -109,9 +109,6 @@ public class DecisionParams {
     // DISABILITY STATE
     public static final Indicator DEFAULT_DISABILITY = Indicator.False;     // assumed for formulating expectations in absence of explicit value
 
-    // FORMAL SOCIAL CARE STATE
-    public static int minAgeReceiveFormalCare;
-
     // MAXIMUM AGE FOR COHABITATION
     public static final int MAX_AGE_COHABITATION = 115;
 
@@ -168,10 +165,6 @@ public class DecisionParams {
         Parameters.flagUnemployment = responsesToLowWageOffer;
         minAgeForPoorHealth = minAgeForPoorHealth1;
         flagDisability = respondToDisability;
-        if (Parameters.flagSocialCare) {
-            if (!flagHealth)
-                throw new RuntimeException("if project behavioural responses to social care, then need to also allow for health");
-        }
         flagRegion = responsesToRegion;
         flagEducation = responsesToEducation;
         if (responsesToPension || respondToRetirement)
@@ -190,7 +183,6 @@ public class DecisionParams {
             minAgeToRetire = Parameters.DEFAULT_AGE_TO_RETIRE;
         else
             minAgeToRetire = Parameters.MIN_AGE_TO_RETIRE;
-        minAgeReceiveFormalCare = Parameters.MIN_AGE_FORMAL_SOCARE;
 
         Parameters.annuityRates = new AnnuityRates();
         maxPensionPYear = getMaxWealthByAge(Parameters.MAX_AGE_FLEXIBLE_LABOUR_SUPPLY) * Parameters.SHARE_OF_WEALTH_TO_ANNUITISE_AT_RETIREMENT /
@@ -254,9 +246,6 @@ public class DecisionParams {
     }
 
     public static int maxAgeForDisability() {
-        int val = DecisionParams.maxAgeFlexibleLabourSupply;
-        if (Parameters.flagSocialCare && val >= DecisionParams.minAgeReceiveFormalCare)
-            val = DecisionParams.minAgeReceiveFormalCare - 1;
-        return val;
+        return DecisionParams.maxAgeFlexibleLabourSupply;
     }
 }

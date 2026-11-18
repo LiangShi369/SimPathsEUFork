@@ -198,29 +198,6 @@ public class CloneBenefitUnit {
         }
         return change;
     }
-    public boolean matchCarerIndex(int index) {
-
-        boolean change = false;
-        int carerTarget = getInteger(target,"lcr01");
-        int carerSpouse = 0;
-        if (spouse!=null)
-            carerSpouse = getInteger(spouse,"lcr01");
-        int carer = Math.max(carerTarget, carerSpouse);
-        if ( (index==0) && (carer>0) ) {
-            change = true;
-            if (carerTarget > 0)
-                target.replace("lcr01", 0.0);
-            if (carerSpouse > 0)
-                spouse.replace("lcr01", 0.0);
-        } else if ( (index==1) && (carer==0) ) {
-            change = true;
-            if (spouse!=null)
-                spouse.replace("lcr01", 1.0);
-            else
-                target.replace("lcr01", 1.0);
-        }
-        return change;
-    }
     public boolean matchDisabledIndex(int index) {
 
         boolean change = false;
