@@ -92,7 +92,6 @@ public class DatabaseExtension {
                 newPersonId = benefitUnit.matchChildrenIndex(imperfectMatch.getChildren(), newPersonId);
                 changed = benefitUnit.matchEmploymentIndex(imperfectMatch.getEmployment());
                 changed = benefitUnit.matchDisabledIndex(imperfectMatch.getDisability());
-                changed = benefitUnit.matchCarerIndex(imperfectMatch.getCareProvision());
                 changed = benefitUnit.matchChildcareIndex(imperfectMatch.getChildcare());
                 changed = benefitUnit.matchDualIncomeIndex(imperfectMatch.getDualIncome());
 

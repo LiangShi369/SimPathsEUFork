@@ -29,7 +29,7 @@ public class TaxEvaluation {
     public TaxEvaluation(){}
     public TaxEvaluation(int simYear, int age, Gender dgn, int numberMembersOver17, int numberChildrenUnder5, int numberChildren5To9,
                          int numberChildren10To17, double hoursWorkedPerWeekMan, double hoursWorkedPerWeekWoman,
-                         int disabilityMan, int disabilityWoman, int careProvision, double originalIncomePerMonth, double secondIncomePerMonth,
+                         int disabilityMan, int disabilityWoman, double originalIncomePerMonth, double secondIncomePerMonth,
                          double childcareCostPerMonth, double randomDraw) {
 
         // evaluate imputed transfer payments
@@ -40,7 +40,7 @@ public class TaxEvaluation {
 
         // evaluate transfer payments
         evaluateImputedTaxes(simYear, priceYear, age, dgn, numberMembersOver17, numberChildrenUnder5, numberChildren5To9, numberChildren10To17,
-                hoursWorkedPerWeekMan, hoursWorkedPerWeekWoman, disabilityMan, disabilityWoman, careProvision, originalIncomePerMonth,
+                hoursWorkedPerWeekMan, hoursWorkedPerWeekWoman, disabilityMan, disabilityWoman, originalIncomePerMonth,
                 secondIncomePerMonth, childcareCostPerMonth);
 
     }
@@ -52,7 +52,7 @@ public class TaxEvaluation {
      */
     private void evaluateImputedTaxes(int simYear, int priceYear, int age, Gender dgn, int numberMembersOver17, int numberChildrenUnder5, int numberChildren5To9,
                                       int numberChildren10To17, double hoursWorkedPerWeekMan, double hoursWorkedPerWeekWoman,
-                                      int disabilityMan, int disabilityWoman, int careProvision, double originalIncomePerMonth, double secondIncomePerMonth,
+                                      int disabilityMan, int disabilityWoman, double originalIncomePerMonth, double secondIncomePerMonth,
                                       double childcareCostPerMonth) {
 
         double originalIncomePerWeek = originalIncomePerMonth / Parameters.WEEKS_PER_MONTH;  // can be negative
@@ -60,7 +60,7 @@ public class TaxEvaluation {
         double childcareCostPerWeek = childcareCostPerMonth / Parameters.WEEKS_PER_MONTH;
         keyFunction = new KeyFunction(simYear, priceYear, age, dgn, numberMembersOver17, numberChildrenUnder5,
                 numberChildren5To9, numberChildren10To17, hoursWorkedPerWeekMan, hoursWorkedPerWeekWoman, disabilityMan,
-                disabilityWoman, careProvision, originalIncomePerWeek, secondIncomePerWeek, childcareCostPerWeek);
+                disabilityWoman, originalIncomePerWeek, secondIncomePerWeek, childcareCostPerWeek);
         keys.evaluate(keyFunction);
         imputedTransfers = new DonorTaxImputation(keys);
         imputedTransfers.evaluate();

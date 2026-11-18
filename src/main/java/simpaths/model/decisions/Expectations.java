@@ -484,7 +484,7 @@ public class Expectations {
         // evaluate disposable income
         double originalIncomePerMonth = originalIncomePerWeek * Parameters.WEEKS_PER_MONTH;
         TaxEvaluation evaluatedTransfers = new TaxEvaluation(year, ageYearsNextPeriod, dgn, numberAdults, numberChildrenUnder5, numberChildrenAged5To9,
-                numberChildrenAged10To17, hoursWorkPerWeek1, hoursWorkPerWeek2, disability1, disability2, 0, originalIncomePerMonth, secondIncomePerMonth,
+                numberChildrenAged10To17, hoursWorkPerWeek1, hoursWorkPerWeek2, disability1, disability2, originalIncomePerMonth, secondIncomePerMonth,
                 childcareCostPerMonth, -1.0);
 
         Match match = evaluatedTransfers.getMatch();

@@ -55,15 +55,12 @@ public class KeyFunctionHU2 implements IKeyFunction {
      * @param hoursWorkedPerWeekWoman employment hours per week of adult female
      * @param dlltsdMan disability status of man
      * @param dlltsdWoman disability status of woman
-     * @param careProvision indicator that at least one member of household provides social care; always 0 in
-     *                      SimPathsEU, which has no social care module (the dimension is kept so that the
-     *                      donor keys stored in existing input databases stay valid)
      * @param originalIncomePerWeek original income per week of family (possibly negative)
      * @return Integer list of keys, ordered from most fine (0) to most coarse (2)
      */
     public Integer[] evaluateKeys(int simYear, int priceYear, int age, Gender dgn, int numberMembersOver17, int numberChildrenUnder5, int numberChildren5To9,
                                   int numberChildren10To17, double hoursWorkedPerWeekMan, double hoursWorkedPerWeekWoman, int dlltsdMan, int dlltsdWoman,
-                                  int careProvision, double originalIncomePerWeek, double secondIncomePerWeek, double childcareCostPerWeek) {
+                                  double originalIncomePerWeek, double secondIncomePerWeek, double childcareCostPerWeek) {
 
         // initialise working variables
         int spa = Parameters.getStatePensionAge(simYear, dgn);
@@ -218,25 +215,6 @@ public class KeyFunctionHU2 implements IKeyFunction {
             localMap.put(5,0);
         }
         units.put(MatchFeature.Disability, localMap);
-
-        // social care provision (careProvision is always 0, so the units below are always 0)
-        localMap = new HashMap<>();
-        if (careProvision > 0) {
-            localMap.put(0,1);
-            localMap.put(1,1);
-            localMap.put(2,1);
-            localMap.put(3,0);
-            localMap.put(4,0);
-            localMap.put(5,0);
-        } else {
-            localMap.put(0,0);
-            localMap.put(1,0);
-            localMap.put(2,0);
-            localMap.put(3,0);
-            localMap.put(4,0);
-            localMap.put(5,0);
-        }
-        units.put(MatchFeature.CareProvision, localMap);
 
         // original income
         localMap = new HashMap<>();
@@ -420,11 +398,6 @@ public class KeyFunctionHU2 implements IKeyFunction {
             mapLocal = updateMap(mapLocal, ptsLocal);
             taxdbCounter.put(MatchFeature.Disability,mapLocal);
             ptsLocal = new int[]{2,2,1,1,1,1};
-
-            // care provision
-            mapLocal = updateMap(mapLocal, ptsLocal);
-            taxdbCounter.put(MatchFeature.CareProvision,mapLocal);
-            ptsLocal = new int[]{2,2,2,1,1,1};
 
             // original income
             mapLocal = updateMap(mapLocal, ptsLocal);

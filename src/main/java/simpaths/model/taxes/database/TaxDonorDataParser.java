@@ -653,7 +653,7 @@ public class TaxDonorDataParser {
                 counter++;
                 int age = 0, numberMembersOver17 = 0, numberChildrenUnder5 = 0, numberChildren5To9 = 0;
                 Gender dgn = Gender.Male;  //it is default gender value for Tax unit; needed only to evaluate flagSPA
-                int numberChildren10To17 = 0, dlltsd1 = 0, dlltsd2 = 0, careProvision = -1;
+                int numberChildren10To17 = 0, dlltsd1 = 0, dlltsd2 = 0;
                 double hoursWorkedPerWeek1 = 0.0, hoursWorkedPerWeek2 = 0.0;
                 boolean flagInitialiseDemographics = true;
                 for (int fromYear : Parameters.EUROMODpolicyScheduleSystemYearMap.keySet()) {
@@ -717,9 +717,6 @@ public class TaxDonorDataParser {
                                     dlltsd2 = dlltsd;
                                 }
                             }
-                            int cphere = person.getCarer();
-                            if (cphere>careProvision)
-                                careProvision = cphere;
                         } else {
                             // recompute tests for invariance on later years
                             if (agePerson > ageTest) {
@@ -746,7 +743,7 @@ public class TaxDonorDataParser {
                         DonorKeys keys = new DonorKeys();
                         KeyFunction keyFunction = new KeyFunction(systemYear, systemYear, age, dgn, numberMembersOver17, numberChildrenUnder5,
                                 numberChildren5To9, numberChildren10To17, hoursWorkedPerWeek1, hoursWorkedPerWeek2, dlltsd1, dlltsd2,
-                                careProvision, originalIncomePerWeek, secondIncomePerWeek, childcareCostPerWeek);
+                                originalIncomePerWeek, secondIncomePerWeek, childcareCostPerWeek);
                         keys.evaluate(keyFunction);
 
                         // set all taxUnitPolicy attributes
