@@ -15,6 +15,7 @@ import simpaths.data.ManagerRegressions;
 import simpaths.data.MultiValEvent;
 import simpaths.data.Parameters;
 import simpaths.data.RegressionName;
+import simpaths.data.SilcHoursDistribution;
 import simpaths.data.filters.FertileFilter;
 import simpaths.model.decisions.Axis;
 import simpaths.model.decisions.DecisionParams;
@@ -88,32 +89,8 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
     private Integer labEmpNyear;                  //Work history in years (number of years in employment)
     @Enumerated(EnumType.STRING) private Indicator healthDsblLongtermFlag;	//Long-term sick or disabled if = 1
     @Transient private Indicator healthDsblLongtermFlagL1; //Lag(1) of long-term sick or disabled
-    @Enumerated(EnumType.STRING) @Column(name="need_socare") private Indicator careNeedFlag;
-    @Column(name="formal_socare_hrs") private Double careHrsFormalWeek;
-    @Column(name="formal_socare_cost") private Double xCareFormalWeek;
-    @Column(name="partner_socare_hrs") private Double careHrsFromPartnerWeek;
-    @Column(name="parent_socare_hrs") private Double careHrsFromParentWeek;
-    @Column(name="daughter_socare_hrs") private Double careHrsFromDaughterWeek;
-    @Column(name="son_socare_hrs") private Double careHrsFromSonWeek;
-    @Column(name="other_socare_hrs") private Double careHrsFromOtherWeek;
     private Boolean labWageOfferLowFlag;
     @Transient private Boolean labWageOfferLowFlagL1;
-    @Transient private SocialCareReceipt careReceivedFlag;
-    @Transient private Boolean careFormalFlag;
-    @Transient private Boolean careFromPartnerFlag;
-    @Transient private Boolean careFromDaughterFlag;
-    @Transient private Boolean careFromSonFlag;
-    @Transient private Boolean careFromOtherFlag;
-    @Column(name="socare_provided_hrs") private Double careHrsProvidedWeek;
-    @Enumerated(EnumType.STRING) @Column(name="socare_provided_to") private SocialCareProvision careProvidedFlag;
-    @Transient private SocialCareProvision careProvidedFlagL1;
-    @Transient private Indicator careNeedFlagL1;
-    @Transient private Double careHrsFormalWeekL1;
-    @Transient private Double careHrsFromPartnerWeekL1;
-    @Transient private Double careHrsFromParentWeekL1;
-    @Transient private Double careHrsFromDaughterWeekL1;
-    @Transient private Double careHrsFromSonWeekL1;
-    @Transient private Double careHrsFromOtherWeekL1;
 
     // partner lags
     @Transient private Dcpst demPartnerStatusL1;            // lag partnership status
@@ -168,6 +145,13 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
     @Transient private Integer demPartnerNYearL1; //Lag(1) of number of years in partnership
     private Double yNonBenPersGrossMonth; // asinh of personal non-benefit income per month
     @Transient private Double yNonBenPersGrossMonthL1; //Lag(1) of gross personal non-benefit income
+    @Transient private Ydses_c5 yHhQuintilesC5L1; //Lag(1) income quintile of the benefit unit the person was in last year (Ydses_c5_*_L1); kept per person, see updateLaggedVariables
+    @Transient private Boolean wealthDhhOwnedL1; //Lag(1) home ownership of the benefit unit the person was in last year (Dhh_owned_L1); kept per person, see updateLaggedVariables
+    @Transient private Integer demNChildAllL1; //Lag(1) number of own dependent children aged 0-17 (Dnc*_L1, D_Children_L1); see updateChildrenAndHouseholdTypeLags
+    @Transient private Integer demNChildren02L1; //Lag(1) number of own dependent children aged 0-2 (Dnc02*_L1)
+    @Transient private Dhhtp_c4 demCompHhC4L1; //Lag(1) own household type (Dhhtp_c4_*_L1, Dhhtp_c8_*_L1)
+    @Transient private Double yDispEquivYearL1; //Lag(1) equivalised disposable income of the benefit unit the person was in last year (RealIncomeChange, RealIncomeDecrease_D)
+    @Transient private Integer yPvrtyFlagL1; //Lag(1) at-risk-of-poverty flag of the benefit unit the person was in last year (NonPovertyToPoverty, PovertyToNonPoverty, PersistentPoverty)
     @Transient private boolean parentsKnownL1; //Lag(1): a mother or father lived in the same household (Parents_known_L1)
     @Transient private Double parentsYpnbL1; //Lag(1) asinh of co-resident parents' summed non-benefit income; null if none
     @Transient private Ydses_c5 parentsYpnbQuintileL1; //Quintile of parentsYpnbL1, cut each year by SimPathsModel; null if none
@@ -207,7 +191,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
     @Transient private Map<Labour, Integer> personContinuousHoursLabourSupplyMap = new EnumMap<>(Labour.class);
     @Transient private boolean evaluatingLabourChoice = false; // true while the benefit unit scores candidate hours brackets; see Parameters.useRepresentativeHoursInUtility
     @Transient private Double labHrsDrawYear; // this year's position within the hours bracket, used when Parameters.redrawHoursEachYear is true
-    @Transient private String silcLhwSheet; // EU-SILC hours-distribution sheet (sample type and gender) fixed at the start of each labour-supply choice pass; see Parameters.USE_SILC_LHW_DISTRIBUTION_ES
+    @Transient private String silcLhwSheet; // EU-SILC hours-distribution sheet (sample type and gender) fixed at the start of each labour-supply choice pass; see Parameters.USE_SILC_LHW_DISTRIBUTION
 
     // local variables interact with regression models
     @Transient private Integer i_demYear;
@@ -253,7 +237,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         if (regressionModel) {
             model = null;
             key = null;
-            setAllSocialCareVariablesToFalse();
         } else {
             throw new RuntimeException("Person constructor call not recognised");
         }
@@ -286,7 +269,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         yPensPersGrossMonth = 0.0;
         labWageHrly = Parameters.MIN_HOURLY_WAGE_RATE;
         healthDsblLongtermFlag = Indicator.False;
-        setAllSocialCareVariablesToFalse();
         labWageOfferLowFlag = false;
         benefitUnit = mother.benefitUnit;
         idBu = benefitUnit.getId();
@@ -381,7 +363,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
             labC4 = originalPerson.labC4;
         } else if (originalPerson.demAge < Parameters.MIN_AGE_TO_LEAVE_EDUCATION) {
             labC4 = Les_c4.Student;
-        } else if (originalPerson.demAge > (int)Parameters.getTimeSeriesValue(model.getYear(), originalPerson.getDgn().toString(), TimeSeriesVariable.FixedRetirementAge)) {
+        } else if (originalPerson.reachedStatePensionAge(originalPerson.demAge, model.getYear())) {
             labC4 = Les_c4.Retired;
         } else if (originalPerson.getLabourSupplyWeekly() != null && originalPerson.getLabourSupplyWeekly().getHours(originalPerson) > 0) {
             labC4 = Les_c4.EmployedOrSelfEmployed;
@@ -412,6 +394,13 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         demPartnerStatusL1 = originalPerson.demPartnerStatusL1;
         yNonBenPersGrossMonth = originalPerson.getYpnbihs_dv();
         yNonBenPersGrossMonthL1 = originalPerson.yNonBenPersGrossMonthL1;
+        yHhQuintilesC5L1 = originalPerson.yHhQuintilesC5L1;
+        wealthDhhOwnedL1 = originalPerson.wealthDhhOwnedL1;
+        demNChildAllL1 = originalPerson.demNChildAllL1;
+        demNChildren02L1 = originalPerson.demNChildren02L1;
+        demCompHhC4L1 = originalPerson.demCompHhC4L1;
+        yDispEquivYearL1 = originalPerson.yDispEquivYearL1;
+        yPvrtyFlagL1 = originalPerson.yPvrtyFlagL1;
         parentsKnownL1 = originalPerson.parentsKnownL1;
         parentsYpnbL1 = originalPerson.parentsYpnbL1;
         yMiscPersGrossMonth = Objects.requireNonNullElse(originalPerson.yMiscPersGrossMonth, 0.0);
@@ -430,47 +419,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         labEmpNyear = Objects.requireNonNullElseGet(originalPerson.labEmpNyear, () -> ((Les_c4.EmployedOrSelfEmployed.equals(labC4)) ? 1 : 0));
         healthDsblLongtermFlag = originalPerson.healthDsblLongtermFlag;
         healthDsblLongtermFlagL1 = originalPerson.healthDsblLongtermFlagL1;
-        careNeedFlag = Objects.requireNonNullElse(originalPerson.careNeedFlag, Indicator.False);
-        careHrsFormalWeek = Objects.requireNonNullElse(originalPerson.careHrsFormalWeek, 0.0);
-        xCareFormalWeek = Objects.requireNonNullElse(originalPerson.xCareFormalWeek, 0.0);
-        careHrsFromPartnerWeek = Objects.requireNonNullElse(originalPerson.careHrsFromPartnerWeek, 0.0);
-        careHrsFromParentWeek = Objects.requireNonNullElse(originalPerson.careHrsFromParentWeek, 0.0);
-        careHrsFromDaughterWeek = Objects.requireNonNullElse(originalPerson.careHrsFromDaughterWeek, 0.0);
-        careHrsFromSonWeek = Objects.requireNonNullElse(originalPerson.careHrsFromSonWeek, 0.0);
-        careHrsFromOtherWeek = Objects.requireNonNullElse(originalPerson.careHrsFromOtherWeek, 0.0);
-        careFormalFlag = Objects.requireNonNullElseGet(originalPerson.careFormalFlag, () -> (careHrsFormalWeek > 0.0));
-        careFromPartnerFlag = Objects.requireNonNullElseGet(originalPerson.careFromPartnerFlag, () -> (careHrsFromPartnerWeek > 0.0));
-        careFromDaughterFlag = Objects.requireNonNullElseGet(originalPerson.careFromDaughterFlag, () -> (careHrsFromDaughterWeek > 0.0));
-        careFromSonFlag = Objects.requireNonNullElseGet(originalPerson.careFromSonFlag, () -> (careHrsFromSonWeek > 0.0));
-        careFromOtherFlag = Objects.requireNonNullElseGet(originalPerson.careFromOtherFlag, () -> (careHrsFromOtherWeek > 0.0));
-        if (originalPerson.careReceivedFlag!=null)
-            careReceivedFlag = originalPerson.careReceivedFlag;
-        else {
-            if (careFormalFlag) {
-                if (careFromPartnerFlag || careFromDaughterFlag || careFromSonFlag || careFromOtherFlag)
-                    careReceivedFlag = SocialCareReceipt.Mixed;
-                else
-                    careReceivedFlag = SocialCareReceipt.Formal;
-            } else {
-                if (careFromPartnerFlag || careFromDaughterFlag || careFromSonFlag || careFromOtherFlag)
-                    careReceivedFlag = SocialCareReceipt.Informal;
-                else
-                    careReceivedFlag = SocialCareReceipt.None;
-            }
-        }
-
-        careHrsProvidedWeek = Objects.requireNonNullElse(originalPerson.careHrsProvidedWeek, 0.0);
-        careProvidedFlag = Objects.requireNonNullElseGet(originalPerson.careProvidedFlag, () ->
-                (careHrsProvidedWeek > 0.01) ? SocialCareProvision.OnlyOther : SocialCareProvision.None);
-
-        careNeedFlagL1 = Objects.requireNonNullElse(originalPerson.careNeedFlagL1, careNeedFlag);
-        careHrsFormalWeekL1 = Objects.requireNonNullElse(originalPerson.careHrsFormalWeekL1, careHrsFormalWeek);
-        careHrsFromPartnerWeekL1 = Objects.requireNonNullElse(originalPerson.careHrsFromPartnerWeekL1, careHrsFromPartnerWeek);
-        careHrsFromDaughterWeekL1 = Objects.requireNonNullElse(originalPerson.careHrsFromDaughterWeekL1, careHrsFromDaughterWeek);
-        careHrsFromSonWeekL1 = Objects.requireNonNullElse(originalPerson.careHrsFromSonWeekL1, careHrsFromSonWeek);
-        careHrsFromOtherWeekL1 = Objects.requireNonNullElse(originalPerson.careHrsFromOtherWeekL1, careHrsFromOtherWeek);
-        careProvidedFlagL1 = Objects.requireNonNullElse(originalPerson.careProvidedFlagL1, careProvidedFlag);
-
         labWageOfferLowFlag = originalPerson.labWageOfferLowFlag;
         labWageOfferLowFlagL1 = originalPerson.labWageOfferLowFlagL1;
         eduExitSampleFlag = originalPerson.eduExitSampleFlag;
@@ -556,6 +504,8 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         demClonedFlag = false;
 
         // initialise random draws
+        // Draws 5-14 are unused: they belonged to the social care module, which has been removed. They
+        // are kept so that every other draw, and therefore the simulated results, stays unchanged.
         this.statSeed = statSeed;
         innovations = new Innovations(32, 1, 1, statSeed);
 
@@ -588,33 +538,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
             sampleDifferentials = Parameters.getWageAndAgeDifferentialMultivariateNormalDistribution(innovations.getSingleDrawLongInnov(0));
         }
         return sampleDifferentials;
-    }
-
-    private void setAllSocialCareVariablesToFalse() {
-        careNeedFlag = Indicator.False;
-        careHrsFormalWeek = -9.0;
-        careHrsFromPartnerWeek = -9.0;
-        careHrsFromParentWeek = -9.0;
-        careHrsFromDaughterWeek = -9.0;
-        careHrsFromSonWeek = -9.0;
-        careHrsFromOtherWeek = -9.0;
-        careHrsProvidedWeek = -9.0;
-        xCareFormalWeek = -9.0;
-        careReceivedFlag = SocialCareReceipt.None;
-        careFormalFlag = false;
-        careFromPartnerFlag = false;
-        careFromDaughterFlag = false;
-        careFromSonFlag = false;
-        careFromOtherFlag = false;
-        careProvidedFlag = SocialCareProvision.None;
-        careNeedFlagL1 = Indicator.False;
-        careHrsFormalWeekL1 = -9.0;
-        careHrsFromPartnerWeekL1 = -9.0;
-        careHrsFromParentWeekL1 = -9.0;
-        careHrsFromDaughterWeekL1 = -9.0;
-        careHrsFromSonWeekL1 = -9.0;
-        careHrsFromOtherWeekL1 = -9.0;
-        careProvidedFlagL1 = SocialCareProvision.None;
     }
 
     public void setAdditionalFieldsInInitialPopulation() {
@@ -694,8 +617,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         LeavingSchool,
         PartnershipDissolution,
         ProjectEquivConsumption,
-        SocialCareReceipt,
-        SocialCareProvision,
         Unemployment,
         Update,
         UpdateOutputVariables,
@@ -746,12 +667,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
     //			log.debug("Health for person " + this.getKey().getId());
                 health();
                 disability();
-            }
-            case SocialCareReceipt -> {
-                evaluateSocialCareReceipt();
-            }
-            case SocialCareProvision -> {
-                evaluateSocialCareProvision();
             }
             case HealthMentalHM1 -> {
                 healthMentalHM1Level();
@@ -1074,226 +989,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
                 healthDsblLongtermFlag = Indicator.True;
             } else {
                 healthDsblLongtermFlag = Indicator.False;
-            }
-        }
-    }
-
-    protected void evaluateSocialCareReceipt() {
-
-        if (demAge < Parameters.MIN_AGE_FORMAL_SOCARE || getYear()>getStartYear()) {
-
-            careNeedFlag = Indicator.False;
-            careHrsFormalWeek = 0.0;
-            xCareFormalWeek = 0.0;
-            careHrsFromPartnerWeek = 0.0;
-            careHrsFromParentWeek = 0.0;
-            careHrsFromDaughterWeek = 0.0;
-            careHrsFromSonWeek = 0.0;
-            careHrsFromOtherWeek = 0.0;
-            careReceivedFlag = SocialCareReceipt.None;
-            careFormalFlag = false;
-            careFromPartnerFlag = false;
-            careFromDaughterFlag = false;
-            careFromSonFlag = false;
-            careFromOtherFlag = false;
-        }
-        if (careHrsFromParentWeek==null)
-            careHrsFromParentWeek = 0.0;
-
-        if ((demAge < Parameters.MIN_AGE_FORMAL_SOCARE) && Indicator.True.equals(healthDsblLongtermFlag)) {
-            // under 65 years old with disability
-
-            careNeedFlag = Indicator.True;
-            double probRecCare;
-            if (Indicator.False.equals(healthDsblLongtermFlagL1) || getYear()==getStartYear()) {
-                // need to identify receipt of social care
-
-                probRecCare = Parameters.getRegReceiveCareS1a().getProbability(this, Person.DoublesVariables.class);
-            } else {
-                // persist preceding receipt
-
-                if (getTotalHoursSocialCare_L1()>0.5) {
-                    probRecCare = 1.1;
-                } else {
-                    probRecCare = -0.1;
-                }
-            }
-
-            if (innovations.getDoubleDraw(5) < probRecCare) {
-                // receive social care
-
-                double score = Parameters.getRegCareHoursS1b().getScore(this,Person.DoublesVariables.class);
-                double rmse = Parameters.getRMSEForRegression("S1b");
-                double gauss = Parameters.getStandardNormalDistribution().inverseCumulativeProbability(innovations.getDoubleDraw(6));
-                double careHours = Math.min(Parameters.MAX_HOURS_WEEKLY_INFORMAL_CARE, Math.exp(score + rmse * gauss));
-                Person partner = getPartner();
-                if (partner!=null && partner.getDag() < 75) {
-                    careFromPartnerFlag = true;
-                    careHrsFromPartnerWeek = careHours;
-                } else if (demAge < 50) {
-                    careFromOtherFlag = true;
-                    careHrsFromParentWeek = careHours;
-                } else {
-                    careFromOtherFlag = true;
-                    careHrsFromOtherWeek = careHours;
-                }
-            }
-        }
-
-        if (demAge >= Parameters.MIN_AGE_FORMAL_SOCARE && getYear()>getStartYear()) {
-            // need care only projected for 65 and over due to limitations of data used for parameterisation
-
-            double probNeedCare = Parameters.getRegNeedCareS2a().getProbability(this, Person.DoublesVariables.class);
-            double recCareInnov = innovations.getDoubleDraw(7);
-            if (recCareInnov < probNeedCare) {
-                // need care
-                careNeedFlag = Indicator.True;
-            }
-
-            double probRecCare = Parameters.getRegReceiveCareS2b().getProbability(this, Person.DoublesVariables.class);
-            if (recCareInnov < probRecCare) {
-                // receive care
-
-                Map<SocialCareReceiptS2c,Double> probs1 = Parameters.getRegSocialCareMarketS2c().getProbabilities(this, Person.DoublesVariables.class);
-                MultiValEvent event = new MultiValEvent(probs1, innovations.getDoubleDraw(8));
-                SocialCareReceiptS2c socialCareReceiptS2c = (SocialCareReceiptS2c) event.eval();
-                careReceivedFlag = SocialCareReceipt.getCode(socialCareReceiptS2c);
-                if (SocialCareReceipt.Mixed.equals(careReceivedFlag) || SocialCareReceipt.Formal.equals(careReceivedFlag))
-                    careFormalFlag = true;
-
-                if (SocialCareReceipt.Mixed.equals(careReceivedFlag) || SocialCareReceipt.Informal.equals(careReceivedFlag)) {
-                    // some informal care received
-
-                    if (getPartner()!=null) {
-                        // check if receive care from partner
-
-                        double probPartnerCare = Parameters.getRegReceiveCarePartnerS2d().getProbability(this, Person.DoublesVariables.class);
-                        if (innovations.getDoubleDraw(9) < probPartnerCare) {
-                            // receive care from partner - check for supplementary carers
-
-                            careFromPartnerFlag = true;
-                            Map<PartnerSupplementaryCarer,Double> probs2 =
-                                    Parameters.getRegPartnerSupplementaryCareS2e().getProbabilities(this, Person.DoublesVariables.class);
-                            event = new MultiValEvent(probs2, innovations.getDoubleDraw(10));
-                            PartnerSupplementaryCarer cc = (PartnerSupplementaryCarer) event.eval();
-                            if (PartnerSupplementaryCarer.Daughter.equals(cc))
-                                careFromDaughterFlag = true;
-                            if (PartnerSupplementaryCarer.Son.equals(cc))
-                                careFromSonFlag = true;
-                            if (PartnerSupplementaryCarer.Other.equals(cc))
-                                careFromOtherFlag = true;
-                        }
-                    }
-                    if (!careFromPartnerFlag) {
-                        // no care from partner - identify who supplies informal care
-
-                        Map<NotPartnerInformalCarer,Double> probs2 =
-                                Parameters.getRegNotPartnerInformalCareS2f().getProbabilities(this, Person.DoublesVariables.class);
-                        event = new MultiValEvent(probs2, innovations.getDoubleDraw(11));
-                        NotPartnerInformalCarer cc = (NotPartnerInformalCarer) event.eval();
-                        if (NotPartnerInformalCarer.DaughterOnly.equals(cc) || NotPartnerInformalCarer.DaughterAndSon.equals(cc) || NotPartnerInformalCarer.DaughterAndOther.equals(cc))
-                            careFromDaughterFlag = true;
-                        if (NotPartnerInformalCarer.SonOnly.equals(cc) || NotPartnerInformalCarer.DaughterAndSon.equals(cc) || NotPartnerInformalCarer.SonAndOther.equals(cc))
-                            careFromSonFlag = true;
-                        if (NotPartnerInformalCarer.OtherOnly.equals(cc) || NotPartnerInformalCarer.SonAndOther.equals(cc) || NotPartnerInformalCarer.DaughterAndOther.equals(cc))
-                            careFromOtherFlag = true;
-                    }
-                }
-                double careHoursInnov = innovations.getDoubleDraw(12);
-                if (careFromPartnerFlag) {
-                    double score = Parameters.getRegPartnerCareHoursS2g().getScore(this,Person.DoublesVariables.class);
-                    double rmse = Parameters.getRMSEForRegression("S2g");
-                    double gauss = Parameters.getStandardNormalDistribution().inverseCumulativeProbability(careHoursInnov);
-                    careHrsFromPartnerWeek = Math.min(Parameters.MAX_HOURS_WEEKLY_INFORMAL_CARE, Math.exp(score + rmse * gauss));
-                }
-                careHoursInnov = Parameters.updateProbability(careHoursInnov);
-                if (careFromDaughterFlag) {
-                    double score = Parameters.getRegDaughterCareHoursS2h().getScore(this,Person.DoublesVariables.class);
-                    double rmse = Parameters.getRMSEForRegression("S2h");
-                    double gauss = Parameters.getStandardNormalDistribution().inverseCumulativeProbability(careHoursInnov);
-                    careHrsFromDaughterWeek = Math.min(Parameters.MAX_HOURS_WEEKLY_INFORMAL_CARE, Math.exp(score + rmse * gauss));
-                }
-                careHoursInnov = Parameters.updateProbability(careHoursInnov);
-                if (careFromSonFlag) {
-                    double score = Parameters.getRegSonCareHoursS2i().getScore(this,Person.DoublesVariables.class);
-                    double rmse = Parameters.getRMSEForRegression("S2i");
-                    double gauss = Parameters.getStandardNormalDistribution().inverseCumulativeProbability(careHoursInnov);
-                    careHrsFromSonWeek = Math.min(Parameters.MAX_HOURS_WEEKLY_INFORMAL_CARE, Math.exp(score + rmse * gauss));
-                }
-                careHoursInnov = Parameters.updateProbability(careHoursInnov);
-                if (careFromOtherFlag) {
-                    double score = Parameters.getRegOtherCareHoursS2j().getScore(this,Person.DoublesVariables.class);
-                    double rmse = Parameters.getRMSEForRegression("S2j");
-                    double gauss = Parameters.getStandardNormalDistribution().inverseCumulativeProbability(careHoursInnov);
-                    careHrsFromOtherWeek = Math.min(Parameters.MAX_HOURS_WEEKLY_INFORMAL_CARE, Math.exp(score + rmse * gauss));
-                }
-                careHoursInnov = Parameters.updateProbability(careHoursInnov);
-                if (careFormalFlag) {
-                    double score = Parameters.getRegFormalCareHoursS2k().getScore(this,Person.DoublesVariables.class);
-                    double rmse = Parameters.getRMSEForRegression("S2k");
-                    double gauss = Parameters.getStandardNormalDistribution().inverseCumulativeProbability(careHoursInnov);
-                    careHrsFormalWeek = Math.min(Parameters.MAX_HOURS_WEEKLY_FORMAL_CARE, Math.exp(score + rmse * gauss));
-                    xCareFormalWeek = careHrsFormalWeek * Parameters.getTimeSeriesValue(model.getYear(), TimeSeriesVariable.CarerWageRate);
-                }
-            }
-        }
-        if (Parameters.flagSuppressSocialCareCosts)
-            xCareFormalWeek = 0.0;
-    }
-
-    protected void evaluateSocialCareProvision() {
-        evaluateSocialCareProvision(Parameters.getTimeSeriesValue(model.getYear(),TimeSeriesVariable.CareProvisionAdjustment));
-    }
-
-    public void evaluateSocialCareProvision(double probitAdjustment) {
-
-        careProvidedFlag = SocialCareProvision.None;
-        careHrsProvidedWeek = 0.0;
-        boolean careToPartner = false;
-        boolean careToOther;
-        double careHoursToPartner = 0.0;
-        if (demAge >= Parameters.AGE_TO_BECOME_RESPONSIBLE) {
-
-            // check if care provided to partner
-            // identified in method evaluateSocialCareReceipt
-            Person partner = getPartner();
-            if (partner!=null && partner.careFromPartnerFlag) {
-                careToPartner = true;
-                careHoursToPartner = partner.getCareHoursFromPartnerWeekly();
-            }
-
-            // check if care provided to "other"
-            double prob;
-            if (careToPartner) {
-                double score = Parameters.getRegCarePartnerProvCareToOtherS3a().getScore(this, Person.DoublesVariables.class);
-                prob = Parameters.getRegCarePartnerProvCareToOtherS3a().getProbability(score + probitAdjustment);
-            } else {
-                double score = Parameters.getRegNoCarePartnerProvCareToOtherS3b().getScore(this, Person.DoublesVariables.class);
-                prob = Parameters.getRegNoCarePartnerProvCareToOtherS3b().getProbability(score + probitAdjustment);
-            }
-            careToOther = (innovations.getDoubleDraw(13) < prob);
-
-            // update care provision states
-            if (careToPartner || careToOther) {
-
-                if (careToPartner && careToOther) {
-                    careProvidedFlag = SocialCareProvision.PartnerAndOther;
-                } else if (careToPartner) {
-                    careProvidedFlag = SocialCareProvision.OnlyPartner;
-                } else {
-                    careProvidedFlag = SocialCareProvision.OnlyOther;
-                }
-                if (!Parameters.flagSuppressSocialCareCosts) {
-                    if (SocialCareProvision.OnlyPartner.equals(careProvidedFlag)) {
-                        careHrsProvidedWeek = careHoursToPartner;
-                    } else {
-                        double score = Parameters.getRegCareHoursProvS3e().getScore(this,Person.DoublesVariables.class);
-                        double rmse = Parameters.getRMSEForRegression("S3e");
-                        double gauss = Parameters.getStandardNormalDistribution().inverseCumulativeProbability(innovations.getDoubleDraw(14));
-                        careHrsProvidedWeek = Math.min(Parameters.MAX_HOURS_WEEKLY_INFORMAL_CARE,
-                                Math.max(careHoursToPartner + 1.0, Math.exp(score + rmse * gauss)));
-                    }
-                }
             }
         }
     }
@@ -1765,8 +1460,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         //ded = (Les_c4.Student.equals(les_c4)) ? Indicator.True : Indicator.False; it's a bug!
         // now it's fixed - it's set up from init pop and is updated in inSchool method
 
-        if (initialUpdate && careHrsFromParentWeek==null)
-            careHrsFromParentWeek = 0.0;
         if (demAge<Parameters.AGE_TO_BECOME_RESPONSIBLE) {
             Person mother = benefitUnit.getFemale();
             if (mother!=null)
@@ -1792,9 +1485,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
                 healthDsblLongtermFlag = Indicator.False;
                 healthDsblLongtermFlagL1 = Indicator.False;
             }
-            if (!Parameters.flagSocialCare) {
-                setAllSocialCareVariablesToFalse();
-            }
             innovations.getNewDoubleDraws();
         }
     }
@@ -1816,18 +1506,22 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         healthWbScore0to36L1 = healthWbScore0to36; //Update lag(1) of mental health
         healthDhmGhqL1 = healthDhmGhq;
         healthDsblLongtermFlagL1 = healthDsblLongtermFlag; //Update lag(1) of long-term sick or disabled status
-        careNeedFlagL1 = careNeedFlag;
-        careHrsFormalWeekL1 = careHrsFormalWeek;
-        careHrsFromPartnerWeekL1 = careHrsFromPartnerWeek;
-        careHrsFromParentWeekL1 = careHrsFromParentWeek;
-        careHrsFromDaughterWeekL1 = careHrsFromDaughterWeek;
-        careHrsFromSonWeekL1 = careHrsFromSonWeek;
-        careHrsFromOtherWeekL1 = careHrsFromOtherWeek;
-        careProvidedFlagL1 = careProvidedFlag;
         labWageOfferLowFlagL1 = getLowWageOffer();
         eduHighestC4L1 = eduHighestC4; //Update lag(1) of education level
         eduDedL1 = eduSpellFlag; //Update lag(1) of education level
         yNonBenPersGrossMonthL1 = getYpnbihs_dv(); //Update lag(1) of gross personal non-benefit income
+        // Lag(1) income quintile, saved per person as Stata's l.ydses_c5 is. This runs before ageing, while the person is
+        // still in last year's benefit unit, so someone who turns 18 and moves to a new unit keeps their parents' quintile.
+        yHhQuintilesC5L1 = benefitUnit.getYdses_c5();
+        // Lag(1) home ownership, saved per person for the same reason. At 17 it is the parents' unit's, as in the data,
+        // where every benefit unit takes the home ownership of its household (03_create_benefit_units_<CC>.do).
+        wealthDhhOwnedL1 = benefitUnit.isDhhOwned();
+        // Lag(1) equivalised disposable income and poverty status, saved per person for the same reason. The only Stata
+        // definition (exp_incchange and exp_poverty in regression_estimates/ES/with_time_trend/variable_update_ak.do, which
+        // no ES or PL estimation runs) also lags them per person.
+        yDispEquivYearL1 = benefitUnit.getEquivalisedDisposableIncomeYearly();
+        yPvrtyFlagL1 = benefitUnit.getAtRiskOfPoverty();
+        updateChildrenAndHouseholdTypeLags();
         updateParentsLaggedVariables();
         labHrsWorkEnumWeekL1 = getLabourSupplyWeekly(); // Lag(1) of labour supply
         yBenReceivedFlagL1 = yBenReceivedFlag; // Lag(1) of flag indicating if individual receives benefits
@@ -2044,7 +1738,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         isNotEmployedOrRetired,
         isToBePartnered,
         isPsychologicallyDistressed,
-        isNeedSocialCare,
     }
 
     public int getIntValue(Enum<?> variableID) {
@@ -2081,9 +1774,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
 
         case isPsychologicallyDistressed:
             return (healthDhmGhq)? 1 : 0;
-
-        case isNeedSocialCare:
-            return (Indicator.True.equals(careNeedFlag)) ? 1 : 0;
 
         default:
             throw new RuntimeException("Unsupported variable " + variableID.name() + " in Person#getIntValue");
@@ -2290,7 +1980,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         Lnonwork,
         Lstudent,
         Lunion,
-        NeedCare_L1,
         NonPovertyToPoverty,
         NotEmployed_L1,
         NumberChildren,
@@ -2321,14 +2010,12 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         RealIncomeChange, //Note: the above return a 0 or 1 value, but income variables will return the change in income or 0
         RealIncomeDecrease_D,
         RealWageGrowth,
-        ReceiveCare_L1,
         ResStanDev,
         Retired,
         sIndex,
         sIndexNormalised,
         Single,
         Single_kids,
-        StatePensionAge,
         UnemployedToEmployed,
         UnemploymentRate,
         Union,
@@ -2510,15 +2197,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
 
             case LnAge -> {
                 return Math.log(demAge);
-            }
-            case StatePensionAge -> {
-                return (demAge >= 68) ? 1. : 0.;
-            }
-            case NeedCare_L1 -> {
-                return (Indicator.True.equals(careNeedFlagL1)) ? 1. : 0.;
-            }
-            case ReceiveCare_L1 -> {
-                return (getTotalHoursSocialCare_L1() > 0.01) ? 1. : 0.;
             }
             case Constant -> {
                 return 1.;
@@ -3428,108 +3106,59 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
             case Yplgrs_dv_L3 -> {
                 return yEmpPersGrossMonthL3;
             }
-            case Reached_Retirement_Age -> {
-                int retirementAge;
-                if (demMaleFlag.equals(Gender.Female)) {
-                    retirementAge = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                } else {
-                    retirementAge = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                }
-                return (demAge >= retirementAge) ? 1. : 0.;
+            case Reached_Retirement_Age -> { // At or above state pension age
+                return reachedStatePensionAge(demAge, getYear()) ? 1. : 0.;
             }
-            case Reached_Retirement_Age_Sp -> {
-                int retirementAgePartner;
-                Person partner = getPartner();
-                if (partner != null) {
-                    if (partner.demMaleFlag.equals(Gender.Female)) {
-                        retirementAgePartner = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                    } else {
-                        retirementAgePartner = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                    }
-                    return (partner.demAge >= retirementAgePartner) ? 1. : 0.;
-                } else {
-                    return 0.;
-                }
-            }
-            case Elig_pen -> { // Age == state retirement age
-                int retirementAge;
-                if (demMaleFlag.equals(Gender.Female)) {
-                    retirementAge = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                } else {
-                    retirementAge = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                }
-                return (demAge == retirementAge) ? 1. : 0.;
-            }
-            case Elig_pen_L1 -> { // Age == state retirement age +1
-                int retirementAge = 1;
-                if (demMaleFlag.equals(Gender.Female)) {
-                    retirementAge += (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                } else {
-                    retirementAge += (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                }
-                return (demAge == retirementAge) ? 1. : 0.;
-            }
-
-            case Elig_pen_Sp -> { // Partner's age == state retirement age
-                int retirementAgePartner;
-                Person partner = getPartner();
-                if (partner != null) {
-                    if (partner.demMaleFlag.equals(Gender.Female)) {
-                        retirementAgePartner = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                    } else {
-                        retirementAgePartner = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                    }
-                    return (partner.demAge == retirementAgePartner) ? 1. : 0.;
-                } else {
-                    return 0.;
-                }
-            }
-            case Elig_pen_L1_Sp -> { // Partner's age == state retirement age +1
-                int retirementAgePartner = 1;
-                Person partner = getPartner();
-                if (partner != null) {
-                    if (partner.demMaleFlag.equals(Gender.Female)) {
-                        retirementAgePartner += (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                    } else {
-                        retirementAgePartner += (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                    }
-                    return (partner.demAge == retirementAgePartner) ? 1. : 0.;
-                } else {
-                    return 0.;
-                }
-            }
-            case Reached_Retirement_Age_Sp_L1 -> { // Partner was at or above state retirement age in the previous year
+            case Reached_Retirement_Age_Sp -> { // Partner at or above state pension age
                 Person partner = getPartner();
                 if (partner == null)
                     return 0.;
-                return (partner.demAge - 1 >= getFixedRetirementAge(partner, getYear() - 1)) ? 1. : 0.;
+                return partner.reachedStatePensionAge(partner.demAge, getYear()) ? 1. : 0.;
             }
-            case Elig_pen_Sp_L1 -> { // Partner's age == state retirement age in the previous year
+            case Elig_pen -> { // Age == state pension age
+                return (demAge == getStatePensionAge(getYear())) ? 1. : 0.;
+            }
+            case Elig_pen_L1 -> { // Age == state pension age + 1
+                return (demAge == getStatePensionAge(getYear()) + 1) ? 1. : 0.;
+            }
+            case Elig_pen_Sp -> { // Partner's age == state pension age
                 Person partner = getPartner();
                 if (partner == null)
                     return 0.;
-                return (partner.demAge - 1 == getFixedRetirementAge(partner, getYear() - 1)) ? 1. : 0.;
+                return (partner.demAge == partner.getStatePensionAge(getYear())) ? 1. : 0.;
             }
-            case Elig_pen_L1_Sp_L1 -> { // Partner's age == state retirement age +1 in the previous year.
+            case Elig_pen_L1_Sp -> { // Partner's age == state pension age + 1
+                Person partner = getPartner();
+                if (partner == null)
+                    return 0.;
+                return (partner.demAge == partner.getStatePensionAge(getYear()) + 1) ? 1. : 0.;
+            }
+            case Reached_Retirement_Age_Sp_L1 -> { // Partner was at or above state pension age in the previous year
+                Person partner = getPartner();
+                if (partner == null)
+                    return 0.;
+                return partner.reachedStatePensionAge(partner.demAge - 1, getYear() - 1) ? 1. : 0.;
+            }
+            case Elig_pen_Sp_L1 -> { // Partner's age == state pension age in the previous year
+                Person partner = getPartner();
+                if (partner == null)
+                    return 0.;
+                return (partner.demAge - 1 == partner.getStatePensionAge(getYear() - 1)) ? 1. : 0.;
+            }
+            case Elig_pen_L1_Sp_L1 -> { // Partner's age == state pension age + 1 in the previous year.
                                         // Inner _L1 is the age offset (SPA+1), outer _L1 is the one-year time lag
                 Person partner = getPartner();
                 if (partner == null)
                     return 0.;
-                return (partner.demAge - 1 == getFixedRetirementAge(partner, getYear() - 1) + 1) ? 1. : 0.;
+                return (partner.demAge - 1 == partner.getStatePensionAge(getYear() - 1) + 1) ? 1. : 0.;
             }
-            case Reached_Retirement_Age_Les_c3_NotEmployed_L1 -> { //Reached retirement age and was not employed in the previous year
-                int retirementAge;
-                if (demMaleFlag.equals(Gender.Female)) {
-                    retirementAge = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                } else {
-                    retirementAge = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                }
-                return ((demAge >= retirementAge) && (labC4L1.equals(Les_c4.NotEmployed) || labC4L1.equals(Les_c4.Retired))) ? 1. : 0.;
+            case Reached_Retirement_Age_Les_c3_NotEmployed_L1 -> { // At or above state pension age and not employed in the previous year
+                return (reachedStatePensionAge(demAge, getYear()) && (labC4L1.equals(Les_c4.NotEmployed) || labC4L1.equals(Les_c4.Retired))) ? 1. : 0.;
             }
             case Reached_Retirement_Age_Les_c2_NotEmployed_L1, Reached_Retirement_Age_Les_L1 -> {
                 // Stata Reached_Retirement_Age * l.Les_c3_NotEmployed, where Reached_Retirement_Age = dagpns
                 // (at or above state pension age this year) and Les_c3_NotEmployed = lesnr_c2
-                return (demAge >= getFixedRetirementAge(this, getYear()) && isNotEmployedC2Lag1()) ? 1. : 0.;
+                return (reachedStatePensionAge(demAge, getYear()) && isNotEmployedC2Lag1()) ? 1. : 0.;
             }
             case EquivalisedIncomeYearly -> {
                 return getBenefitUnit().getEquivalisedDisposableIncomeYearly();
@@ -3560,26 +3189,27 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
                 return (getYear() > 2015) ? 1. : 0.;
             }
 
+            // poverty and income change: the current benefit unit's value against the person's own lag
             case NonPovertyToPoverty -> {
-                if (benefitUnit.getAtRiskOfPoverty_lag1() != null) {
-                    return (benefitUnit.getAtRiskOfPoverty_lag1() == 0 && benefitUnit.getAtRiskOfPoverty() == 1) ? 1. : 0.;
+                if (yPvrtyFlagL1 != null) {
+                    return (yPvrtyFlagL1 == 0 && benefitUnit.getAtRiskOfPoverty() == 1) ? 1. : 0.;
                 } else return 0.;
             }
             case PovertyToNonPoverty -> {
-                if (benefitUnit.getAtRiskOfPoverty_lag1() != null) {
-                    return (benefitUnit.getAtRiskOfPoverty_lag1() == 1 && benefitUnit.getAtRiskOfPoverty() == 0) ? 1. : 0.;
+                if (yPvrtyFlagL1 != null) {
+                    return (yPvrtyFlagL1 == 1 && benefitUnit.getAtRiskOfPoverty() == 0) ? 1. : 0.;
                 } else return 0.;
             }
             case PersistentPoverty -> {
-                if (benefitUnit.getAtRiskOfPoverty_lag1() != null) {
-                    return (benefitUnit.getAtRiskOfPoverty_lag1() == 1 && benefitUnit.getAtRiskOfPoverty() == 1) ? 1. : 0.;
+                if (yPvrtyFlagL1 != null) {
+                    return (yPvrtyFlagL1 == 1 && benefitUnit.getAtRiskOfPoverty() == 1) ? 1. : 0.;
                 } else return 0.;
             }
             case RealIncomeChange -> {
-                return (benefitUnit.getYearlyChangeInLogEDI());
+                return getYearlyChangeInLogEDI();
             }
             case RealIncomeDecrease_D -> {
-                return (benefitUnit.isDecreaseInYearlyEquivalisedDisposableIncome()) ? 1. : 0.;
+                return (yDispEquivYearL1 != null && benefitUnit.getEquivalisedDisposableIncomeYearly() < yDispEquivYearL1) ? 1. : 0.;
             }
             case D_Econ_benefits -> {
                 return isReceivesBenefitsFlag_L1() ? 1. : 0.;
@@ -3588,7 +3218,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
                 return getBenefitUnit().isDhhOwned() ? 1. : 0.;
             } // Evaluated at the level of a benefit unit. If required, can be changed to individual-level homeownership status.
             case Dhh_owned_L1 -> {
-                return getBenefitUnit().isDhhOwned_lag1() ? 1. : 0.;
+                return Boolean.TRUE.equals(wealthDhhOwnedL1) ? 1. : 0.;
             }
             case Pt -> {
                 return (getLabourSupplyHoursWeekly() > 0 && getLabourSupplyHoursWeekly() < Parameters.MIN_HOURS_FULL_TIME_EMPLOYED) ? 1. : 0.;
@@ -3869,6 +3499,41 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
             }
         }
         return parents;
+    }
+
+    /**
+     * Lag(1) number of own dependent children and own household type, as Stata's l.dnc, l.dnc02 and l.dhhtp_c4. In the
+     * data (03_create_benefit_units_<CC>.do) an adult's dnc is the number of children aged 0-17 in their benefit unit (ES)
+     * or of their own children (PL), a person aged 17 or under has none, and dhhtp_c4 combines dnc with the person's own
+     * partnership status. So an adult takes the values of their benefit unit, and a child, whose unit is the parents',
+     * has no children and is single. Called from updateLaggedVariables, before ageing, so a person who moves to a new
+     * benefit unit during the year (at 18, or when a partnership forms or ends) keeps last year's values.
+     */
+    private void updateChildrenAndHouseholdTypeLags() {
+
+        if (demAge < Parameters.AGE_TO_BECOME_RESPONSIBLE) {
+            demNChildAllL1 = 0;
+            demNChildren02L1 = 0;
+            demCompHhC4L1 = Dhhtp_c4.SingleNoChildren;
+        } else {
+            demNChildAllL1 = benefitUnit.getNumberChildrenAll();
+            demNChildren02L1 = benefitUnit.getNumberChildren(0,2);
+            demCompHhC4L1 = benefitUnit.getDhhtp_c4();
+        }
+    }
+
+    /**
+     * Change in log equivalised disposable income from last year (RealIncomeChange): this year's income of the current
+     * benefit unit against the person's own lag, so a person who moved to a new unit this year is compared with the unit
+     * they were in last year. Like Stata's econ_realequivinc - L.econ_realequivinc, it compares this year's income, so
+     * it is meaningful once that is known (after BenefitUnit.Processes.CalculateChangeInEDI). +1 because log(0) is not
+     * defined. Returns 0 when either income is missing or negative.
+     */
+    private double getYearlyChangeInLogEDI() {
+        double edi = benefitUnit.getEquivalisedDisposableIncomeYearly();
+        if (yDispEquivYearL1 != null && edi >= 0. && yDispEquivYearL1 >= 0.)
+            return Math.log(edi + 1) - Math.log(yDispEquivYearL1 + 1);
+        return 0.;
     }
 
     /**
@@ -4218,12 +3883,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
 
     private void nullPartnerVariables() {
 
-        careHrsFromPartnerWeek = 0.0;
         demPartnerNYear = 0;
-        if (SocialCareProvision.OnlyPartner.equals(careProvidedFlag))
-            careProvidedFlag = SocialCareProvision.None;
-        else if (SocialCareProvision.PartnerAndOther.equals(careProvidedFlag))
-            careProvidedFlag = SocialCareProvision.OnlyOther;
     }
 
     public Labour getLabourSupplyWeekly() {
@@ -4272,32 +3932,15 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
      * candidate hours bracket, which would rerun the partner's atRiskOfWork() each time.
      */
     public void updateSilcLhwSheet() {
-        silcLhwSheet = (Parameters.USE_SILC_LHW_DISTRIBUTION_ES && "ES".equals(Parameters.COUNTRY_STRING))
-                ? findSilcLhwSheet() : null;
+        silcLhwSheet = (Parameters.getSilcHoursDistribution() != null) ? SilcHoursDistribution.sheetFor(this) : null;
     }
 
     /**
-     * EU-SILC hours-distribution sheet used to draw realised hours (Parameters.USE_SILC_LHW_DISTRIBUTION_ES):
+     * EU-SILC hours-distribution sheet used to draw realised hours (Parameters.USE_SILC_LHW_DISTRIBUTION):
      * the one fixed at the start of the last labour-supply choice pass, otherwise the person's current sample type.
      */
     public String getSilcLhwSheet() {
-        return (silcLhwSheet != null) ? silcLhwSheet : findSilcLhwSheet();
-    }
-
-    /**
-     * Sample type and gender of the person, mirroring the choice of labour-supply estimates in BenefitUnit:
-     * Couple when both partners are flexible in labour supply, Single_dep when the partner is not,
-     * Adult_child for single adult children and Single_indep for other singles.
-     */
-    private String findSilcLhwSheet() {
-        String sample;
-        if (benefitUnit != null && Occupancy.Couple.equals(benefitUnit.getOccupancy())) {
-            Person partner = (Gender.Female.equals(demMaleFlag)) ? benefitUnit.getMale() : benefitUnit.getFemale();
-            sample = (partner != null && partner.atRiskOfWork()) ? "Couple" : "Single_dep";
-        } else {
-            sample = (getAdultChildFlag() == 1) ? "Adult_child" : "Single_indep";
-        }
-        return sample + (Gender.Female.equals(demMaleFlag) ? "_female" : "_male");
+        return (silcLhwSheet != null) ? silcLhwSheet : SilcHoursDistribution.sheetFor(this);
     }
 
     public double getLabourSupplyHoursYearly() {
@@ -4359,58 +4002,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         return val;
     }
 
-    public void populateSocialCareReceipt(SocialCareReceiptState state) {
-        if (SocialCareReceiptState.NoFormal.equals(state)) {
-            careNeedFlag = Indicator.True;
-            careReceivedFlag = SocialCareReceipt.Informal;
-            careHrsFromOtherWeek = 10.0;
-            careFromOtherFlag = true;
-        } else if (SocialCareReceiptState.Mixed.equals(state)) {
-            careNeedFlag = Indicator.True;
-            careReceivedFlag = SocialCareReceipt.Mixed;
-            careHrsFromOtherWeek = 10.0;
-            careHrsFormalWeek = 10.0;
-            xCareFormalWeek = 100.0;
-            careFormalFlag = true;
-            careFromOtherFlag = true;
-        } else if (SocialCareReceiptState.Formal.equals(state)) {
-            careNeedFlag = Indicator.True;
-            careReceivedFlag = SocialCareReceipt.Formal;
-            careHrsFormalWeek = 10.0;
-            xCareFormalWeek = 100.0;
-            careFormalFlag = true;
-        }
-    }
-
-    public void populateSocialCareReceipt_lag1(SocialCareReceiptState state) {
-        if (SocialCareReceiptState.NoFormal.equals(state)) {
-            careNeedFlagL1 = Indicator.True;
-            careHrsFromOtherWeekL1 = 10.0;
-        } else if (SocialCareReceiptState.Mixed.equals(state)) {
-            careNeedFlagL1 = Indicator.True;
-            careHrsFromOtherWeekL1 = 10.0;
-            careHrsFormalWeekL1 = 10.0;
-        } else if (SocialCareReceiptState.Formal.equals(state)) {
-            careNeedFlagL1 = Indicator.True;
-            careHrsFormalWeekL1 = 10.0;
-        }
-    }
-
-    public void setSocialCareFromOther(boolean val) {
-        careFromOtherFlag = val;
-    }
-
-    public void setCareHoursFromOtherWeekly_lag1(double val) {
-        careHrsFromOtherWeekL1 = val;
-    }
-
-    public void setCareHoursFromFormalWeekly_lag1(double val) {
-        careHrsFormalWeekL1 = val;
-    }
-    public void setSocialCareProvision_lag1(SocialCareProvision careProvision) {
-        careProvidedFlagL1 = careProvision;
-    }
-
     public void setDhm(Double healthWbScore0to36) {
         this.healthWbScore0to36 = healthWbScore0to36;
     }
@@ -4429,14 +4020,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
 
     public void setDhmGhq(boolean dhm_ghq) {
         this.healthDhmGhq = dhm_ghq;
-    }
-
-    public Indicator getNeedSocialCare() {
-        return careNeedFlag;
-    }
-
-    public void setNeedSocialCare(Indicator careNeedFlag) {
-        this.careNeedFlag = careNeedFlag;
     }
 
     public Indicator getDer() {
@@ -4494,14 +4077,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
     }
     public void setDlltsd(Indicator healthDsblLongtermFlag) {
         this.healthDsblLongtermFlag = healthDsblLongtermFlag;
-    }
-
-    public void setSocialCareReceipt(SocialCareReceipt who) {
-        careReceivedFlag = who;
-    }
-
-    public void setSocialCareProvision(SocialCareProvision who) {
-        careProvidedFlag = who;
     }
 
     public Indicator getDlltsd_lag1() {
@@ -4863,48 +4438,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         return (Indicator.True.equals(getDlltsd())) ? 1 : 0;
     }
 
-    public SocialCareReceipt getSocialCareReceipt() {
-        // market = 0 for no social care
-        //          1 for only informal care
-        //          2 for informal and formal care
-        //          3 for only formal care
-        if (getHoursFormalSocialCare()<0.01 && getHoursInformalSocialCare()<0.01)
-            return SocialCareReceipt.None;
-        else if (getHoursFormalSocialCare()<0.01 && getHoursInformalSocialCare()>0.01)
-            return SocialCareReceipt.Informal;
-        else if (getHoursFormalSocialCare()>0.01 && getHoursInformalSocialCare()>0.01)
-            return SocialCareReceipt.Mixed;
-        else return SocialCareReceipt.Formal;
-    }
-
-    public SocialCareReceiptState getSocialCareReceiptState() {
-        // market = 0 for no social care
-        //          1 for only informal care
-        //          2 for informal and formal care
-        //          3 for only formal care
-        if (Indicator.False.equals(careNeedFlag))
-            return SocialCareReceiptState.NoneNeeded;
-        else if (getHoursFormalSocialCare()<0.01)
-            return SocialCareReceiptState.NoFormal;
-        else if (getHoursInformalSocialCare()<0.01)
-            return SocialCareReceiptState.Formal;
-        else return SocialCareReceiptState.Mixed;
-    }
-
-    public double getSocialCareProvisionState() {
-//        double val = getSocialCareProvision().getValue();
-//        if (dag>DecisionParams.MAX_AGE_COHABITATION && val > 0.1 && val < 2.1)
-//            val = 3.0;
-        return (double)getSocialCareProvision().getValue();
-    }
-
-    public SocialCareProvision getSocialCareProvision() {
-        if (careProvidedFlag==null)
-            return SocialCareProvision.None;
-        else
-            return careProvidedFlag;
-    }
-
     public double getRetired() {
         return (Les_c4.Retired.equals(getLes_c4())) ? 1.0 : 0.0;
     }
@@ -4940,9 +4473,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
 
     private Ydses_c5 getYdses_c5_lag1() {
         if (model!=null) {
-            if (benefitUnit==null)
-                throw new RuntimeException("attempt to access unassigned benefit unit");
-            return benefitUnit.getYdses_c5_lag1();
+            return yHhQuintilesC5L1;
         } else {
             if (i_yHhQuintilesC5==null)
                 throw new RuntimeException("attempt to access unassigned ydses_c5_lag1Local");
@@ -4956,9 +4487,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
 
     private Dhhtp_c4 getDhhtp_c4_lag1() {
         if (model!=null) {
-            if (benefitUnit==null)
-                throw new RuntimeException("attempt to access unassigned benefit unit");
-            return benefitUnit.getDhhtp_c4_lag1();
+            return demCompHhC4L1;
         } else {
             if (i_demCompHhC4L1==null)
                 throw new RuntimeException("attempt to access unassigned dhhtp_c4_lag1Local");
@@ -4971,12 +4500,20 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
     }
 
     /**
-     * State pension age applying to a person in a given year, as used by the retirement regressors.
-     * Lagged regressors pass getYear()-1 to obtain the schedule that was in force the previous year.
+     * State pension age that applies to this person in a given year (Parameters.getStatePensionAge). Lagged
+     * regressors pass getYear() - 1 to obtain the age that applied in the previous year.
      */
-    private static int getFixedRetirementAge(Person person, int year) {
-        Gender gender = Gender.Female.equals(person.demMaleFlag) ? Gender.Female : Gender.Male;
-        return (int) Parameters.getTimeSeriesValue(year, gender.toString(), TimeSeriesVariable.FixedRetirementAge);
+    private int getStatePensionAge(int year) {
+        return Parameters.getStatePensionAge(year, demMaleFlag);
+    }
+
+    /**
+     * Whether this person, aged {@code age} in {@code year}, has reached the state pension age of that year: the one
+     * definition of "at or above state pension age" (Stata dagpns) used by the retirement regressors and by the
+     * Retired status of a cloned person.
+     */
+    private boolean reachedStatePensionAge(int age, int year) {
+        return age >= getStatePensionAge(year);
     }
 
     /**
@@ -4989,8 +4526,8 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
     }
 
     private Integer getNumberChildrenAll_lag1() {
-        if (benefitUnit != null) {
-            return (benefitUnit.getNumberChildrenAll_lag1() != null) ? benefitUnit.getNumberChildrenAll_lag1() : 0;
+        if (model != null) {
+            return (demNChildAllL1 != null) ? demNChildAllL1 : 0;
         } else {
             return (i_demNchildL1==null) ? 0 : i_demNchildL1;
         }
@@ -5022,9 +4559,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
 
     private Integer getNumberChildren02_lag1() {
         if (model != null) {
-            if (benefitUnit==null)
-                throw new RuntimeException("attempt to access unassigned benefit unit");
-            return benefitUnit.getNumberChildren02_lag1();
+            return (demNChildren02L1 != null) ? demNChildren02L1 : 0;
         } else {
             if (i_demNchild0to2L1==null)
                 throw new RuntimeException("attempt to access unassigned numberChildren02Local_lag1");
@@ -5176,109 +4711,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
     }
     public double getBenefitUnitRandomUniform() {return innovations.getDoubleDraw(31);}
 
-    public double getHoursFormalSocialCare_L1() {
-        return (careHrsFormalWeekL1 > 0.0) ? careHrsFormalWeekL1 : 0.0;
-    }
-
-    public double getHoursFormalSocialCare() {
-        double hours = 0.0;
-        if (careHrsFormalWeek !=null)
-            if (careHrsFormalWeek >0.0)
-                hours = careHrsFormalWeek;
-        return hours;
-    }
-
-    public double getHoursInformalSocialCare() {
-        return getCareHoursFromPartnerWeekly() + getCareHoursFromDaughterWeekly() + getCareHoursFromSonWeekly() + getCareHoursFromOtherWeekly() + getCareHoursFromParentWeekly();
-    }
-
-    public double getCareHoursFromPartnerWeekly() {
-        double hours = 0.0;
-        if (careHrsFromPartnerWeek != null)
-            if (careHrsFromPartnerWeek >0.0)
-                hours = careHrsFromPartnerWeek;
-        return hours;
-    }
-    public void setCareHoursFromPartnerWeekly(double hours) {
-        careHrsFromPartnerWeek = hours;
-    }
-
-    public double getCareHoursFromParentWeekly() {
-        double hours = 0.0;
-        if (careHrsFromParentWeek !=null)
-            if (careHrsFromParentWeek >0.0)
-                hours = careHrsFromParentWeek;
-        return hours;
-    }
-
-    public double getCareHoursFromDaughterWeekly() {
-        double hours = 0.0;
-        if (careHrsFromDaughterWeek !=null)
-            if (careHrsFromDaughterWeek >0.0)
-                hours = careHrsFromDaughterWeek;
-        return hours;
-    }
-
-    public double getCareHoursFromSonWeekly() {
-        double hours = 0.0;
-        if (careHrsFromSonWeek !=null)
-            if (careHrsFromSonWeek >0.0)
-                hours = careHrsFromSonWeek;
-        return hours;
-    }
-
-    public double getCareHoursFromOtherWeekly() {
-        double hours = 0.0;
-        if (careHrsFromOtherWeek !=null)
-            if (careHrsFromOtherWeek >0.0)
-                hours = careHrsFromOtherWeek;
-        return hours;
-    }
-
-    public double getCareHoursProvidedWeekly() {
-        double hours = 0.0;
-        if (careHrsProvidedWeek != null)
-            if (careHrsProvidedWeek > 0.0)
-                hours = careHrsProvidedWeek;
-        return hours;
-    }
-
-    public double getHoursInformalSocialCare_L1() {
-        return getCareHoursFromPartner_L1() + getCareHoursFromDaughter_L1() + getCareHoursFromSon_L1() + getCareHoursFromOther_L1() + getCareHoursFromParent_L1();
-    }
-
-    public double getTotalHoursSocialCare_L1() {
-        return getHoursFormalSocialCare_L1() + getHoursInformalSocialCare_L1();
-    }
-
-    public double getCareHoursFromParent_L1() {
-        return (careHrsFromParentWeekL1 >0.0) ? careHrsFromParentWeekL1 : 0.0;
-    }
-
-    public double getCareHoursFromPartner_L1() {
-        return (careHrsFromPartnerWeekL1 > 0.0) ? careHrsFromPartnerWeekL1 : 0.0;
-    }
-
-    public double getCareHoursFromDaughter_L1() {
-        return (careHrsFromDaughterWeekL1 >0.0) ? careHrsFromDaughterWeekL1 : 0.0;
-    }
-
-    public double getCareHoursFromSon_L1() {
-        return (careHrsFromSonWeekL1 >0.0) ? careHrsFromSonWeekL1 : 0.0;
-    }
-
-    public double getCareHoursFromOther_L1() {
-        return (careHrsFromOtherWeekL1 >0.0) ? careHrsFromOtherWeekL1 : 0.0;
-    }
-
-    public double getSocialCareCostWeekly() {
-        double cost = 0.0;
-        if (xCareFormalWeek !=null)
-            if (xCareFormalWeek >0.0)
-                cost = xCareFormalWeek;
-        return cost;
-    }
-
     public boolean getTestPartner() {
         return (demAlignPartnerProcess!=null) && demAlignPartnerProcess;
     }
@@ -5325,7 +4757,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
     }
 
     public double getLeisureHoursPerWeek() {
-        return Parameters.HOURS_IN_WEEK - getCareHoursProvidedWeekly() - getHoursWorkedWeekly();
+        return Parameters.HOURS_IN_WEEK - getHoursWorkedWeekly();
     }
 
     public void setSampleExit(SampleExit demExitSample) {
@@ -5347,12 +4779,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
                     return RegressionName.PartnershipU2;
                 else
                     return RegressionName.PartnershipU1;
-            }
-            case SocialCareProvision -> {
-                if (Dcpst.Partnered.equals(getDcpst()))
-                    return RegressionName.SocialCareS3d;
-                else
-                    return RegressionName.SocialCareS3c;
             }
             case WagePotential -> {
                 if (Gender.Male.equals(demMaleFlag))

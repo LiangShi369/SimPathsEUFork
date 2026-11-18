@@ -163,13 +163,13 @@ public class Parameters {
     public static String COUNTRY_STRING = "";
 
     public static int MIN_AGE_TO_HAVE_INCOME = 16; //Minimum age to have non-employment non-benefit income
-    public static int MAX_LABOUR_HOURS_IN_WEEK = 84;
+    public static int MAX_LABOUR_HOURS_IN_WEEK = 84; // weekly hours cap; must equal the upper limit of the country's top band in Labour (checkLabourBandLimits)
     public static int HOURS_IN_WEEK = 24*7; // currently, 24 hours per day is used to calculate leisure in labour supply
     public static boolean USE_CONTINUOUS_LABOUR_SUPPLY_HOURS = true; // If true, a random number of hours of weekly labour supply within each bracket will be generated. Otherwise, each discrete choice of labour supply corresponds to a fixed number of hours of labour supply, which is the same for all persons
     public static boolean USE_MIDPOINT_HOURS = false; // Applies only to realised hours of brackets that do not spread hours (Labour.spreadsRealisedHours false): if true, they realise at the bracket midpoint (min + max) / 2 instead of their representative hours. Choice-stage (utility) evaluation always uses representative hours for these brackets; brackets that spread hours are unaffected
     public static boolean useRepresentativeHoursInUtility = true; // If true, the labour-supply utility optimisation evaluates each hours bracket at its representative hours (Labour.getRepresentativeHours) rather than at the person's drawn hours; drawn hours apply only once the bracket has been chosen
     public static boolean redrawHoursEachYear = false; // If true, the position of a person's hours within their bracket is redrawn every year (at the labour-supply choice); otherwise one draw is kept for life
-    public static boolean USE_SILC_LHW_DISTRIBUTION_ES = true; // ES only: if true, realised hours in every positive ES band are drawn from the EU-SILC distribution of observed weekly hours (lhw) within that band, for the person's sample type and gender (input/ES/silc_lhw_distribution.xlsx); the top band runs to MAX_LABOUR_HOURS_IN_WEEK. Overrides the per-band spread setting and USE_MIDPOINT_HOURS for ES. Choice-stage evaluation still uses representative hours (useRepresentativeHoursInUtility). If false, ES hours realise as set in Labour
+    public static boolean USE_SILC_LHW_DISTRIBUTION = true; // ES and PL (SILC_LHW_DISTRIBUTION_COUNTRIES): if true, realised hours in every positive band are drawn from the EU-SILC distribution of observed weekly hours (lhw) within that band, for the person's sample type and gender (input/<CC>/silc_lhw_distribution.xlsx); the top band runs to MAX_LABOUR_HOURS_IN_WEEK. Overrides the per-band spread setting and USE_MIDPOINT_HOURS. Choice-stage evaluation still uses representative hours (useRepresentativeHoursInUtility). Ignored for other countries. If false, hours realise as set in Labour
 
     public static int AGE_TO_BECOME_RESPONSIBLE = 18;            // Age become reference person of own benefit unit
     public static int AGE_TO_BECOME_SEMI_RESPONSIBLE = 16;      //Age used in health processes H1, H2
@@ -182,21 +182,20 @@ public class Parameters {
 
     public static int MIN_AGE_TO_RETIRE = 50; //Minimum age to consider retirement
     public static int DEFAULT_AGE_TO_RETIRE = 67; //if pension included, but retirement decision not
-    public static int MIN_AGE_FORMAL_SOCARE = 65; //Minimum age to receive formal social care
     public static int MIN_AGE_FLEXIBLE_LABOUR_SUPPLY = 16; //Used when filtering people who can be "flexible in labour supply"
     public static int MAX_AGE_FLEXIBLE_LABOUR_SUPPLY = 75;
     public static double SHARE_OF_WEALTH_TO_ANNUITISE_AT_RETIREMENT = 0.25;
     public static double ANNUITY_RATE_OF_RETURN = 0.015;
 
     public static int MIN_HOURS_FULL_TIME_EMPLOYED = 25;    // used to distinguish full-time from part-time employment (needs to be consistent with Labour enum)
-    public static int MIN_HOURS_EMPLOYED = 6;    // minimum weekly hours to count as employed in the initial population; also the lower bound
-                                                // of Labour.CATEGORY_ES_1, below which ES hours convert to Labour.ZERO
+    public static int MIN_HOURS_EMPLOYED = 6;    // minimum weekly hours to count as employed (ES 6, PL 1): persons employed on fewer hours are recoded to not employed
+                                                // at setup (DataParser.marginalEmploymentRecode),
+                                                // and fewer hours convert to Labour.ZERO. Must equal the lower limit of the country's first positive band in Labour (checkLabourBandLimits)
     public static double MIN_HOURLY_WAGE_RATE = 0.0;
     public static double MAX_HOURLY_WAGE_RATE = 75.0;
-    public static double MAX_HOURS_WEEKLY_FORMAL_CARE = 150.0;
-    public static double MAX_HOURS_WEEKLY_INFORMAL_CARE = 16 * 7;
     public static double CHILDCARE_COST_EARNINGS_CAP = 0.5;  // maximum share of earnings payable as childcare (for benefit units with some earnings)
 
+    // thresholds of the tax-donor key function (KeyFunctionHU2): applied to the donors at setup and to simulated benefit units in the run
     public static double KEY_FUNCTION_HU2_HI_INCOME = 287.0; // 67th percentile observed in the EM data for 2018
     public static double KEY_FUNCTION_HU2_LO_INCOME = 140.0; // 33rd percentile observed in the EM data for 2018
     public static int KEY_FUNCTION_HU2_MID_AGE = 45;
@@ -407,10 +406,10 @@ public class Parameters {
     //Uprating factor
     private static boolean flagDefaultToTimeSeriesAverages;
     private static Double averageSavingReturns, averageDebtCostLow, averageDebtCostHigh;
-    private static MultiKeyCoefficientMap upratingIndexMapRealGDP, upratingIndexMapInflation, socialCareProvisionTimeAdjustment,
+    private static MultiKeyCoefficientMap upratingIndexMapRealGDP, upratingIndexMapInflation,
             partnershipTimeAdjustment, retirementTimeAdjustment, fertilityTimeAdjustment, disabilityTimeAdjustment, studentsTimeAdjustment, utilityTimeAdjustment, utilityTimeAdjustmentSingleMales, utilityTimeAdjustmentSingleFemales,
             utilityTimeAdjustmentCouples, utilityTimeAdjustmentACMales, utilityTimeAdjustmentACFemales, utilityTimeAdjustmentMaleWithDep, utilityTimeAdjustmentFemaleWithDep, upratingIndexMapRealWageGrowth, priceMapRealSavingReturns, priceMapRealDebtCostLow, priceMapRealDebtCostHigh,
-            wageRateFormalSocialCare, socialCarePolicy, partneredShare, retiredShare, disabledShare, studentShare, employedShare, employedShareSingleMales, employedShareACMales, employedShareSingleFemales, employedShareACFemales, employedShareCouples, employedShareMaleWithDep, employedShareFemaleWithDep;
+            partneredShare, retiredShare, disabledShare, studentShare, employedShare, employedShareSingleMales, employedShareACMales, employedShareSingleFemales, employedShareACFemales, employedShareCouples, employedShareMaleWithDep, employedShareFemaleWithDep;
     public static Map<Integer, Double> partnershipAlignAdjustment, fertilityAlignAdjustment, retirementAlignAdjustment, studentsAlignAdjustment, disabilityAlignAdjustment;
     // Snapshot of initial utility adjustment values loaded from alignment_adjustment_factors.xlsx,
     // preserved so that activity alignment can cold-start from xlsx values each year
@@ -430,7 +429,8 @@ public class Parameters {
     //Mean and covariances for parametric matching
     private static MultiKeyCoefficientMap meanCovarianceParametricMatching;
 
-    private static MultiKeyCoefficientMap fixedRetireAge;
+    // State pension age by year and gender (input/<COUNTRY>/state_pension_age.xlsx), loaded by loadCountrySpecificParameters
+    private static StatePensionAgeSchedule statePensionAgeSchedule;
     //	private static MultiKeyCoefficientMap rawProbSick;
     private static MultiKeyCoefficientMap unemploymentRates;
 //	private static MultiKeyMap probSick;
@@ -472,30 +472,6 @@ public class Parameters {
     //Health
     private static MultiKeyCoefficientMap coeffCovarianceHealthH1;
     private static MultiKeyCoefficientMap coeffCovarianceHealthH2; //Prob. long-term sick or disabled
-
-    //Social care
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS1a; // prob of needing social care under 65
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS1b;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2a; // prob of needing social care 65+
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2b;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2c;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2d;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2e;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2f;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2g;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2h;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2i;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2j;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS2k;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS3a;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS3b;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS3c;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS3d;
-    private static MultiKeyCoefficientMap coeffCovarianceSocialCareS3e;
-    private static Map<SocialCareReceiptS2c, MultiKeyCoefficientMap> coeffCovarianceSocialCareS2cMap;
-    private static Map<PartnerSupplementaryCarer, MultiKeyCoefficientMap> coeffCovarianceSocialCareS2eMap;
-    private static Map<NotPartnerInformalCarer, MultiKeyCoefficientMap> coeffCovarianceSocialCareS2fMap;
-    private static Map<SocialCareProvision, MultiKeyCoefficientMap> coeffCovarianceSocialCareS3dMap;
 
     //Unemployment
     private static MultiKeyCoefficientMap coeffCovarianceUnemploymentU1a;
@@ -672,26 +648,6 @@ public class Parameters {
     private static GeneralisedOrderedRegression regHealthH1;
     private static BinomialRegression regHealthH2;
 
-    //Social care
-    private static BinomialRegression regReceiveCareS1a;
-    private static LinearRegression regCareHoursS1b;
-    private static BinomialRegression regNeedCareS2a;
-    private static BinomialRegression regReceiveCareS2b;
-    private static MultinomialRegression<SocialCareReceiptS2c> regSocialCareMarketS2c;
-    private static BinomialRegression regReceiveCarePartnerS2d;
-    private static MultinomialRegression<PartnerSupplementaryCarer> regPartnerSupplementaryCareS2e;
-    private static MultinomialRegression<NotPartnerInformalCarer> regNotPartnerInformalCareS2f;
-    private static LinearRegression regPartnerCareHoursS2g;
-    private static LinearRegression regDaughterCareHoursS2h;
-    private static LinearRegression regSonCareHoursS2i;
-    private static LinearRegression regOtherCareHoursS2j;
-    private static LinearRegression regFormalCareHoursS2k;
-    private static BinomialRegression regCarePartnerProvCareToOtherS3a;
-    private static BinomialRegression regNoCarePartnerProvCareToOtherS3b;
-    private static BinomialRegression regNoPartnerProvCareToOtherS3c;
-    private static MultinomialRegression<SocialCareProvision> regInformalCareToS3d;
-    private static LinearRegression regCareHoursProvS3e;
-
     //Unemployment
     private static BinomialRegression regUnemploymentMaleGraduateU1a;
     private static BinomialRegression regUnemploymentMaleNonGraduateU1b;
@@ -810,9 +766,7 @@ public class Parameters {
     public static Integer timeTrendStopsInE1b;
     public static Integer timeTrendStopsInE2a;
     public static boolean flagFormalChildcare;
-    public static boolean flagSocialCare;
     public static boolean flagSuppressChildcareCosts;
-    public static boolean flagSuppressSocialCareCosts;
     public static boolean donorPoolAveraging;
 
     public static double realInterestRateInnov;
@@ -957,13 +911,13 @@ public class Parameters {
      */
 
     public static void loadParameters(Country country, int maxAgeModel, boolean enableIntertemporalOptimisations,
-                                      boolean projectFormalChildcare, boolean projectSocialCare, boolean donorPoolAveraging1,
+                                      boolean projectFormalChildcare, boolean donorPoolAveraging1,
                                       boolean fixTimeTrend, boolean fixTimeTrendR1a, boolean fixTimeTrendR1b, boolean fixTimeTrendE1a, boolean fixTimeTrendE1b, boolean fixTimeTrendE2a,
                                       boolean defaultToTimeSeriesAverages, boolean taxDBMatches,
                                       Integer timeTrendStops, Integer timeTrendStopsR1a, Integer timeTrendStopsR1b,  Integer timeTrendStopsE1a, Integer timeTrendStopsE1b, Integer timeTrendStopsE2a,
                                       int startYearModel, int endYearModel, double interestRateInnov1,
                                       double disposableIncomeFromLabourInnov1, boolean flagSuppressChildcareCosts1,
-                                      boolean flagSuppressSocialCareCosts1, MacroScenarioPopulation macroShockPopulation,
+                                      MacroScenarioPopulation macroShockPopulation,
                                       MacroScenarioProductivity macroShockProductivity, MacroScenarioGreenPolicy macroShockGreenPolicy, boolean macroShocksOn) {
 
         // display a dialog box to let the user know what is happening
@@ -976,8 +930,8 @@ public class Parameters {
          * input/<COUNTRY>/parameters.xlsx, so keep that file updated when changing parameter defaults.
          */
 
-        countrySpecificParameters = ExcelAssistant.loadCoefficientMap(resolveCountryFile(country, "parameters.xlsx"), "Parameters", 1);
-        ParametersLoader.setParametersFromMap(countrySpecificParameters);
+        loadCountrySpecificParameters(country);
+        checkLabourBandLimits(country);
 
         maxAge      = maxAgeModel;
         startYear   = startYearModel;
@@ -995,7 +949,7 @@ public class Parameters {
         COUNTRY_STRING  = country.toString();
         loadTimeSeriesFactorMaps(country);
         setLabourSupplyIncomePriceFactor(country);
-        loadSilcLhwDistributionES(country);
+        loadSilcLhwDistribution(country);
         instantiateAlignmentMaps();
 
         // scenario parameters
@@ -1015,13 +969,10 @@ public class Parameters {
         timeTrendStopsInE1b = timeTrendStopsE1b;
         timeTrendStopsInE2a = timeTrendStopsE2a;
         flagFormalChildcare = projectFormalChildcare;
-        flagSocialCare = projectSocialCare;
         flagSuppressChildcareCosts = flagSuppressChildcareCosts1;
-        flagSuppressSocialCareCosts = flagSuppressSocialCareCosts1;
         donorPoolAveraging = donorPoolAveraging1;
         realInterestRateInnov = interestRateInnov1;
         disposableIncomeFromLabourInnov = disposableIncomeFromLabourInnov1;
-        fixedRetireAge = ExcelAssistant.loadCoefficientMap(resolveCountryFile(country, "scenario_retirementAgeFixed.xlsx"), "Retirement_age", 1);
 
         /*
         Code below introduces macro shocks in terms of population, productivity, and employment
@@ -1602,24 +1553,6 @@ public class Parameters {
     public static GeneralisedOrderedRegression getRegHealthH1() { return regHealthH1; }
     public static BinomialRegression getRegHealthH2() { return regHealthH2; }
 
-    public static BinomialRegression getRegReceiveCareS1a() { return regReceiveCareS1a; }
-    public static LinearRegression getRegCareHoursS1b() { return regCareHoursS1b; }
-    public static BinomialRegression getRegNeedCareS2a() { return regNeedCareS2a; }
-    public static BinomialRegression getRegReceiveCareS2b() { return regReceiveCareS2b; }
-    public static MultinomialRegression getRegSocialCareMarketS2c() { return regSocialCareMarketS2c; }
-    public static BinomialRegression getRegReceiveCarePartnerS2d() { return regReceiveCarePartnerS2d; }
-    public static MultinomialRegression getRegPartnerSupplementaryCareS2e() { return regPartnerSupplementaryCareS2e; }
-    public static MultinomialRegression getRegNotPartnerInformalCareS2f() { return regNotPartnerInformalCareS2f; }
-    public static LinearRegression getRegPartnerCareHoursS2g() { return regPartnerCareHoursS2g; }
-    public static LinearRegression getRegDaughterCareHoursS2h() { return regDaughterCareHoursS2h; }
-    public static LinearRegression getRegSonCareHoursS2i() { return regSonCareHoursS2i; }
-    public static LinearRegression getRegOtherCareHoursS2j() { return regOtherCareHoursS2j; }
-    public static LinearRegression getRegFormalCareHoursS2k() { return regFormalCareHoursS2k; }
-    public static BinomialRegression getRegCarePartnerProvCareToOtherS3a() { return regCarePartnerProvCareToOtherS3a; }
-    public static BinomialRegression getRegNoCarePartnerProvCareToOtherS3b() { return regNoCarePartnerProvCareToOtherS3b; }
-    public static BinomialRegression getRegNoPartnerProvCareToOtherS3c() { return regNoPartnerProvCareToOtherS3c; }
-    public static MultinomialRegression getRegInformalCareToS3d() { return regInformalCareToS3d; }
-    public static LinearRegression getRegCareHoursProvS3e() { return regCareHoursProvS3e; }
 
     public static BinomialRegression getRegUnemploymentMaleGraduateU1a() { return regUnemploymentMaleGraduateU1a; }
     public static BinomialRegression getRegUnemploymentMaleNonGraduateU1b() { return regUnemploymentMaleNonGraduateU1b; }
@@ -2063,18 +1996,6 @@ public class Parameters {
         rebaseIndexMap(TimeSeriesVariable.Inflation);
         rebaseIndexMap(TimeSeriesVariable.WageGrowth);
 
-        // load year-specific fiscal policy parameters
-        // Social care is optional: the workbook is only consulted when flagSocialCare is on
-        // (TaxEvaluation -> SocialCareExpenditureSupport -> getSocialCarePolicyValue), and countries
-        // that do not model it need not ship the file. The guard tests for the file rather than the
-        // flag because this method runs before flagSocialCare is assigned in loadParameters, and is
-        // also called standalone from SimPathsStart where the flag is not set at all.
-        String socialCareParametersFile = resolveCountryFile(country, "social_care_parameters.xlsx");
-        if (new File(socialCareParametersFile).exists()) {
-            socialCarePolicy = ExcelAssistant.loadCoefficientMap(socialCareParametersFile, "social care", 1);
-        } else {
-            socialCarePolicy = null;
-        }
         partneredShare = ExcelAssistant.loadCoefficientMap(resolveCountryFile(country, "alignment_targets_partnered_share.xlsx"), "partnered", 1);
         retiredShare = ExcelAssistant.loadCoefficientMap(resolveCountryFile(country, "alignment_targets_retirement.xlsx"), "retirement", 1);
         disabledShare = ExcelAssistant.loadCoefficientMap(resolveCountryFile(country, "alignment_targets_disability.xlsx"), "disability", 1);
@@ -2157,12 +2078,6 @@ public class Parameters {
             case WageGrowth -> {
                 map = upratingIndexMapRealWageGrowth;
             }
-            case CarerWageRate -> {
-                map = wageRateFormalSocialCare;
-            }
-            case CareProvisionAdjustment -> {
-                map = socialCareProvisionTimeAdjustment;
-            }
             case PartnershipAdjustment -> {
                 map = partnershipTimeAdjustment;
             }
@@ -2203,9 +2118,6 @@ public class Parameters {
             }
             case LowEducationRate -> {
                 map = projectionsLowEdu;
-            }
-            case FixedRetirementAge -> {
-                map = fixedRetireAge;
             }
         }
         return map;
@@ -2302,67 +2214,44 @@ public class Parameters {
         return labourSupplyIncomePriceFactor;
     }
 
-    // EU-SILC weekly-hours distributions used when USE_SILC_LHW_DISTRIBUTION_ES is true: cumulative frequency
-    // indexed by weekly hours 0..84, keyed by sheet name (sample type and gender, e.g. "Couple_female")
-    private static final String SILC_LHW_DISTRIBUTION_FILE_ES = "silc_lhw_distribution.xlsx";
-    private static final String[] SILC_LHW_SHEETS_ES = {"Single_indep_male", "Single_indep_female", "Couple_male", "Couple_female",
-            "Single_dep_male", "Single_dep_female", "Adult_child_male", "Adult_child_female"};
-    private static Map<String, double[]> silcLhwCumulativeES;
-
-    /** Loads the EU-SILC hours distributions of input/ES (ES with USE_SILC_LHW_DISTRIBUTION_ES only). */
-    private static void loadSilcLhwDistributionES(Country country) {
-        silcLhwCumulativeES = null;
-        if (country != Country.ES || !USE_SILC_LHW_DISTRIBUTION_ES) return;
-
-        silcLhwCumulativeES = new HashMap<>();
-        String file = resolveCountryFile(country, SILC_LHW_DISTRIBUTION_FILE_ES);
-        for (String sheet : SILC_LHW_SHEETS_ES) {
-            MultiKeyCoefficientMap map = ExcelAssistant.loadCoefficientMap(file, sheet, 1);
-            // read the frequencies f(h), then turn them in place into the cumulative distribution F(h) = f(0) + ... + f(h)
-            double[] cumFreq = new double[85];
-            for (Object entryObject : map.entrySet()) {
-                Map.Entry<?, ?> entry = (Map.Entry<?, ?>) entryObject;
-                int hours = (int) Math.round(Double.parseDouble(((MultiKey<?>) entry.getKey()).getKey(0).toString()));
-                if (hours >= 0 && hours < cumFreq.length)
-                    cumFreq[hours] += ((Number) entry.getValue()).doubleValue();
-            }
-            for (int h = 1; h < cumFreq.length; h++)
-                cumFreq[h] += cumFreq[h - 1];
-            silcLhwCumulativeES.put(sheet, cumFreq);
+    /**
+     * Labour gives its band limits as numbers, so that they do not depend on when the enum is first loaded. Checks that
+     * the country's first positive band starts at MIN_HOURS_EMPLOYED and its top band ends at MAX_LABOUR_HOURS_IN_WEEK,
+     * as read from parameters.xlsx, so that changing only one side fails here instead of being silently ignored.
+     * IT's top band is not checked: it has limits of its own.
+     */
+    private static void checkLabourBandLimits(Country country) {
+        Labour[] bands = Labour.valuesForCountry(country.toString());  // bands[0] is Labour.ZERO
+        Labour first = bands[1];
+        Labour top = bands[bands.length - 1];
+        for (Gender gender : Gender.values()) {
+            if (first.getMinHours(gender) != MIN_HOURS_EMPLOYED)
+                throw new IllegalStateException("MIN_HOURS_EMPLOYED is " + MIN_HOURS_EMPLOYED + " in input/" + country
+                        + "/parameters.xlsx, but Labour." + first + " starts at " + first.getMinHours(gender) + " hours for "
+                        + gender + "; change both together");
+            if (country != Country.IT && top.getMaxHours(gender) != MAX_LABOUR_HOURS_IN_WEEK)
+                throw new IllegalStateException("MAX_LABOUR_HOURS_IN_WEEK is " + MAX_LABOUR_HOURS_IN_WEEK + " in input/" + country
+                        + "/parameters.xlsx, but Labour." + top + " runs to " + top.getMaxHours(gender) + " hours for "
+                        + gender + "; change both together");
         }
     }
 
+    // Countries whose realised hours are drawn from the EU-SILC hours distributions when USE_SILC_LHW_DISTRIBUTION is true
+    private static final Set<Country> SILC_LHW_DISTRIBUTION_COUNTRIES = EnumSet.of(Country.ES, Country.PL);
+    private static SilcHoursDistribution silcHoursDistribution;   // loaded in loadParameters when USE_SILC_LHW_DISTRIBUTION is true and the country is one of SILC_LHW_DISTRIBUTION_COUNTRIES
+
+    /** Loads the EU-SILC hours distribution of input/<country> (USE_SILC_LHW_DISTRIBUTION, SILC_LHW_DISTRIBUTION_COUNTRIES only). */
+    private static void loadSilcLhwDistribution(Country country) {
+        silcHoursDistribution = (USE_SILC_LHW_DISTRIBUTION && SILC_LHW_DISTRIBUTION_COUNTRIES.contains(country)) ?
+                SilcHoursDistribution.load(resolveCountryFile(country, SilcHoursDistribution.FILE_NAME)) : null;
+    }
+
     /**
-     * Draws realised weekly hours in the band [min, max] from the EU-SILC hours distribution of the given sheet, so
-     * that each hour is drawn with probability equal to its SILC share within the band (hours never observed are
-     * never drawn). u is the person's uniform draw. Returns -1 if the band has no SILC frequency.
+     * EU-SILC hours distribution used to draw realised hours, or null when USE_SILC_LHW_DISTRIBUTION is off or the
+     * country is not one of SILC_LHW_DISTRIBUTION_COUNTRIES
      */
-    public static int drawSilcLhwHoursES(String sheet, int min, int max, double u) {
-        if (silcLhwCumulativeES == null)
-            throw new IllegalStateException("EU-SILC hours distributions not loaded: USE_SILC_LHW_DISTRIBUTION_ES is set but the country is not ES");
-        double[] cumFreq = silcLhwCumulativeES.get(sheet);
-        if (cumFreq == null)
-            throw new IllegalArgumentException("No EU-SILC hours distribution for sheet " + sheet);
-
-        int bandLow = Math.max(min, 1);
-        int bandHigh = Math.min(max, cumFreq.length - 1);
-        if (bandHigh < bandLow) return -1;
-
-        double cumBelowBand = cumFreq[bandLow - 1];
-        double bandShare = cumFreq[bandHigh] - cumBelowBand;
-        if (!(bandShare > 0.0)) return -1;
-
-        // Map the uniform draw u onto the cumulative probability range of the allowed hours band.
-        // Select the first hour whose cumulative probability exceeds this target,
-        // preserving the relative EU-SILC frequencies within the band.
-
-        double cumTarget = cumBelowBand + u * bandShare;
-        for (int h = bandLow; h <= bandHigh; h++)
-            if (cumFreq[h] > cumTarget) return h;
-
-        int h = bandHigh;
-        while (h > bandLow && cumFreq[h - 1] >= cumFreq[h]) h--;
-        return h;
+    public static SilcHoursDistribution getSilcHoursDistribution() {
+        return silcHoursDistribution;
     }
 
     /**
@@ -2695,73 +2584,6 @@ public static void putPrevOrNewTarget(int year, Object newTarget, TimeSeriesVari
         return ((Number) val).doubleValue();
     }
 
-    public static double getSocialCarePolicyValue(int year, String param) {
-
-        if (socialCarePolicy == null)
-            throw new RuntimeException("social care projection is enabled, but input/" + COUNTRY_STRING
-                    + "/social_care_parameters.xlsx was not found - supply the workbook or disable projectSocialCare");
-        Object val = socialCarePolicy.getRowColumnValue(year, param);
-        if (val == null)
-            val = extendSocialCarePolicy(year, param);
-        return ((Number) val).doubleValue();
-    }
-
-    public synchronized static Object extendSocialCarePolicy(int year, String param) {
-
-        Object val = socialCarePolicy.getRowColumnValue(year, param);
-        if (val==null) {
-            // assume that series is capped at end by assumed geometric growth rate
-
-            int minYear = 9999, maxYear=0;
-            for (Object key : socialCarePolicy.keySet()) {
-                if (key.hashCode()>0) {
-                    if (key.hashCode()<1900 || key.hashCode()>2500)
-                        throw new RuntimeException("problem extending time series for social policy parameters");
-                    if (key.hashCode() < minYear)
-                        minYear = key.hashCode();
-                    if (key.hashCode() > maxYear)
-                        maxYear = key.hashCode();
-                }
-            }
-            if (year < minYear) {
-                // extend backward through time
-
-                Object[] values0 = (Object[]) socialCarePolicy.getValue(minYear+1);
-                Object[] values1 = (Object[]) socialCarePolicy.getValue(minYear);
-                for( int yy=minYear-1; yy>=year; yy--) {
-                    Object[] values2 = new Object[values1.length];
-                    for (int ii=0; ii<values1.length; ii++) {
-                        double val0 = ((Number) values0[ii]).doubleValue();
-                        double val1 = ((Number) values1[ii]).doubleValue();
-                        values2[ii] = val1 * val1 / val0;
-                    }
-                    socialCarePolicy.putValue(yy, values2);
-                    values0 = values1;
-                    values1 = values2;
-                }
-            }
-            else {
-                // extend forward through time
-
-                Object[] values0 = (Object[]) socialCarePolicy.getValue(maxYear-1);
-                Object[] values1 = (Object[]) socialCarePolicy.getValue(maxYear);
-                for( int yy=maxYear+1; yy<=year; yy++) {
-                    Object[] values2 = new Object[values1.length];
-                    for (int ii=0; ii<values1.length; ii++) {
-                        double val0 = ((Number) values0[ii]).doubleValue();
-                        double val1 = ((Number) values1[ii]).doubleValue();
-                        values2[ii] = val1 * val1 / val0;
-                    }
-                    socialCarePolicy.putValue(yy, values2);
-                    values0 = values1;
-                    values1 = values2;
-                }
-            }
-            val = socialCarePolicy.getRowColumnValue(year, param);
-        }
-        return val;
-    }
-
     public static Map<MatchFeature, Map<Integer, Integer>> getTaxdbCounter() {
         return taxdbCounter;
     }
@@ -2925,102 +2747,16 @@ public static void putPrevOrNewTarget(int year, Object newTarget, TimeSeriesVari
         }
     }
 
-    public static int getStatePensionAge(int year, Gender demMaleFlag) {
-
-        int spa = -9;
-
-        switch (COUNTRY_STRING) {
-
-            case "PL":                                      // Poland
-                if (demMaleFlag == Gender.Male) {
-                    // Men: 65 (<2016), 66 (2016-2017), 65 (2018+)
-                    if      (year >= 2005 && year < 2016)   spa = 65;
-                    else if (year >= 2016 && year < 2018)   spa = 66;
-                    else if (year >= 2018 )                 spa = 65;
-                } else if (demMaleFlag == Gender.Female){
-                    // Women: 60 (<2016), 61 (2016-2017), 60 (2018+)
-                    if      (year >= 2005 && year < 2016)   spa = 60;
-                    else if (year >= 2016 && year < 2018)   spa = 61;
-                    else if (year >= 2018 )                 spa = 60;
-                }
-                break;
-
-            case "ES":                                      // Spain
-                // Men and women: ordinary pension age gradually rises
-                // from 65 before 2013 to 67 from 2027.
-                //
-                // Spain's statutory ages are specified in years and months.
-                // As spa stores integer years, ages are rounded to the
-                // nearest whole year:
-                // 2005–2017: 65
-                // 2018–2023: 66
-                // 2024+:     67
-                if      (year >= 2005 && year < 2018)       spa = 65;
-                else if (year >= 2018 && year < 2024)       spa = 66;
-                else if (year >= 2024)                      spa = 67;
-                break;
-
-            case "EL":                                      // Greece
-                if (demMaleFlag == Gender.Male) {
-                    // Men: 65 (<2013), 67 (2013+)
-                    if      (year >= 2005 && year < 2013)   spa = 65;
-                    else if (year >= 2013  )                spa = 67;
-                } else if (demMaleFlag == Gender.Female){
-                    // Women: 60 (<2009), 61 (2010), 63 (2011), 65 (2012), 67 (2013+)
-                    if      (year >= 2005 && year < 2010)   spa = 60;
-                    else if (year == 2010)                  spa = 61;
-                    else if (year == 2011)                  spa = 63;
-                    else if (year == 2012)                  spa = 65;
-                    else if (year >= 2013 )                 spa = 67;
-                }
-                break;
-
-            case "IT":                                      // Italy
-                if (demMaleFlag == Gender.Male) {
-                    // Men: 65 (<2012), 66 (2012–2018), 67 (2019+)
-                    if      (year >= 2005 && year < 2012)   spa = 65;
-                    else if (year >= 2012 && year < 2019)   spa = 66;
-                    else if (year >= 2019 )                 spa = 67;
-                } else if (demMaleFlag == Gender.Female) {
-                    // Women: 60 (<2012), 62 (2012), 63 (2013–2014), 65 (2015–2017), 66 (2018), 67 (2019+)
-                    if      (year >= 2005 && year < 2012)   spa = 60;
-                    else if (year == 2012)                  spa = 62;
-                    else if (year >= 2013 && year < 2015)   spa = 63;
-                    else if (year >= 2015 && year < 2018)   spa = 65;
-                    else if (year == 2018)                  spa = 66;
-                    else if (year >= 2019 )                 spa = 67;
-                }
-                break;
-
-            case "HU":                                      // Hungary
-                if (demMaleFlag == Gender.Male) {
-                    // Men: 62 (<2014), 63 (2014–2016), 64 (2017–2020), 65 (2021+)
-                    if      (year >= 2005 && year < 2014)   spa = 62;
-                    else if (year >= 2014 && year < 2017)   spa = 63;
-                    else if (year >= 2017 && year < 2021)   spa = 64;
-                    else if (year >= 2021 )                 spa = 65;
-                } else if (demMaleFlag == Gender.Female) {
-                    // Women: 60 (<2010), 62 (2010–2013), 63 (2014–2016), 64 (2017–2020), 65 (2021+)
-                if          (year >= 2005 && year < 2010)   spa = 60;
-                    else if (year >= 2010 && year < 2014)   spa = 62;
-                    else if (year >= 2014 && year < 2017)   spa = 63;
-                    else if (year >= 2017 && year < 2021)   spa = 64;
-                    else if (year >= 2021 )                 spa = 65;
-                }
-                break;
-
-            default:
-                throw new IllegalStateException("No PSA rules for country=" + COUNTRY_STRING);
-        }
-
-        // Throw if nothing matched
-        if (spa == -9) {
-            throw new IllegalStateException(
-                "Could not determine state pension age for: " + "country=" + COUNTRY_STRING + ", gender=" + demMaleFlag + ", year=" + year);
-        }
-
-
-        return spa;
+    /**
+     * State pension age, in whole years, of a person of the given gender in the given year: the only source of the
+     * state pension age in the model (tax-donor keys, childcare costs, the retirement regressors, and the Retired
+     * status of a cloned person). Read from input/<COUNTRY>/state_pension_age.xlsx by loadCountrySpecificParameters.
+     * A year after the table's last row takes the ages of that row; a year before its first row is an error.
+     */
+    public static int getStatePensionAge(int year, Gender gender) {
+        if (statePensionAgeSchedule == null)
+            throw new IllegalStateException("State pension age not loaded: call loadCountrySpecificParameters first");
+        return statePensionAgeSchedule.get(year, gender);
     }
 
     public static MultiKeyCoefficientMap getCoeffLabourSupplyUtilityMales() {
@@ -3180,11 +2916,35 @@ public static void putPrevOrNewTarget(int year, Object newTarget, TimeSeriesVari
         return val;
     }
 
+    /**
+     * Reads the Parameters sheet of input/<COUNTRY>/parameters.xlsx and sets the static field of the same name for
+     * each key, overriding the defaults declared above. Called by loadParameters, and by databaseSetup before the
+     * input database is built, so that setup uses the same values as the simulation: for example MIN_HOURS_EMPLOYED
+     * in DataParser.marginalEmploymentRecode, and the KEY_FUNCTION_HU2_* thresholds with which
+     * TaxDonorDataParser.populateDonorTaxUnitTables gives each donor its matching keys. Also called directly by
+     * SimPathsStart before anything that reads a country-specific static field ahead of databaseSetup/loadParameters
+     * (validateStartYear, or the GUI's direct DataParser.databaseFromCSV call), so that those earlier reads see the
+     * workbook value instead of the Java default.
+     *
+     * Also loads the state pension age table (input/<COUNTRY>/state_pension_age.xlsx), for the same reason: the
+     * tax-donor keys built at setup and the simulation must use the same ages.
+     */
+    public static void loadCountrySpecificParameters(Country country) {
+        countrySpecificParameters = ExcelAssistant.loadCoefficientMap(resolveCountryFile(country, "parameters.xlsx"), "Parameters", 1);
+        ParametersLoader.setParametersFromMap(countrySpecificParameters);
+        statePensionAgeSchedule = StatePensionAgeSchedule.load(resolveCountryFile(country, StatePensionAgeSchedule.FILE_NAME));
+    }
+
     public static void databaseSetup(Country country, boolean executeWithGui, int startYear) {
 
         // remove database file if it exists
         String filePath = "./input" + File.separator + "input.mv.db";
         safeDelete(filePath);
+
+        // setup runs before loadParameters, so it reads parameters.xlsx itself (SimPathsStart also loads it earlier,
+        // before this call, so that validation ahead of databaseSetup already sees these values; re-loading here
+        // keeps this method correct for any other caller that skips that earlier load)
+        loadCountrySpecificParameters(country);
 
         // populate new database for starting data
         DataParser.databaseFromCSV(country, executeWithGui); // Initial database tables

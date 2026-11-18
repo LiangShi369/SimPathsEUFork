@@ -123,11 +123,16 @@ public class SimPathsMultiRun extends MultiRun {
 		country = Country.getCountryFromNameString(countryString);
 
 		// Propagate the resolved country into the static Parameters.COUNTRY_STRING used by
-		// country-specific lookups (e.g. Parameters.getStatePensionAge). SimPathsStart does
+		// country-specific lookups (e.g. Labour.valuesForCountry). SimPathsStart does
 		// this implicitly via runGUIlessSetup(), but SimPathsMultiRun jumps straight into
 		// Parameters.databaseSetup on -DBSetup and into model construction otherwise, so
-		// without this call the DBSetup branch crashes with "No PSA rules for country=".
+		// it has to be set here.
 		Parameters.defineCountryString(country);
+
+		// Load the country's parameters.xlsx before validating startYear, so validation (and, on -DBSetup,
+		// Parameters.databaseSetup's own delete-then-load) use the same MIN/MAX_START_YEAR(_TRAINING) bounds as the
+		// database actually built, instead of validating here against the Java defaults
+		Parameters.loadCountrySpecificParameters(country);
 
 		Parameters.validateStartYear(startYear);
 

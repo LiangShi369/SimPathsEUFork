@@ -255,12 +255,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
     EventGroup firstYearSched = new EventGroup();
     EventGroup yearlySchedule = new EventGroup();
 
-    @GUIparameter(description = "tick to project social care")
-    private boolean projectSocialCare = false;
-
     private boolean flagSuppressChildcareCosts = true;
-
-    private boolean flagSuppressSocialCareCosts = true;
 
     @GUIparameter(description = "tick to enable intertemporal optimised consumption and labour decisions")
     private boolean enableIntertemporalOptimisations = false;
@@ -375,12 +370,12 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
 
         // load model parameters
         Parameters.loadParameters(country, maxAge, enableIntertemporalOptimisations, projectFormalChildcare,
-                projectSocialCare, donorPoolAveraging,
+                donorPoolAveraging,
                 fixTimeTrend, fixTimeTrendR1a, fixTimeTrendR1b,  fixTimeTrendE1a, fixTimeTrendE1b, fixTimeTrendE2a,
                 flagDefaultToTimeSeriesAverages, saveImperfectTaxDBMatches,
                 timeTrendStopsIn, timeTrendStopsInR1a, timeTrendStopsInR1b, timeTrendStopsInE1a, timeTrendStopsInE1b, timeTrendStopsInE2a,
                 startYear, endYear, interestRateInnov, disposableIncomeFromLabourInnov, flagSuppressChildcareCosts,
-                flagSuppressSocialCareCosts, macroShockPopulation, macroShockProductivity, macroShockGreenPolicy, macroShocksOn);
+                macroShockPopulation, macroShockProductivity, macroShockGreenPolicy, macroShocksOn);
         if (enableIntertemporalOptimisations) {
 
             alignEmployment = false;
@@ -704,11 +699,7 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
             pw.println(line);
             line = "responsesToDisability: " + responsesToDisability;
             pw.println(line);
-            line = "projectSocialCare: " + projectSocialCare;
-            pw.println(line);
             line = "flagSuppressChildcareCosts: " + flagSuppressChildcareCosts;
-            pw.println(line);
-            line = "flagSuppressSocialCareCosts: " + flagSuppressSocialCareCosts;
             pw.println(line);
             line = "responsesToRegion: " + responsesToRegion;
             pw.println(line);
@@ -737,7 +728,6 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
         EndYear,
         UnionMatching,
         LabourMarketAndIncomeUpdate,
-        SocialCareMarketClearing,
 
         //Alignment Processes
         FertilityAlignment,
@@ -828,9 +818,6 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                     unionMatchingNoRegion(false); //Run matching again relaxing regions this time
                 }
                 if (commentsOn) log.info("Union matching complete.");
-            }
-            case SocialCareMarketClearing -> {
-                socialCareMarketClearing();
             }
             case FertilityAlignment -> {
 
@@ -1513,21 +1500,6 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                 }
             }
             matches.addAll(matchesHere);
-        }
-    }
-
-    private void socialCareMarketClearing() {
-
-        // adjust provision so that aggregate provision broadly matches aggregate receipt
-        double careProvisionAdjustment = Parameters.getTimeSeriesValue(getYear(),TimeSeriesVariable.CareProvisionAdjustment);
-        SocialCareAlignment socialCareAlignment = new SocialCareAlignment(persons, careProvisionAdjustment);
-        double[] startVal = new double[] {careProvisionAdjustment};
-        double[] lowerBound = new double[] {careProvisionAdjustment - 1.5};
-        double[] upperBound = new double[] {careProvisionAdjustment + 1.5};
-        RootSearch search = new RootSearch(lowerBound, upperBound, startVal, socialCareAlignment, 1.0E-2, 0.001);
-        search.evaluate();
-        if (search.isTargetAltered()) {
-            Parameters.putTimeSeriesValue(getYear(), search.getTarget()[0], TimeSeriesVariable.CareProvisionAdjustment);
         }
     }
 
@@ -2926,11 +2898,6 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
 
     public void setYear(int year) {
         this.year = year;
-    }
-
-    public boolean getProjectSocialCare() { return projectSocialCare; }
-    public void setProjectSocialCare(boolean projectSocialCare) {
-        this.projectSocialCare = projectSocialCare;
     }
 
     public boolean getEnableIntertemporalOptimisations() {
