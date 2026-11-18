@@ -177,8 +177,6 @@ public class Expectations {
         personProxyThisPeriod.setDhe(currentStates.getHealthCode());
         personProxyThisPeriod.setDeh_c4(currentStates.getEducationCode());
         personProxyThisPeriod.setDcpstLocal(currentStates.getDcpst());
-        personProxyThisPeriod.setSocialCareProvision(currentStates.getSocialCareProvisionCode());
-        personProxyThisPeriod.populateSocialCareReceipt(currentStates.getSocialCareReceiptStateCode());
 
         // add person proxy for next period expectations
         personProxyNextPeriod = new Person(true);
@@ -195,8 +193,6 @@ public class Expectations {
         personProxyNextPeriod.setDlltsd_lag1(currentStates.getDlltsd());
         personProxyNextPeriod.setDhe(currentStates.getHealthCode());
         personProxyNextPeriod.setDhe_lag1(currentStates.getHealthCode());
-        personProxyNextPeriod.populateSocialCareReceipt_lag1(currentStates.getSocialCareReceiptStateCode());
-        personProxyNextPeriod.setSocialCareProvision_lag1(currentStates.getSocialCareProvisionCode());
         personProxyNextPeriod.setDed(currentStates.getStudentIndicator());
         personProxyNextPeriod.setDeh_c4(currentStates.getEducationCode());
         personProxyNextPeriod.setDeh_c4_lag1(currentStates.getEducationCode());
@@ -235,15 +231,6 @@ public class Expectations {
         // update current period variables for discrete decisions
         //********************************************************
 
-        // care hours per week
-        double careHoursProvidedWeekly = 0.0;
-        int careProvision = 0;
-        if (Parameters.flagSocialCare) {
-            careHoursProvidedWeekly = evalSocialCareHoursProvidedWeekly();
-            if (careHoursProvidedWeekly>1.0E-5)
-                careProvision = 1;
-        }
-
         // labour and labour income in current period - to evaluate taxes and benefits
         double labourIncome1Weekly = 0.0;
         double labourIncome2Weekly = 0.0;
@@ -251,12 +238,6 @@ public class Expectations {
         Integer labourHours1Weekly = null;
         Integer labourHours2Weekly = null;
         leisureTime = 1.0;
-        if (careHoursProvidedWeekly>0.0) {
-            if (cohabitation)
-                leisureTime -= careHoursProvidedWeekly / (2.0*Parameters.HOURS_IN_WEEK);
-            else
-                leisureTime -= careHoursProvidedWeekly / Parameters.HOURS_IN_WEEK;
-        }
         if (ageYearsThisPeriod <= DecisionParams.maxAgeFlexibleLabourSupply) {
             labourHours1Weekly = (int) Math.round(DecisionParams.FULLTIME_HOURS_WEEKLY * emp1Pr);
             hourlyWageRate1 = getHourlyWageRate(labourHours1Weekly);
@@ -335,14 +316,9 @@ public class Expectations {
             benefitUnitProxyThisPeriod.setLabourHoursWeekly2Local(null);
         }
         double childcareCostAnnual = evalChildcareCostWeekly() * Parameters.WEEKS_PER_YEAR;
-        double socialCareCostAnnual = evalSocialCareCostWeekly() * Parameters.WEEKS_PER_YEAR;
 
-        // disability
+        // disability: not a tax-donor matching characteristic (see KeyFunctionHU2), so passed as 0
         int disability1 = 0, disability2;
-        if (!Parameters.flagSuppressSocialCareCosts) {
-
-            disability1 = currentStates.getDisability();
-        }
         if (cohabitation) {
             disability2 = 0;
         } else {
@@ -351,11 +327,10 @@ public class Expectations {
 
         // call to tax and benefit function
         disposableIncomeAnnual = taxBenefitFunction(labourHours1Weekly, disability1, labourIncome1Weekly, investmentIncome1Annual, pensionIncome1Annual,
-                labourHours2Weekly, disability2, careProvision, labourIncome2Weekly, investmentIncome2Annual, pensionIncome2Annual, childcareCostAnnual,
-                socialCareCostAnnual, liquidWealth);
+                labourHours2Weekly, disability2, labourIncome2Weekly, investmentIncome2Annual, pensionIncome2Annual, childcareCostAnnual);
 
         // cash on hand
-        cashOnHand = liquidWealth + availableCredit + disposableIncomeAnnual - childcareCostAnnual - socialCareCostAnnual;
+        cashOnHand = liquidWealth + availableCredit + disposableIncomeAnnual - childcareCostAnnual;
 
 
         //********************************************************
@@ -419,16 +394,6 @@ public class Expectations {
             // dependent children
             futures.updateChildren();
 
-            // social care receipt
-            if (Parameters.flagSocialCare  && ageYearsNextPeriod >= DecisionParams.minAgeReceiveFormalCare) {
-                futures.updateSocialCareReceipt();
-            }
-
-            // social care provision
-            if (Parameters.flagSocialCare) {
-                futures.updateSocialCareProvision();
-            }
-
             // full-time wage potential
             if (ageYearsNextPeriod <= DecisionParams.maxAgeFlexibleLabourSupply) {
                 futures.updateWagePotential();
@@ -473,39 +438,6 @@ public class Expectations {
         return childcareCostWeekly;
     }
 
-    private double evalSocialCareCostWeekly() {
-
-        double socialCareCostWeekly = 0.0;
-        if (Parameters.flagSocialCare && !Parameters.flagSuppressSocialCareCosts && (ageYearsThisPeriod>=DecisionParams.minAgeReceiveFormalCare)) {
-
-            SocialCareReceiptState market = currentStates.getSocialCareReceiptStateCode();
-            if (SocialCareReceiptState.Mixed.equals(market) || SocialCareReceiptState.Formal.equals(market)) {
-
-                double score = Parameters.getRegFormalCareHoursS2k().getScore(personProxyThisPeriod,Person.DoublesVariables.class);
-                double rmse = Parameters.getRMSEForRegression("S2k");
-                double hours = Math.min(Parameters.MAX_HOURS_WEEKLY_FORMAL_CARE, Math.exp(score + rmse*rmse/2.0));
-                socialCareCostWeekly = hours * Parameters.getTimeSeriesValue(currentStates.getYear(), TimeSeriesVariable.CarerWageRate);
-            }
-        }
-        return socialCareCostWeekly;
-    }
-
-    private double evalSocialCareHoursProvidedWeekly() {
-
-        double socialCareHoursProvidedWeekly = 0.0;
-        if (Parameters.flagSocialCare && !Parameters.flagSuppressSocialCareCosts) {
-
-            SocialCareProvision status = currentStates.getSocialCareProvisionCode();
-            if (!SocialCareProvision.None.equals(status)) {
-
-                double score = Parameters.getRegCareHoursProvS3e().getScore(personProxyThisPeriod,Person.DoublesVariables.class);
-                double rmse = Parameters.getRMSEForRegression("S3e");
-                socialCareHoursProvidedWeekly = Math.min(80.0, Math.exp(score + rmse*rmse/2.0));
-            }
-        }
-        return socialCareHoursProvidedWeekly;
-    }
-
     /**
      * METHOD TO CALL TO TAX AND BENEFIT FUNCTION
      * @return disposable income per annum of benefitUnit
@@ -519,13 +451,10 @@ public class Expectations {
                                      double pensionIncome1Annual,
                                      Integer labourHours2Weekly,
                                      Integer disability2,
-                                     Integer careProvision,
                                      double labourIncome2Weekly,
                                      double investmentIncome2Annual,
                                      double pensionIncome2Annual,
-                                     double childcareCostAnnual,
-                                     double socialCareCostAnnual,
-                                     double liquidWealth) {
+                                     double childcareCostAnnual) {
 
         // prepare characteristics
         int year = currentStates.getYear();
@@ -551,13 +480,12 @@ public class Expectations {
             hoursWorkPerWeek2 = 0.0;
         }
         double childcareCostPerMonth = childcareCostAnnual / 12.0;
-        double socialCareCostPerMonth = socialCareCostAnnual / 12.0;
 
         // evaluate disposable income
         double originalIncomePerMonth = originalIncomePerWeek * Parameters.WEEKS_PER_MONTH;
         TaxEvaluation evaluatedTransfers = new TaxEvaluation(year, ageYearsNextPeriod, dgn, numberAdults, numberChildrenUnder5, numberChildrenAged5To9,
-                numberChildrenAged10To17, hoursWorkPerWeek1, hoursWorkPerWeek2, disability1, disability2, careProvision, originalIncomePerMonth, secondIncomePerMonth,
-                childcareCostPerMonth, socialCareCostPerMonth, liquidWealth, -1.0);
+                numberChildrenAged10To17, hoursWorkPerWeek1, hoursWorkPerWeek2, disability1, disability2, originalIncomePerMonth, secondIncomePerMonth,
+                childcareCostPerMonth, -1.0);
 
         Match match = evaluatedTransfers.getMatch();
         if (match.getMatchCriterion()>Parameters.IMPERFECT_THRESHOLD) {

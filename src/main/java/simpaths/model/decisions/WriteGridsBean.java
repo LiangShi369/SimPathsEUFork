@@ -21,8 +21,6 @@ public class WriteGridsBean {
     private int retirement;
     private int health;
     private int disability;
-    private int socialCareReceipt;
-    private int socialCareProvision;
     private int region;
     private int student;
     private int education;
@@ -60,8 +58,6 @@ public class WriteGridsBean {
         this.health = health;
     }
     public void setDisability(int disability) {this.disability = disability;}
-    public void setSocialCareReceipt(int socialCareReceipt) {this.socialCareReceipt = socialCareReceipt;}
-    public void setSocialCareProvision(int socialCareProvision) {this.socialCareProvision = socialCareProvision;}
     public void setRegion(int region) {this.region = region;}
     public void setStudent(int student) {
         this.student = student;
@@ -118,8 +114,6 @@ public class WriteGridsBean {
         return health;
     }
     public int getDisability() {return disability;}
-    public int getSocialCareReceipt() {return socialCareReceipt;}
-    public int getSocialCareProvision() {return socialCareProvision;}
     public int getRegion() {return region;}
     public int getStudent() {
         return student;
@@ -186,8 +180,6 @@ public class WriteGridsBean {
     public String getDisabilityString() {
         return String.valueOf(disability);
     }
-    public String getSocialCareReceiptString() {return String.valueOf(socialCareReceipt);}
-    public String getSocialCareProvisionString() {return String.valueOf(socialCareProvision);}
     public String getRegionString() {return String.valueOf(region);}
     public String getStudentString() {
         return String.valueOf(student);

@@ -29,7 +29,6 @@ public class DonorPerson {
     @Column(name = "WEIGHT") private Double weight;
     @Column(name = "HOURS_WORKED_WEEKLY") private Integer hoursWorkedWeekly;
     @Column(name = "DLLTSD") private Integer dlltsd;
-    @Column(name = "CARER") private Integer carer;
 
 
     /**
@@ -62,7 +61,6 @@ public class DonorPerson {
     public String getDgnRaw() { return dgnRaw; }
     public int getHoursWorkedWeekly() { return this.hoursWorkedWeekly; }
     public int getDlltsd() { return this.dlltsd; }
-    public int getCarer() { return 0; }
     public double getWeight() { return this.weight; }
     public Set<DonorPersonPolicy> getPolicies() { return policies; }
     public DonorPersonPolicy getPolicy(int startYear) {

@@ -27,7 +27,6 @@ model_args:
 #    projectFormalChildcare: true
 #    donorPoolAveraging: true
 #    alignEmployment: false
-#    projectSocialCare: false
 #    enableIntertemporalOptimisations: true
 #    responsesToLowWageOffer: true
 #    saveImperfectTaxDBMatches: false
