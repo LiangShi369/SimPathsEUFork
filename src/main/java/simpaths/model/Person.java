@@ -363,7 +363,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
             labC4 = originalPerson.labC4;
         } else if (originalPerson.demAge < Parameters.MIN_AGE_TO_LEAVE_EDUCATION) {
             labC4 = Les_c4.Student;
-        } else if (originalPerson.demAge > (int)Parameters.getTimeSeriesValue(model.getYear(), originalPerson.getDgn().toString(), TimeSeriesVariable.FixedRetirementAge)) {
+        } else if (originalPerson.reachedStatePensionAge(originalPerson.demAge, model.getYear())) {
             labC4 = Les_c4.Retired;
         } else if (originalPerson.getLabourSupplyWeekly() != null && originalPerson.getLabourSupplyWeekly().getHours(originalPerson) > 0) {
             labC4 = Les_c4.EmployedOrSelfEmployed;
@@ -2016,7 +2016,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         sIndexNormalised,
         Single,
         Single_kids,
-        StatePensionAge,
         UnemployedToEmployed,
         UnemploymentRate,
         Union,
@@ -2198,9 +2197,6 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
 
             case LnAge -> {
                 return Math.log(demAge);
-            }
-            case StatePensionAge -> {
-                return (demAge >= 68) ? 1. : 0.;
             }
             case Constant -> {
                 return 1.;
@@ -3110,108 +3106,59 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
             case Yplgrs_dv_L3 -> {
                 return yEmpPersGrossMonthL3;
             }
-            case Reached_Retirement_Age -> {
-                int retirementAge;
-                if (demMaleFlag.equals(Gender.Female)) {
-                    retirementAge = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                } else {
-                    retirementAge = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                }
-                return (demAge >= retirementAge) ? 1. : 0.;
+            case Reached_Retirement_Age -> { // At or above state pension age
+                return reachedStatePensionAge(demAge, getYear()) ? 1. : 0.;
             }
-            case Reached_Retirement_Age_Sp -> {
-                int retirementAgePartner;
-                Person partner = getPartner();
-                if (partner != null) {
-                    if (partner.demMaleFlag.equals(Gender.Female)) {
-                        retirementAgePartner = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                    } else {
-                        retirementAgePartner = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                    }
-                    return (partner.demAge >= retirementAgePartner) ? 1. : 0.;
-                } else {
-                    return 0.;
-                }
-            }
-            case Elig_pen -> { // Age == state retirement age
-                int retirementAge;
-                if (demMaleFlag.equals(Gender.Female)) {
-                    retirementAge = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                } else {
-                    retirementAge = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                }
-                return (demAge == retirementAge) ? 1. : 0.;
-            }
-            case Elig_pen_L1 -> { // Age == state retirement age +1
-                int retirementAge = 1;
-                if (demMaleFlag.equals(Gender.Female)) {
-                    retirementAge += (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                } else {
-                    retirementAge += (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                }
-                return (demAge == retirementAge) ? 1. : 0.;
-            }
-
-            case Elig_pen_Sp -> { // Partner's age == state retirement age
-                int retirementAgePartner;
-                Person partner = getPartner();
-                if (partner != null) {
-                    if (partner.demMaleFlag.equals(Gender.Female)) {
-                        retirementAgePartner = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                    } else {
-                        retirementAgePartner = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                    }
-                    return (partner.demAge == retirementAgePartner) ? 1. : 0.;
-                } else {
-                    return 0.;
-                }
-            }
-            case Elig_pen_L1_Sp -> { // Partner's age == state retirement age +1
-                int retirementAgePartner = 1;
-                Person partner = getPartner();
-                if (partner != null) {
-                    if (partner.demMaleFlag.equals(Gender.Female)) {
-                        retirementAgePartner += (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                    } else {
-                        retirementAgePartner += (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                    }
-                    return (partner.demAge == retirementAgePartner) ? 1. : 0.;
-                } else {
-                    return 0.;
-                }
-            }
-            case Reached_Retirement_Age_Sp_L1 -> { // Partner was at or above state retirement age in the previous year
+            case Reached_Retirement_Age_Sp -> { // Partner at or above state pension age
                 Person partner = getPartner();
                 if (partner == null)
                     return 0.;
-                return (partner.demAge - 1 >= getFixedRetirementAge(partner, getYear() - 1)) ? 1. : 0.;
+                return partner.reachedStatePensionAge(partner.demAge, getYear()) ? 1. : 0.;
             }
-            case Elig_pen_Sp_L1 -> { // Partner's age == state retirement age in the previous year
+            case Elig_pen -> { // Age == state pension age
+                return (demAge == getStatePensionAge(getYear())) ? 1. : 0.;
+            }
+            case Elig_pen_L1 -> { // Age == state pension age + 1
+                return (demAge == getStatePensionAge(getYear()) + 1) ? 1. : 0.;
+            }
+            case Elig_pen_Sp -> { // Partner's age == state pension age
                 Person partner = getPartner();
                 if (partner == null)
                     return 0.;
-                return (partner.demAge - 1 == getFixedRetirementAge(partner, getYear() - 1)) ? 1. : 0.;
+                return (partner.demAge == partner.getStatePensionAge(getYear())) ? 1. : 0.;
             }
-            case Elig_pen_L1_Sp_L1 -> { // Partner's age == state retirement age +1 in the previous year.
+            case Elig_pen_L1_Sp -> { // Partner's age == state pension age + 1
+                Person partner = getPartner();
+                if (partner == null)
+                    return 0.;
+                return (partner.demAge == partner.getStatePensionAge(getYear()) + 1) ? 1. : 0.;
+            }
+            case Reached_Retirement_Age_Sp_L1 -> { // Partner was at or above state pension age in the previous year
+                Person partner = getPartner();
+                if (partner == null)
+                    return 0.;
+                return partner.reachedStatePensionAge(partner.demAge - 1, getYear() - 1) ? 1. : 0.;
+            }
+            case Elig_pen_Sp_L1 -> { // Partner's age == state pension age in the previous year
+                Person partner = getPartner();
+                if (partner == null)
+                    return 0.;
+                return (partner.demAge - 1 == partner.getStatePensionAge(getYear() - 1)) ? 1. : 0.;
+            }
+            case Elig_pen_L1_Sp_L1 -> { // Partner's age == state pension age + 1 in the previous year.
                                         // Inner _L1 is the age offset (SPA+1), outer _L1 is the one-year time lag
                 Person partner = getPartner();
                 if (partner == null)
                     return 0.;
-                return (partner.demAge - 1 == getFixedRetirementAge(partner, getYear() - 1) + 1) ? 1. : 0.;
+                return (partner.demAge - 1 == partner.getStatePensionAge(getYear() - 1) + 1) ? 1. : 0.;
             }
-            case Reached_Retirement_Age_Les_c3_NotEmployed_L1 -> { //Reached retirement age and was not employed in the previous year
-                int retirementAge;
-                if (demMaleFlag.equals(Gender.Female)) {
-                    retirementAge = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Female.toString(), TimeSeriesVariable.FixedRetirementAge);
-                } else {
-                    retirementAge = (int) Parameters.getTimeSeriesValue(getYear(), Gender.Male.toString(), TimeSeriesVariable.FixedRetirementAge);
-                }
-                return ((demAge >= retirementAge) && (labC4L1.equals(Les_c4.NotEmployed) || labC4L1.equals(Les_c4.Retired))) ? 1. : 0.;
+            case Reached_Retirement_Age_Les_c3_NotEmployed_L1 -> { // At or above state pension age and not employed in the previous year
+                return (reachedStatePensionAge(demAge, getYear()) && (labC4L1.equals(Les_c4.NotEmployed) || labC4L1.equals(Les_c4.Retired))) ? 1. : 0.;
             }
             case Reached_Retirement_Age_Les_c2_NotEmployed_L1, Reached_Retirement_Age_Les_L1 -> {
                 // Stata Reached_Retirement_Age * l.Les_c3_NotEmployed, where Reached_Retirement_Age = dagpns
                 // (at or above state pension age this year) and Les_c3_NotEmployed = lesnr_c2
-                return (demAge >= getFixedRetirementAge(this, getYear()) && isNotEmployedC2Lag1()) ? 1. : 0.;
+                return (reachedStatePensionAge(demAge, getYear()) && isNotEmployedC2Lag1()) ? 1. : 0.;
             }
             case EquivalisedIncomeYearly -> {
                 return getBenefitUnit().getEquivalisedDisposableIncomeYearly();
@@ -4553,12 +4500,20 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
     }
 
     /**
-     * State pension age applying to a person in a given year, as used by the retirement regressors.
-     * Lagged regressors pass getYear()-1 to obtain the schedule that was in force the previous year.
+     * State pension age that applies to this person in a given year (Parameters.getStatePensionAge). Lagged
+     * regressors pass getYear() - 1 to obtain the age that applied in the previous year.
      */
-    private static int getFixedRetirementAge(Person person, int year) {
-        Gender gender = Gender.Female.equals(person.demMaleFlag) ? Gender.Female : Gender.Male;
-        return (int) Parameters.getTimeSeriesValue(year, gender.toString(), TimeSeriesVariable.FixedRetirementAge);
+    private int getStatePensionAge(int year) {
+        return Parameters.getStatePensionAge(year, demMaleFlag);
+    }
+
+    /**
+     * Whether this person, aged {@code age} in {@code year}, has reached the state pension age of that year: the one
+     * definition of "at or above state pension age" (Stata dagpns) used by the retirement regressors and by the
+     * Retired status of a cloned person.
+     */
+    private boolean reachedStatePensionAge(int age, int year) {
+        return age >= getStatePensionAge(year);
     }
 
     /**

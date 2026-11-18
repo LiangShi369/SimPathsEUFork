@@ -429,7 +429,8 @@ public class Parameters {
     //Mean and covariances for parametric matching
     private static MultiKeyCoefficientMap meanCovarianceParametricMatching;
 
-    private static MultiKeyCoefficientMap fixedRetireAge;
+    // State pension age by year and gender (input/<COUNTRY>/state_pension_age.xlsx), loaded by loadCountrySpecificParameters
+    private static StatePensionAgeSchedule statePensionAgeSchedule;
     //	private static MultiKeyCoefficientMap rawProbSick;
     private static MultiKeyCoefficientMap unemploymentRates;
 //	private static MultiKeyMap probSick;
@@ -972,7 +973,6 @@ public class Parameters {
         donorPoolAveraging = donorPoolAveraging1;
         realInterestRateInnov = interestRateInnov1;
         disposableIncomeFromLabourInnov = disposableIncomeFromLabourInnov1;
-        fixedRetireAge = ExcelAssistant.loadCoefficientMap(resolveCountryFile(country, "scenario_retirementAgeFixed.xlsx"), "Retirement_age", 1);
 
         /*
         Code below introduces macro shocks in terms of population, productivity, and employment
@@ -2119,9 +2119,6 @@ public class Parameters {
             case LowEducationRate -> {
                 map = projectionsLowEdu;
             }
-            case FixedRetirementAge -> {
-                map = fixedRetireAge;
-            }
         }
         return map;
     }
@@ -2750,102 +2747,16 @@ public static void putPrevOrNewTarget(int year, Object newTarget, TimeSeriesVari
         }
     }
 
-    public static int getStatePensionAge(int year, Gender demMaleFlag) {
-
-        int spa = -9;
-
-        switch (COUNTRY_STRING) {
-
-            case "PL":                                      // Poland
-                if (demMaleFlag == Gender.Male) {
-                    // Men: 65 (<2016), 66 (2016-2017), 65 (2018+)
-                    if      (year >= 2005 && year < 2016)   spa = 65;
-                    else if (year >= 2016 && year < 2018)   spa = 66;
-                    else if (year >= 2018 )                 spa = 65;
-                } else if (demMaleFlag == Gender.Female){
-                    // Women: 60 (<2016), 61 (2016-2017), 60 (2018+)
-                    if      (year >= 2005 && year < 2016)   spa = 60;
-                    else if (year >= 2016 && year < 2018)   spa = 61;
-                    else if (year >= 2018 )                 spa = 60;
-                }
-                break;
-
-            case "ES":                                      // Spain
-                // Men and women: ordinary pension age gradually rises
-                // from 65 before 2013 to 67 from 2027.
-                //
-                // Spain's statutory ages are specified in years and months.
-                // As spa stores integer years, ages are rounded to the
-                // nearest whole year:
-                // 2005–2017: 65
-                // 2018–2023: 66
-                // 2024+:     67
-                if      (year >= 2005 && year < 2018)       spa = 65;
-                else if (year >= 2018 && year < 2024)       spa = 66;
-                else if (year >= 2024)                      spa = 67;
-                break;
-
-            case "EL":                                      // Greece
-                if (demMaleFlag == Gender.Male) {
-                    // Men: 65 (<2013), 67 (2013+)
-                    if      (year >= 2005 && year < 2013)   spa = 65;
-                    else if (year >= 2013  )                spa = 67;
-                } else if (demMaleFlag == Gender.Female){
-                    // Women: 60 (<2009), 61 (2010), 63 (2011), 65 (2012), 67 (2013+)
-                    if      (year >= 2005 && year < 2010)   spa = 60;
-                    else if (year == 2010)                  spa = 61;
-                    else if (year == 2011)                  spa = 63;
-                    else if (year == 2012)                  spa = 65;
-                    else if (year >= 2013 )                 spa = 67;
-                }
-                break;
-
-            case "IT":                                      // Italy
-                if (demMaleFlag == Gender.Male) {
-                    // Men: 65 (<2012), 66 (2012–2018), 67 (2019+)
-                    if      (year >= 2005 && year < 2012)   spa = 65;
-                    else if (year >= 2012 && year < 2019)   spa = 66;
-                    else if (year >= 2019 )                 spa = 67;
-                } else if (demMaleFlag == Gender.Female) {
-                    // Women: 60 (<2012), 62 (2012), 63 (2013–2014), 65 (2015–2017), 66 (2018), 67 (2019+)
-                    if      (year >= 2005 && year < 2012)   spa = 60;
-                    else if (year == 2012)                  spa = 62;
-                    else if (year >= 2013 && year < 2015)   spa = 63;
-                    else if (year >= 2015 && year < 2018)   spa = 65;
-                    else if (year == 2018)                  spa = 66;
-                    else if (year >= 2019 )                 spa = 67;
-                }
-                break;
-
-            case "HU":                                      // Hungary
-                if (demMaleFlag == Gender.Male) {
-                    // Men: 62 (<2014), 63 (2014–2016), 64 (2017–2020), 65 (2021+)
-                    if      (year >= 2005 && year < 2014)   spa = 62;
-                    else if (year >= 2014 && year < 2017)   spa = 63;
-                    else if (year >= 2017 && year < 2021)   spa = 64;
-                    else if (year >= 2021 )                 spa = 65;
-                } else if (demMaleFlag == Gender.Female) {
-                    // Women: 60 (<2010), 62 (2010–2013), 63 (2014–2016), 64 (2017–2020), 65 (2021+)
-                if          (year >= 2005 && year < 2010)   spa = 60;
-                    else if (year >= 2010 && year < 2014)   spa = 62;
-                    else if (year >= 2014 && year < 2017)   spa = 63;
-                    else if (year >= 2017 && year < 2021)   spa = 64;
-                    else if (year >= 2021 )                 spa = 65;
-                }
-                break;
-
-            default:
-                throw new IllegalStateException("No PSA rules for country=" + COUNTRY_STRING);
-        }
-
-        // Throw if nothing matched
-        if (spa == -9) {
-            throw new IllegalStateException(
-                "Could not determine state pension age for: " + "country=" + COUNTRY_STRING + ", gender=" + demMaleFlag + ", year=" + year);
-        }
-
-
-        return spa;
+    /**
+     * State pension age, in whole years, of a person of the given gender in the given year: the only source of the
+     * state pension age in the model (tax-donor keys, childcare costs, the retirement regressors, and the Retired
+     * status of a cloned person). Read from input/<COUNTRY>/state_pension_age.xlsx by loadCountrySpecificParameters.
+     * A year after the table's last row takes the ages of that row; a year before its first row is an error.
+     */
+    public static int getStatePensionAge(int year, Gender gender) {
+        if (statePensionAgeSchedule == null)
+            throw new IllegalStateException("State pension age not loaded: call loadCountrySpecificParameters first");
+        return statePensionAgeSchedule.get(year, gender);
     }
 
     public static MultiKeyCoefficientMap getCoeffLabourSupplyUtilityMales() {
@@ -3014,10 +2925,14 @@ public static void putPrevOrNewTarget(int year, Object newTarget, TimeSeriesVari
      * SimPathsStart before anything that reads a country-specific static field ahead of databaseSetup/loadParameters
      * (validateStartYear, or the GUI's direct DataParser.databaseFromCSV call), so that those earlier reads see the
      * workbook value instead of the Java default.
+     *
+     * Also loads the state pension age table (input/<COUNTRY>/state_pension_age.xlsx), for the same reason: the
+     * tax-donor keys built at setup and the simulation must use the same ages.
      */
     public static void loadCountrySpecificParameters(Country country) {
         countrySpecificParameters = ExcelAssistant.loadCoefficientMap(resolveCountryFile(country, "parameters.xlsx"), "Parameters", 1);
         ParametersLoader.setParametersFromMap(countrySpecificParameters);
+        statePensionAgeSchedule = StatePensionAgeSchedule.load(resolveCountryFile(country, StatePensionAgeSchedule.FILE_NAME));
     }
 
     public static void databaseSetup(Country country, boolean executeWithGui, int startYear) {

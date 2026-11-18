@@ -13,7 +13,6 @@ import simpaths.model.enums.EducationLevel;
 import simpaths.model.enums.Indicator;
 import simpaths.model.enums.Gender;
 import simpaths.model.enums.Les_c4;
-import simpaths.model.enums.TimeSeriesVariable;
 import simpaths.model.enums.Ydses_c5;
 import simpaths.model.Innovations;
 
@@ -216,8 +215,7 @@ public class PersonTest {
         @Test
         @DisplayName("Reached_Retirement_Age_Les_c2_NotEmployed_L1 needs pension age this year and lagged non-employment")
         public void reachedRetirementAgeLesC2Interaction() {
-            parametersMock.when(() -> Parameters.getTimeSeriesValue(Mockito.anyInt(), Mockito.anyString(),
-                    Mockito.eq(TimeSeriesVariable.FixedRetirementAge))).thenReturn(65.0);
+            parametersMock.when(() -> Parameters.getStatePensionAge(Mockito.anyInt(), Mockito.any(Gender.class))).thenReturn(65);
             testPerson.setDgn(Gender.Male);
 
             testPerson.setDag(65);
@@ -229,6 +227,31 @@ public class PersonTest {
             testPerson.setDag(64);
             testPerson.setLes_c4_lag1(Les_c4.NotEmployed);
             assertEquals(0.0, testPerson.getDoubleValue(Person.DoublesVariables.Reached_Retirement_Age_Les_c2_NotEmployed_L1));
+        }
+
+        @Test
+        @DisplayName("Pension-age regressors use the state pension age of the person's gender in the current year")
+        public void pensionAgeRegressorsUseOwnGenderAndYear() {
+            // mockModel.getYear() is 2025
+            parametersMock.when(() -> Parameters.getStatePensionAge(2025, Gender.Female)).thenReturn(60);
+            parametersMock.when(() -> Parameters.getStatePensionAge(2025, Gender.Male)).thenReturn(65);
+
+            testPerson.setDgn(Gender.Female);
+            testPerson.setDag(60);
+            assertEquals(1.0, testPerson.getDoubleValue(Person.DoublesVariables.Reached_Retirement_Age));
+            assertEquals(1.0, testPerson.getDoubleValue(Person.DoublesVariables.Elig_pen));
+            assertEquals(0.0, testPerson.getDoubleValue(Person.DoublesVariables.Elig_pen_L1));
+            testPerson.setDag(61);
+            assertEquals(1.0, testPerson.getDoubleValue(Person.DoublesVariables.Reached_Retirement_Age));
+            assertEquals(0.0, testPerson.getDoubleValue(Person.DoublesVariables.Elig_pen));
+            assertEquals(1.0, testPerson.getDoubleValue(Person.DoublesVariables.Elig_pen_L1));
+
+            testPerson.setDgn(Gender.Male);
+            assertEquals(0.0, testPerson.getDoubleValue(Person.DoublesVariables.Reached_Retirement_Age));
+            assertEquals(0.0, testPerson.getDoubleValue(Person.DoublesVariables.Elig_pen_L1));
+            testPerson.setDag(65);
+            assertEquals(1.0, testPerson.getDoubleValue(Person.DoublesVariables.Reached_Retirement_Age));
+            assertEquals(1.0, testPerson.getDoubleValue(Person.DoublesVariables.Elig_pen));
         }
 
         @Test

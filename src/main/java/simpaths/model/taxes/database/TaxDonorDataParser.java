@@ -652,7 +652,7 @@ public class TaxDonorDataParser {
 
                 counter++;
                 int age = 0, numberMembersOver17 = 0, numberChildrenUnder5 = 0, numberChildren5To9 = 0;
-                Gender dgn = Gender.Male;  //it is default gender value for Tax unit; needed only to evaluate flagSPA
+                Gender dgn = Gender.Male;  // gender of the oldest member, which sets the state pension age of the donor keys
                 int numberChildren10To17 = 0, dlltsd1 = 0, dlltsd2 = 0;
                 double hoursWorkedPerWeek1 = 0.0, hoursWorkedPerWeek2 = 0.0;
                 boolean flagInitialiseDemographics = true;
@@ -683,11 +683,10 @@ public class TaxDonorDataParser {
 
 
                         if (flagInitialiseDemographics) {
-                            // need to instantiate variables to evaluate key
-                            if (Parameters.getStatePensionAge(systemYear, dgn) <= age) {dgn = genderPerson;} // if flagSPA = 1 then update dgn
-
-                            // update age and dgn together using the same selection rule (max age)
-                            if (agePerson > age) {
+                            // need to instantiate variables to evaluate key:
+                            // age and gender of the oldest member, a man if a man and a woman are equally old, as
+                            // BenefitUnit's MaximumAge and MaximumAgeGender give them in the simulation
+                            if (agePerson > age || (agePerson == age && Gender.Male.equals(genderPerson))) {
                                 age = agePerson;
                                 dgn = genderPerson;
                             }
