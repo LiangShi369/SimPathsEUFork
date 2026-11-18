@@ -1,8 +1,11 @@
 package simpaths.data;
 
 import microsim.data.MultiKeyCoefficientMap;
+import org.apache.commons.collections4.keyvalue.MultiKey;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
@@ -188,6 +191,35 @@ class InputScenarioTest {
         assertThrows(IllegalStateException.class,
                 () -> InputScenario.requireCachedInputsUnchanged("m", "parameters", "parameters.xlsx", missing, base));
         assertDoesNotThrow(() -> InputScenario.requireCachedInputsUnchanged("m", "parameters", "parameters.xlsx", base, base));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"KEY_FUNCTION_HU2_MID_AGE", "KEY_FUNCTION_HU2_LO_INCOME",
+            "KEY_FUNCTION_HU2_HI_INCOME", "KEY_FUNCTION_HU2_INCOME_REF_YEAR"})
+    void donorKeyGuardRejectsChangedAddedAndRemovedSettings(String parameterName) {
+        MultiKey<String> key = new MultiKey<>(new String[]{parameterName});
+        Map<MultiKey<?>, Object> baseline = Map.of(key, 45.0);
+        Map<MultiKey<?>, Object> changed = Map.of(key, "50");
+
+        var error = assertThrows(IllegalArgumentException.class,
+                () -> Parameters.requireSameDonorKeyParameters("s1", changed, baseline));
+        assertTrue(error.getMessage().contains(parameterName), error.getMessage());
+        assertTrue(error.getMessage().contains("stored tax-donor keys"), error.getMessage());
+        assertThrows(IllegalArgumentException.class,
+                () -> Parameters.requireSameDonorKeyParameters("s1", baseline, Map.of()));
+        assertThrows(IllegalArgumentException.class,
+                () -> Parameters.requireSameDonorKeyParameters("s1", Map.of(), baseline));
+    }
+
+    @Test
+    void donorKeyGuardAcceptsEquivalentValuesAndUnrelatedParameterChanges() {
+        MultiKey<String> age = new MultiKey<>(new String[]{"KEY_FUNCTION_HU2_MID_AGE"});
+        MultiKey<String> income = new MultiKey<>(new String[]{"KEY_FUNCTION_HU2_LO_INCOME"});
+        MultiKey<String> separationAge = new MultiKey<>(new String[]{"SEPARATION_STOP_AGE"});
+        Map<MultiKey<?>, Object> baseline = Map.of(age, 45.0, income, 140.0, separationAge, 70);
+        Map<MultiKey<?>, Object> scenario = Map.of(age, "45", income, 140, separationAge, 75);
+
+        assertDoesNotThrow(() -> Parameters.requireSameDonorKeyParameters("s1", scenario, baseline));
     }
 
     @Test

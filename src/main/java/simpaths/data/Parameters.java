@@ -110,6 +110,11 @@ public class Parameters {
     }
 
     private static final List<String> CACHED_PARAMETER_KEYS = List.of("AGE_TO_BECOME_RESPONSIBLE", "MAX_START_YEAR");
+    private static final Map<String, Class<?>> DONOR_KEY_PARAMETER_TYPES = Map.of(
+            "KEY_FUNCTION_HU2_MID_AGE", int.class,
+            "KEY_FUNCTION_HU2_LO_INCOME", double.class,
+            "KEY_FUNCTION_HU2_HI_INCOME", double.class,
+            "KEY_FUNCTION_HU2_INCOME_REF_YEAR", int.class);
 
     /**
      * Fails when a replaced workbook changes the cells that enter the cached starting population: the two
@@ -151,10 +156,41 @@ public class Parameters {
     private static Map<String, Double> parameterCells(Map<MultiKey<?>, Object> parameters) {
         Map<String, Double> cells = new HashMap<>();
         for (Map.Entry<MultiKey<?>, Object> entry : parameters.entrySet()) {
-            MultiKey<?> key = entry.getKey();
-            String paramName = (key.size() > 1 ? key.getKey(1) : key.getKey(0)).toString();
+            String paramName = parameterName(entry.getKey());
             if (CACHED_PARAMETER_KEYS.contains(paramName) && entry.getValue() instanceof Number n) {
                 cells.put(paramName, n.doubleValue());
+            }
+        }
+        return cells;
+    }
+
+    private static String parameterName(MultiKey<?> key) {
+        return (key.size() > 1 ? key.getKey(1) : key.getKey(0)).toString();
+    }
+
+    /** Verifies that scenario parameters use the settings used to build the stored tax-donor keys. */
+    static void requireSameDonorKeyParameters(String scenarioName, Map<MultiKey<?>, Object> scenarioParameters,
+                                              Map<MultiKey<?>, Object> baselineParameters) {
+        Map<String, Object> scenario = donorKeyParameterCells(scenarioParameters);
+        Map<String, Object> baseline = donorKeyParameterCells(baselineParameters);
+        for (String key : DONOR_KEY_PARAMETER_TYPES.keySet()) {
+            if (!Objects.equals(scenario.get(key), baseline.get(key))
+                    || scenario.containsKey(key) != baseline.containsKey(key)) {
+                throw new IllegalArgumentException("Input scenario '" + scenarioName + "' changes " + key
+                        + " from " + baseline.getOrDefault(key, "(missing)") + " to "
+                        + scenario.getOrDefault(key, "(missing)") + " in parameters.xlsx. "
+                        + "The stored tax-donor keys use the baseline setting. Restore it in the scenario workbook.");
+            }
+        }
+    }
+
+    private static Map<String, Object> donorKeyParameterCells(Map<MultiKey<?>, Object> parameters) {
+        Map<String, Object> cells = new HashMap<>();
+        for (Map.Entry<MultiKey<?>, Object> entry : parameters.entrySet()) {
+            String name = parameterName(entry.getKey());
+            Class<?> type = DONOR_KEY_PARAMETER_TYPES.get(name);
+            if (type != null) {
+                cells.put(name, ParametersLoader.convertValueToFieldType(entry.getValue(), type));
             }
         }
         return cells;
@@ -3102,9 +3138,24 @@ public static void putPrevOrNewTarget(int year, Object newTarget, TimeSeriesVari
      * tax-donor keys built at setup and the simulation must use the same ages.
      */
     public static void loadCountrySpecificParameters(Country country) {
-        countrySpecificParameters = ExcelAssistant.loadCoefficientMap(resolveCountryFile(country, "parameters.xlsx"), "Parameters", 1);
-        ParametersLoader.setParametersFromMap(countrySpecificParameters);
-        statePensionAgeSchedule = StatePensionAgeSchedule.load(resolveCountryFile(country, StatePensionAgeSchedule.FILE_NAME));
+        String parametersFile = "parameters.xlsx";
+        MultiKeyCoefficientMap loadedParameters =
+                ExcelAssistant.loadCoefficientMap(resolveCountryFile(country, parametersFile), "Parameters", 1);
+        if (inputScenario.replaces(parametersFile)) {
+            MultiKeyCoefficientMap baselineParameters = ExcelAssistant.loadCoefficientMap(
+                    getCountryInputDir(country) + parametersFile, "Parameters", 1);
+            requireSameDonorKeyParameters(inputScenario.name(), loadedParameters, baselineParameters);
+        }
+
+        String pensionAgeFile = StatePensionAgeSchedule.FILE_NAME;
+        String baselinePensionAgeFile = getCountryInputDir(country) + pensionAgeFile;
+        StatePensionAgeSchedule loadedPensionAges = inputScenario.replaces(pensionAgeFile)
+                ? StatePensionAgeSchedule.loadMatchingBaseline(baselinePensionAgeFile, inputScenario.resolve(pensionAgeFile))
+                : StatePensionAgeSchedule.load(baselinePensionAgeFile);
+
+        ParametersLoader.setParametersFromMap(loadedParameters);
+        countrySpecificParameters = loadedParameters;
+        statePensionAgeSchedule = loadedPensionAges;
     }
 
     public static void databaseSetup(Country country, boolean executeWithGui, int startYear) {
