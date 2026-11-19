@@ -3,7 +3,7 @@
 * SECTION:        ALIGNMENT PROCEDURES
 *
 * AUTHORS:        Codex
-* LAST UPDATE:    30/03/2026
+* LAST UPDATE:    19/11/2026
 * COUNTRY:        PL
 *
 * DATA:           Existing target Excel workbooks
@@ -26,7 +26,7 @@ clear all
 
 * --- DEFINE GLOBALS -------------------------------------------------------- *
 
-global dir_w "/Users/pineapple/IdeaProjects/SimPathsEU_APR"
+global dir_w "/Users/pineapple/IdeaProjects/SimPathsEU_OCT"
 global country "PL"
 
 global dir_input  "$dir_w/input/${country}"
