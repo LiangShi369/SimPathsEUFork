@@ -181,6 +181,7 @@ public class Parameters {
 
 
     public static int MIN_AGE_TO_RETIRE = 50; //Minimum age to consider retirement
+    public static final int MAX_YEARS_IN_PAID_WORK = 55; // upper censoring of liwwh (years in paid work) in 02_create_variables_<CC>.do
     public static int DEFAULT_AGE_TO_RETIRE = 67; //if pension included, but retirement decision not
     public static int MIN_AGE_FLEXIBLE_LABOUR_SUPPLY = 16; //Used when filtering people who can be "flexible in labour supply"
     public static int MAX_AGE_FLEXIBLE_LABOUR_SUPPLY = 75;

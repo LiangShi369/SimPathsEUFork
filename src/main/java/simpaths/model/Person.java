@@ -143,6 +143,8 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
     @Transient private LinkedHashMap<Integer, Double> sIndexYearMap;
     private Integer demPartnerNYear; //Number of years in partnership
     @Transient private Integer demPartnerNYearL1; //Lag(1) of number of years in partnership
+    @Transient private boolean demNewPartnerFlag; // partnership formed in this year's union matching (Stata new_rel)
+    @Transient private boolean demNewPartnerFlagL1; // Lag(1) of demNewPartnerFlag (New_rel_L1)
     private Double yNonBenPersGrossMonth; // asinh of personal non-benefit income per month
     @Transient private Double yNonBenPersGrossMonthL1; //Lag(1) of gross personal non-benefit income
     @Transient private Ydses_c5 yHhQuintilesC5L1; //Lag(1) income quintile of the benefit unit the person was in last year (Ydses_c5_*_L1); kept per person, see updateLaggedVariables
@@ -392,6 +394,8 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
 
         labStatusPartnerAndOwnC4L1 = originalPerson.labStatusPartnerAndOwnC4L1;
         demPartnerStatusL1 = originalPerson.demPartnerStatusL1;
+        demNewPartnerFlag = originalPerson.demNewPartnerFlag;
+        demNewPartnerFlagL1 = originalPerson.demNewPartnerFlagL1;
         yNonBenPersGrossMonth = originalPerson.getYpnbihs_dv();
         yNonBenPersGrossMonthL1 = originalPerson.yNonBenPersGrossMonthL1;
         yHhQuintilesC5L1 = originalPerson.yHhQuintilesC5L1;
@@ -426,12 +430,16 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         eduLeaveSchoolFlag = originalPerson.eduLeaveSchoolFlag;
         wgtCrossMainSurvey = originalPerson.wgtCrossMainSurvey;
         healthSelfRated = originalPerson.healthSelfRated;
+        // EU-SILC records self-rated health from age 16 only. Children get the value newborns get, so that at 16 the
+        // health process (H1) does not read a missing lag as Poor, its omitted category.
+        if (healthSelfRated == null && demAge < Parameters.AGE_TO_BECOME_SEMI_RESPONSIBLE)
+            healthSelfRated = Dhe.VeryGood;
         healthWbScore0to36 = originalPerson.healthWbScore0to36;
 
         if (originalPerson.healthSelfRatedL1 != null) { //If original person misses lagged level of health, assign current level of health as lagged value
             healthSelfRatedL1 = originalPerson.healthSelfRatedL1;
         } else {
-            healthSelfRatedL1 = originalPerson.healthSelfRated;
+            healthSelfRatedL1 = healthSelfRated;
         }
 
         if (originalPerson.healthWbScore0to36L1 != null) {
@@ -765,6 +773,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
                 demPartnerNYear = 0;
         } else
             demPartnerNYear = 0;
+        demNewPartnerFlag = false;
 
         // iterate employment history
         if (Les_c4.EmployedOrSelfEmployed.equals(labC4)) {
@@ -1557,15 +1566,22 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
             yPensPersGrossMonthL1 = getYpnoab();
         }
 
+        // partnership formed last year (New_rel_L1). Not reset here: Update also runs twice before the first
+        // simulated year, and the flag is cleared in aging(), which runs only in simulated years
+        demNewPartnerFlagL1 = demNewPartnerFlag;
+
         // partner variables
         Person partner = getPartner();
         if (partner!=null) {
+            // years in partnership at the end of last year (Dcpyy_L1, Stata l.dcpyy_st); runs before aging()
+            demPartnerNYearL1 = demPartnerNYear;
             eduDehspC4L1 = partner.eduHighestC4;
             healthPartnerSelfRatedL1 = partner.healthSelfRated;
             demPartnerStatusL1 = Dcpst.Partnered;
             demAgePartnerDiffL1 = demAge - partner.demAge;
             idPartnerL1 = partner.getId();
         } else {
+            demPartnerNYearL1 = null;
             eduDehspC4L1 = null;
             healthPartnerSelfRatedL1 = null;
             demAgePartnerDiffL1 = null;
@@ -2345,8 +2361,8 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
             case Deh_c4_Low_L1 -> {
                 return (Education.Low.equals(eduHighestC4L1)) ? 1.0 : 0.0;
             }
-            case Deh_c4_Na -> {
-                return (Education.NotAssigned.equals(eduHighestC4) && demAge <=18) ? 1.0 : 0.0;
+            case Deh_c4_Na -> { // Stata deh_c4 == 0: under 16 or in initial education, at any age (02_create_variables_<CC>.do)
+                return Education.NotAssigned.equals(eduHighestC4) ? 1.0 : 0.0;
             }
             case Deh_c4_Na_L1 -> {
                 return (Education.NotAssigned.equals(eduHighestC4L1) && demAge <=19) ? 1.0 : 0.0;
@@ -2565,11 +2581,8 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
             case D_Children_L1 -> {
                 return (getNumberChildrenAll_lag1() > 0) ? 1. : 0.;
             }
-            case FertilityRate -> {
-                if (ioFlag)
-                    return Parameters.getFertilityProjectionsByYear(getYear());
-                else
-                    return Parameters.getFertilityRateByRegionYear(getRegion(), getYear());
+            case FertilityRate -> { // national rate of projections_fertility.xlsx, as dplfr in 04_reg_fertility_<CC>.do
+                return Parameters.getFertilityProjectionsByYear(getYear());
             }
             case Female -> {
                 return demMaleFlag.equals(Gender.Female) ? 1. : 0.;
@@ -2690,8 +2703,8 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
                 else
                     return 0.;
             }
-            case Liwwh -> {
-                return (double) labEmpNyear;
+            case Liwwh -> { // capped as liwwh is in the data the wage equations (W1) are estimated on
+                return (double) Math.min(labEmpNyear, Parameters.MAX_YEARS_IN_PAID_WORK);
             }
             case NotEmployed_L1 -> {
                 return (labC4L1.equals(Les_c4.NotEmployed)) ? 1. : 0.;
@@ -3061,10 +3074,8 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
             case Yptciihs_dv_L3 -> {
                 return yMiscPersGrossMonthL3;
             }
-            case New_rel_L1 -> {
-                return (Dcpst.Partnered.equals(getDcpst()) &&
-                        demPartnerStatusL1 != null &&
-                        !Dcpst.Partnered.equals(demPartnerStatusL1)) ? 1. : 0.;
+            case New_rel_L1 -> { // partnership formed last year (Stata l.new_rel)
+                return demNewPartnerFlagL1 ? 1. : 0.;
             }
             case Ypncp_L1 -> {
                 return yCapitalPersMonthL1;
@@ -4109,6 +4120,15 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
 
     public Integer getDcpyy() {
         return demPartnerNYear;
+    }
+
+    /**
+     * Called for both partners when union matching forms a partnership. Years in partnership count from 1 in the
+     * year the partnership forms, as Stata's dcpyy_st and the initial populations' demPartnerNYear do.
+     */
+    public void startPartnership() {
+        demPartnerNYear = 1;
+        demNewPartnerFlag = true;
     }
 
     public void setDcpyy(Integer demPartnerNYear) {

@@ -299,13 +299,23 @@ public class PersonTest {
         }
 
         @Test
-        @DisplayName("New_rel_L1 returns one for a newly partnered person")
+        @DisplayName("New_rel_L1 is one only for a partnership formed in last year's union matching")
         public void newRelLagFlagsNewPartnership() throws Exception {
-            setPrivateField(testPerson, "benefitUnit", null);
-            testPerson.setDcpstLocal(Dcpst.Partnered);
-            testPerson.setDcpst_lag1(Dcpst.Single);
-
+            setPrivateField(testPerson, "demNewPartnerFlagL1", true);
             assertEquals(1.0, testPerson.getDoubleValue(Person.DoublesVariables.New_rel_L1));
+
+            setPrivateField(testPerson, "demNewPartnerFlagL1", false);
+            assertEquals(0.0, testPerson.getDoubleValue(Person.DoublesVariables.New_rel_L1));
+        }
+
+        @Test
+        @DisplayName("Liwwh is capped at the years in paid work the wage estimation allows")
+        public void liwwhIsCappedAtMaxYearsInPaidWork() {
+            testPerson.setLiwwh(30);
+            assertEquals(30.0, testPerson.getDoubleValue(Person.DoublesVariables.Liwwh));
+
+            testPerson.setLiwwh(Parameters.MAX_YEARS_IN_PAID_WORK + 5);
+            assertEquals(Parameters.MAX_YEARS_IN_PAID_WORK, testPerson.getDoubleValue(Person.DoublesVariables.Liwwh));
         }
 
         @Test
