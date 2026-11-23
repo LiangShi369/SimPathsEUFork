@@ -319,6 +319,80 @@ public class PersonTest {
         }
 
         @Test
+        @DisplayName("Pt is 0 in the W1 score, which gives the full-time wage")
+        public void ptIsZeroInFullTimeWage() {
+            assertEquals(0.0, testPerson.getDoubleValue(Person.DoublesVariables.Pt));
+        }
+
+        @Test
+        @DisplayName("The part-time effect applies up to MAX_HOURS_PART_TIME hours and not above")
+        public void partTimeEffectAppliesUpToMaxHoursPartTime() throws Exception {
+            managerRegressionsMock.when(() -> ManagerRegressions.getRegressionCoeff(Mockito.any(RegressionName.class), Mockito.eq("Pt")))
+                    .thenReturn(0.1);
+            setPrivateField(testPerson, "labWageHrly", 10.0);
+            setPrivateField(testPerson, "labWageHrlyFullTimeFlag", true);
+            setPrivateField(testPerson, "labC4L1", Les_c4.EmployedOrSelfEmployed);
+            setPrivateField(testPerson, "demMaleFlag", Gender.Female);
+            int original = Parameters.MAX_HOURS_PART_TIME;
+            try {
+                Parameters.MAX_HOURS_PART_TIME = 25;
+                assertEquals(10.0 * Math.exp(0.1), testPerson.getHourlyWageRate(25), 1e-9);
+                assertEquals(10.0, testPerson.getHourlyWageRate(26), 1e-9);
+            } finally {
+                Parameters.MAX_HOURS_PART_TIME = original;
+            }
+        }
+
+        @Test
+        @DisplayName("In the start year the observed wage holds at the observed hours' side of the part-time cutoff")
+        public void startYearObservedWageIncludesPartTimeEffect() throws Exception {
+            managerRegressionsMock.when(() -> ManagerRegressions.getRegressionCoeff(Mockito.any(RegressionName.class), Mockito.eq("Pt")))
+                    .thenReturn(0.1);
+            setPrivateField(testPerson, "labWageHrly", 10.0);
+            setPrivateField(testPerson, "labWageHrlyFullTimeFlag", false);
+            setPrivateField(testPerson, "labC4L1", Les_c4.EmployedOrSelfEmployed);
+            setPrivateField(testPerson, "demMaleFlag", Gender.Female);
+            int original = Parameters.MAX_HOURS_PART_TIME;
+            try {
+                Parameters.MAX_HOURS_PART_TIME = 25;
+                // observed part-timer: the wage already includes the effect, which is removed at full-time hours
+                setPrivateField(testPerson, "labHrsWorkWeek", 20);
+                assertEquals(10.0, testPerson.getHourlyWageRate(25), 1e-9);
+                assertEquals(10.0 * Math.exp(-0.1), testPerson.getHourlyWageRate(26), 1e-9);
+                // observed full-timer: the effect is added at part-time hours only
+                setPrivateField(testPerson, "labHrsWorkWeek", 40);
+                assertEquals(10.0 * Math.exp(0.1), testPerson.getHourlyWageRate(25), 1e-9);
+                assertEquals(10.0, testPerson.getHourlyWageRate(26), 1e-9);
+            } finally {
+                Parameters.MAX_HOURS_PART_TIME = original;
+            }
+        }
+
+        @Test
+        @DisplayName("The lagged wage is the wage earned: the full-time wage plus the part-time effect, or the observed wage")
+        public void lagWageIsTheWageEarned() throws Exception {
+            managerRegressionsMock.when(() -> ManagerRegressions.getRegressionCoeff(Mockito.any(RegressionName.class), Mockito.eq("Pt")))
+                    .thenReturn(0.1);
+            setPrivateField(testPerson, "labWageHrly", 10.0);
+            setPrivateField(testPerson, "labC4L1", Les_c4.EmployedOrSelfEmployed);
+            setPrivateField(testPerson, "demMaleFlag", Gender.Female);
+            int original = Parameters.MAX_HOURS_PART_TIME;
+            try {
+                Parameters.MAX_HOURS_PART_TIME = 25;
+                // observed wage of the initial population: already the wage earned
+                setPrivateField(testPerson, "labWageHrlyFullTimeFlag", false);
+                assertEquals(10.0, testPerson.getHourlyWageEarned(25), 1e-9);
+                // W1 full-time wage: part-time hours add the part-time effect
+                setPrivateField(testPerson, "labWageHrlyFullTimeFlag", true);
+                assertEquals(10.0 * Math.exp(0.1), testPerson.getHourlyWageEarned(25), 1e-9);
+                assertEquals(10.0, testPerson.getHourlyWageEarned(26), 1e-9);
+                assertEquals(10.0, testPerson.getHourlyWageEarned(0), 1e-9);
+            } finally {
+                Parameters.MAX_HOURS_PART_TIME = original;
+            }
+        }
+
+        @Test
         @DisplayName("Ydses_c5 lags read the quintile saved on the person, not the current benefit unit's")
         public void ydsesLagIsKeptPerPerson() throws Exception {
             // Saved last year from the parents' unit (Q4); the person now heads a new unit, as after turning 18

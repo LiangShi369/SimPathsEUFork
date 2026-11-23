@@ -133,8 +133,9 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
 //	age, education, civil status, number of children, etc. Hence, potential earnings
 //	is a separate process in the simulation, and it is computed for every adult
 //	individual in the simulated population, in each simulated period.
+    @Transient private boolean labWageHrlyFullTimeFlag; // labWageHrly is the W1 full-time wage (Pt = 0), set in each simulated year; false while it is the observed wage of the initial population
     private Double labWageHrly;		//Is hourly rate.  Initialised with value: ils_earns / (4.34 * lhw), where lhw is the weekly hours a person worked in EUROMOD input data
-    private Double labWageHrlyL1; // Lag(1) of potentialHourlyEarnings
+    private Double labWageHrlyL1; // Lag(1) of the hourly wage earned (see getHourlyWageEarned)
     @Transient private Series.Double yearlyEquivalisedDisposableIncomeSeries;
     private Double xEquivYear;
     @Transient private Series.Double yearlyEquivalisedConsumptionSeries;
@@ -484,6 +485,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         yBenReceivedFlagL1 = originalPerson.yBenReceivedFlagL1;
 
 
+        labWageHrlyFullTimeFlag = originalPerson.labWageHrlyFullTimeFlag;
         if (originalPerson.labWageHrly >= Parameters.MIN_HOURLY_WAGE_RATE) {
             labWageHrly = Math.min(Parameters.MAX_HOURLY_WAGE_RATE, Math.max(Parameters.MIN_HOURLY_WAGE_RATE, originalPerson.labWageHrly));
         } else {
@@ -695,6 +697,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
             case UpdatePotentialHourlyEarnings -> {
     //			System.out.println("Update wage equation for person " + this.getKey().getId() + " with age " + age + " with activity_status " + activity_status + " and activity_status_lag " + activity_status_lag + " and toLeaveSchool " + toLeaveSchool + " with education " + education);
                 updateFullTimeHourlyEarnings();
+                labWageHrlyFullTimeFlag = true;
             }
             case Unemployment -> {
                 updateUnemploymentState();
@@ -1508,6 +1511,10 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
 
     private void updateLaggedVariables(boolean initialUpdate) {
 
+        // Wage earned last year, taken before labC4L1 moves on: getHourlyWageRate picks the W1 equation, and so the
+        // part-time effect, by labC4L1. Hours are only read once labWageHrly is the W1 full-time wage (not at load).
+        Double hourlyWageLastYear = labWageHrlyFullTimeFlag ? getHourlyWageEarned(getLabourSupplyHoursWeekly()) : labWageHrly;
+
         labC4L1 = labC4;
         labC7CovidL1 = labC7Covid;
         demStatusHhL1 = getHouseholdStatus();
@@ -1534,7 +1541,7 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         updateParentsLaggedVariables();
         labHrsWorkEnumWeekL1 = getLabourSupplyWeekly(); // Lag(1) of labour supply
         yBenReceivedFlagL1 = yBenReceivedFlag; // Lag(1) of flag indicating if individual receives benefits
-        labWageHrlyL1 = labWageHrly; // Lag(1) of potential hourly earnings
+        labWageHrlyL1 = hourlyWageLastYear; // Lag(1) of the hourly wage earned (L1_log_hourly_wage, Stata l.lwage_hour)
 
         if (initialUpdate) {
             yEmpPersGrossMonthL1 = getYplgrs_dv(); //Lag(1) of gross personal employment income
@@ -3232,7 +3239,10 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
                 return Boolean.TRUE.equals(wealthDhhOwnedL1) ? 1. : 0.;
             }
             case Pt -> {
-                return (getLabourSupplyHoursWeekly() > 0 && getLabourSupplyHoursWeekly() < Parameters.MIN_HOURS_FULL_TIME_EMPLOYED) ? 1. : 0.;
+                // The W1 score sets the full-time hourly wage (labWageHrly) before this year's hours are chosen, so Pt
+                // is 0 there. getHourlyWageRate adds the part-time effect, the Pt coefficient, for the hours of each
+                // labour-supply option and then for the hours actually worked.
+                return 0.;
             }
             case L1_log_hourly_wage -> {
                 if (labWageHrlyL1 == null) {
@@ -4661,27 +4671,45 @@ public class Person implements EventListener, IDoubleSource, IIntSource, Weight,
         int weeklyHours = (int) Math.round(labourHoursWeekly);
         return getHourlyWageRate(weeklyHours);
     }
+    /**
+     * Hourly wage earned at the given weekly hours, the lag of which is L1_log_hourly_wage (Stata l.lwage_hour, the
+     * observed hourly wage). Once labWageHrly is the W1 full-time wage, that is getHourlyWageRate at those hours, which
+     * adds the part-time effect. The observed wage of the initial population already includes it, so it is kept as is.
+     */
+    public Double getHourlyWageEarned(int labourHoursWeekly) {
+        return labWageHrlyFullTimeFlag ? getHourlyWageRate(labourHoursWeekly) : labWageHrly;
+    }
+
+    /**
+     * Hourly wage at the given weekly hours, with the part-time effect, exp(Pt coefficient of W1), at 1 to
+     * Parameters.MAX_HOURS_PART_TIME hours, as pt in 08_reg_wages_<CC>.do. From the first simulated year, labWageHrly
+     * is the W1 full-time wage (Pt = 0), so the effect is added at part-time hours. In the start year it is the
+     * observed wage at the observed hours (labHrsWorkWeek), which already includes the effect for part-timers: it is
+     * then added or removed only where the given hours and the observed hours fall on different sides of the cutoff.
+     */
     public double getHourlyWageRate(int labourHoursWeekly) {
 
-        if (labourHoursWeekly >= Parameters.MIN_HOURS_FULL_TIME_EMPLOYED) {
+        int ptAtHours = isPartTimeInWageEquations(labourHoursWeekly) ? 1 : 0;
+        int ptInWage = (!labWageHrlyFullTimeFlag && labHrsWorkWeek != null && isPartTimeInWageEquations(labHrsWorkWeek)) ? 1 : 0;
+        if (ptAtHours == ptInWage)
             return labWageHrly;
-        } else {
-            double ptPremium;
-            if (labC4L1.equals(Les_c4.EmployedOrSelfEmployed)) {
-                if (Gender.Male.equals(demMaleFlag)) {
-                    ptPremium = ManagerRegressions.getRegressionCoeff(RegressionName.W1mb, "Pt");
-                } else {
-                    ptPremium = ManagerRegressions.getRegressionCoeff(RegressionName.W1fb, "Pt");
-                }
-            } else {
-                if (Gender.Male.equals(demMaleFlag)) {
-                    ptPremium = ManagerRegressions.getRegressionCoeff(RegressionName.W1ma, "Pt");
-                } else {
-                    ptPremium = ManagerRegressions.getRegressionCoeff(RegressionName.W1fa, "Pt");
-                }
-            }
-            return Math.exp( Math.log(labWageHrly) + ptPremium);
-        }
+        return Math.exp(Math.log(labWageHrly) + (ptAtHours - ptInWage) * getPartTimeWageEffect());
+    }
+
+    private static boolean isPartTimeInWageEquations(int labourHoursWeekly) {
+        return labourHoursWeekly > 0 && labourHoursWeekly <= Parameters.MAX_HOURS_PART_TIME;
+    }
+
+    /**
+     * Pt coefficient of the W1 equation that predicts this person's wage: W1mb/W1fb for anyone employed last year,
+     * W1ma/W1fa otherwise.
+     */
+    private double getPartTimeWageEffect() {
+        boolean male = Gender.Male.equals(demMaleFlag);
+        RegressionName wageEquation = Les_c4.EmployedOrSelfEmployed.equals(labC4L1)
+                ? (male ? RegressionName.W1mb : RegressionName.W1fb)
+                : (male ? RegressionName.W1ma : RegressionName.W1fa);
+        return ManagerRegressions.getRegressionCoeff(wageEquation, "Pt");
     }
 
     public double getEarningsWeekly() {
