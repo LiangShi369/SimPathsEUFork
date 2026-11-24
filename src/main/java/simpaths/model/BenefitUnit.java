@@ -387,6 +387,19 @@ public class BenefitUnit implements EventListener, IDoubleSource, Weight, Compar
         if (hasDisposableIncome) {
             yDispMonth = disposableIncome;
         }
+
+        // Equivalised gross non-benefit income of the responsible adults (asinh), as the income step of the labour
+        // market update defines it. That step does not run in the start year, so without this the collector would
+        // take the start year's quintile cut-offs (Ydses_c5) from zeros, and in the next year every unit with any
+        // income would be put in Q5 and the rest in Q1.
+        double ypnbihsAdults = 0.0;
+        Person male = getMale();
+        Person female = getFemale();
+        if (male != null && male.getYpnbihs_dv() != null)
+            ypnbihsAdults += Math.sinh(male.getYpnbihs_dv());
+        if (female != null && female.getYpnbihs_dv() != null)
+            ypnbihsAdults += Math.sinh(female.getYpnbihs_dv());
+        i_yNonBenHhGrossAsinh = asinh(ypnbihsAdults / getEquivalisedWeight());
     }
 
     protected void updateAttributes() {

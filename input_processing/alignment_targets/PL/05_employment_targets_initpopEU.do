@@ -3,7 +3,7 @@
 * SECTION:        ALIGNMENT PROCEDURES
 *
 * AUTHORS:        Mariia Vartuzova (MV)
-* LAST UPDATE:    03/12/2025 (MV)
+* LAST UPDATE:    19/11/2026 (MV)
 * COUNTRY:        EU
 *
 * DATA:           Initial populations
@@ -24,9 +24,11 @@
 *                retain the camelCase column names of the refactored
 *                initial-population CSVs.
 *
-* SET-UP:         1. Update the working directory path (global dir_w)
-*                 2. Copy the relevant input data into the /input_data folder
-*                    under the country-specific subdirectory
+* SET-UP:         1. Set global dir_w to the root of this SimPaths project
+*                 2. The initial populations are read from
+*                    input/<country>/InitialPopulations of that project. The
+*                    workbook is written to input/<country>/DoFilesTargets;
+*                    copy it to input/<country>/ for SimPaths to use it
 *
 *******************************************************************************/
 
@@ -37,7 +39,7 @@ clear all
 
 * Working directory (project root)
 //global dir_w "/Users/pineapple/Library/CloudStorage/OneDrive-UniversityofEssex/WorkCEMPA/SimPathsEU/SimPathsTargets"
-global dir_w "/Users/pineapple/IdeaProjects/SimPathsEU_APR"
+global dir_w "/Users/pineapple/IdeaProjects/SimPathsEU_OCT"
 
 * Country code and time span for which targets are produced
 global country = "PL"
@@ -45,9 +47,13 @@ global min_year 2011
 global max_year 2023
 
 * Directory structure
-global dir_input_data   "$dir_w/input/${country}/InitialPopulationsACTUAL"
+global dir_input_data   "$dir_w/input/${country}/InitialPopulations"
 global dir_working_data "$dir_w/input/${country}/DoFilesTargets/working_data"
 global dir_output       "$dir_w/input/${country}/DoFilesTargets"
+
+* Create the output folders if they do not exist yet
+capture mkdir "${dir_output}"
+capture mkdir "${dir_working_data}"
 
 
 * Initialise file that will store BU-level employment shares for all years
