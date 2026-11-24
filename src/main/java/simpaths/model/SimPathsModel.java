@@ -1027,11 +1027,16 @@ public class SimPathsModel extends AbstractSimulationManager implements EventLis
                 }
             }
             case MacroEndYearCapture -> {
-
                 if (macroManager.isRecorderActive()) {
-                    macroManager.updateLevelAggregatesPostAlignment(year, persons);
+                    Set<Person> activePersons = new LinkedHashSet<>();
+                    for (Person person : persons) {
+                        if (SampleExit.NotYet.equals(person.getSampleExit())) {
+                            activePersons.add(person);
+                        }
+                    }
+                    macroManager.updateLevelAggregatesPostAlignment(year, activePersons);
+                    macroManager.applyRamseyRecursiveFeedback(year, activePersons);
                 }
-                macroManager.applyRamseyRecursiveFeedback(year, persons);
             }
             default -> {
                 throw new RuntimeException("failed to identify process type in SimPathsModel.onEvent");
